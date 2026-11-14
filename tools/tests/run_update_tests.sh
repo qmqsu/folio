@@ -13,8 +13,8 @@ if [ -x "$update_toolchain/clang" ] && [ -d "$update_sdk" ]; then update_cc=${CC
 compile_update() {
     "$update_cc" -std=c11 -D_POSIX_C_SOURCE=200809L "-DFOLIO_SD_ROOT=\"$update_tmp/card\"" \
         -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all \
-        -Wall -Wextra -Werror "$@" -Itools/tests/update_stubs -Itools/tests/ui_stubs -Imain \
-        tools/tests/test_update.c -o "$update_tmp/update_test"
+        -Wall -Wextra -Werror -Itools/tests/update_stubs -Itools/tests/ui_stubs -Imain \
+        tools/tests/test_update.c -o "$update_tmp/update_test" "$@"
 }
 if [ -x "$update_toolchain/clang" ] && [ -d "$update_sdk" ]; then
     compile_update -isysroot "$update_sdk" -B"$update_toolchain"

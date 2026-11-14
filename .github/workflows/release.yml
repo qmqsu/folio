@@ -16,11 +16,6 @@ jobs:
         with:
           python-version: '3.13.3'
       - run: python -m pip install -r .github/release-requirements.txt
-      - run: |
-          sh tools/tests/run_release_tests.sh
-          sh tools/tests/run_update_tests.sh
-          sh tools/tests/run_online_update_tests.sh
-          sh tools/tests/run_power_tests.sh
       - name: Validate tag and derive sequence
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -42,14 +37,14 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           . toolchain/esp-idf/export.sh
-          sh tools/tests/run_online_update_guard_tests.sh
+          python -m pip install -r .github/release-requirements.txt
+          python tools/tests/run_ci_host_tests.py release update online_update online_update_guard power
           export FOLIO_BUILD_DIR="$RUNNER_TEMP/folio-release-build"
           export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
           # Clean pinned IDF uses nonrecursive os.mkdir(build/log); precreate both.
           mkdir -p "$FOLIO_BUILD_DIR/log"
           prefix_map="-ffile-prefix-map=$GITHUB_WORKSPACE=/usr/src/folio -fdebug-prefix-map=$GITHUB_WORKSPACE=/usr/src/folio -ffile-prefix-map=$RUNNER_TEMP=/tmp/folio-build -fdebug-prefix-map=$RUNNER_TEMP=/tmp/folio-build"
           sh tools/idf.sh -D SDKCONFIG="$RUNNER_TEMP/sdkconfig.release" -D "SDKCONFIG_DEFAULTS=$GITHUB_WORKSPACE/sdkconfig.defaults;$GITHUB_WORKSPACE/.github/sdkconfig.release" -D "CMAKE_C_FLAGS=$prefix_map" -D "CMAKE_CXX_FLAGS=$prefix_map" build
-          python -m pip install -r .github/release-requirements.txt
           sequence=$(python -c 'import json,os; print(json.load(open(os.environ["RUNNER_TEMP"]+"/release-version.json"))["sequence"])')
           python tools/release_bundle.py prepare --root "$GITHUB_WORKSPACE" --build-dir "$FOLIO_BUILD_DIR" --output-dir "$RUNNER_TEMP/candidate" --version "${RELEASE_TAG#v}" --sequence "$sequence" --commit "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

@@ -418,6 +418,7 @@ tools/tests/reader_stubs/freertos/FreeRTOS.h
 tools/tests/reader_stubs/freertos/task.h
 tools/tests/run_activity_tests.sh
 tools/tests/run_catalog_tests.sh
+tools/tests/run_ci_host_tests.py
 tools/tests/run_font_asset_symbols.sh
 tools/tests/run_font_pack_tests.sh
 tools/tests/run_font_resource_tests.sh
