@@ -1,0 +1,12 @@
+{
+  "upstream": "https://github.com/google/fonts/tree/main/ofl/notoserifsc",
+  "upstream_sha256": "050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9",
+  "weight": 500,
+  "coverage": "GB2312 level-1 + ASCII + native UI characters",
+  "glyphs": 4538,
+  "ttf_bytes": 1658608,
+  "deflate_bytes": 1023951,
+  "ttf_sha256": "458fce0b8ceece06a182d09baceecfe358093e1ab948d0fe51cd06b32512a1ff",
+  "deflate_sha256": "58d8e2eaef18c5935217aa1d1d8cd2f9468ec7df01451395ea7c1477d9c37320",
+  "license": "SIL OFL 1.1; see licenses/NotoSerifSC-OFL.txt"
+}

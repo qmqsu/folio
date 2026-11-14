@@ -1,0 +1,2 @@
+#pragma once
+#define FOLIO_BUILTIN_FONT_BYTES 1658608u

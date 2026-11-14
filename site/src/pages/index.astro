@@ -1,0 +1,119 @@
+---
+import '../styles/global.css';
+const repo = 'https://github.com/qmqsu/folio';
+---
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="页间 Folio：为小纸 Pico 打造的轻量阅读固件。了解功能、备份与安全安装，留一点时间给阅读。" />
+  <meta name="color-scheme" content="light" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://qmqsu.github.io; object-src 'none'; base-uri 'self'; form-action 'none'" />
+  <link rel="icon" type="image/svg+xml" href="/folio/favicon.svg" />
+  <link rel="canonical" href="https://qmqsu.github.io/folio/" />
+  <title>页间 Folio — 留一点时间，给阅读。</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="site-header wrap">
+    <a class="brand" href="#main" aria-label="页间 Folio 首页"><svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true"><path d="M5 6h9l2 3 2-3h9v21H18l-2 2-2-2H5V6Zm11 3v20M9 11h3m-3 5h3m8-5h3m-3 5h3" fill="none" stroke="currentColor" stroke-width="1.5" /></svg><span>页间 <b>Folio</b></span></a>
+    <nav aria-label="主导航"><a href="#about">关于</a><a href="#features">功能</a><a href="#install">安装</a><a href="#updates">更新</a><a href="#help">帮助</a><a class="source-link" href={repo}>GitHub <span aria-hidden="true">↗</span></a></nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="line"></span> A LITTLE SPACE FOR READING</p>
+        <h1 id="hero-title">页间 <span>Folio</span></h1>
+        <p class="hero-subtitle">为小纸 Pico 打造的<br />轻量阅读固件</p>
+        <p class="hero-description">让文字回到页面中央。<br />把阅读留在手里，把纷扰留在屏幕之外。</p>
+        <div class="actions"><a class="button primary" href="#install">了解与安装 <span aria-hidden="true">↗</span></a><a class="text-link" href="#features">翻开看看 <span aria-hidden="true">↓</span></a></div>
+        <p class="hero-note">为 RDP-G01-W 而做 <span>·</span> 自研应用 MIT 开源</p>
+      </div>
+      <figure class="hero-figure">
+        <div class="paper-label"><span>THE QUIET EDITION</span><span>No. 01</span></div>
+        <div class="device" role="img" aria-label="原创阅读界面示意：页间标题、正文、章节与页码。非设备截图。">
+          <div class="device-screen">
+            <div class="mock-top"><strong>页间</strong><span>FOLIO / READING</span></div>
+            <div class="mock-rule"></div>
+            <span class="mock-kicker">阅读，从这一页开始</span>
+            <h2>把时间<br />还给文字。</h2>
+            <div class="mock-copy"><p>窗边的光慢慢移过纸面。<br />不必赶路，也不必等谁。<br />只要翻开一页，<br />眼前就有了新的远方。</p><p>在一个安静的片刻里，<br />让一行字接住另一行字，<br />让纷乱的思绪，<br />有一处轻轻落下。</p></div>
+            <div class="mock-footer"><span>原创排版示意</span><span>01 / 12</span></div>
+          </div>
+          <div class="device-keys" aria-hidden="true"><i></i><i></i><i></i></div>
+        </div>
+        <figcaption><span class="figure-number">FIG. 01</span> 文字是主角，界面退后一步。<br /><small>原创网页示意，非实机照片或硬件验收。</small></figcaption>
+      </figure>
+    </section>
+    <div class="spec-strip"><div class="wrap"><span>小纸 Pico · RDP-G01-W</span><span>4.7″ 墨水屏</span><span>1216 × 684 · 16 灰阶</span><span>ESP32-S3 · 16MiB Flash</span></div></div>
+    <section class="section wrap intro" id="about" aria-labelledby="about-title">
+      <div class="section-label"><span>01 / 关于页间</span><span>LESS, BUT ENOUGH.</span></div>
+      <div class="intro-grid"><h2 id="about-title">少一点界面，<br />多一点阅读。</h2><div><p class="large-copy">页间 Folio 是为小纸 Pico 编写的原生 ESP-IDF 阅读固件。从屏幕绘制到中文排版，让这块小小的墨水屏，专心做好阅读这件事。</p><p>这不是硬件官方固件。支持范围、安装风险与尚待验证的事项，都放在明处。你可以查看源码，也可以先了解，再决定是否安装。</p><a class="text-link" href={`${repo}#readme`}>阅读项目说明 <span aria-hidden="true">↗</span></a></div></div>
+    </section>
+    <section class="section wrap" id="features" aria-labelledby="features-title">
+      <div class="section-label"><span>02 / 日常所需</span><span>BUILT AROUND WORDS.</span></div>
+      <div class="section-heading"><h2 id="features-title">刚刚好的阅读工具。</h2><p>从翻开一本书，到记住上次读到的地方。</p></div>
+      <div class="feature-grid">
+        <article class="feature"><span class="feature-index">a.</span><h3>本地阅读，轻装出发</h3><p>TXT 与文本型 EPUB，放入 TF 卡即可阅读。章节目录、书签、开机续读，让每次阅读自然接续。</p><span class="feature-note">不承诺 PDF / 漫画 / 固定版式阅读</span></article>
+        <article class="feature"><span class="feature-index">b.</span><h3>把字排成喜欢的样子</h3><p>字号、行距、页边距与对齐方式可调。应用保留内置宋体，也支持 TF 卡 TrueType 字体。</p><span class="feature-note">三款新增字体为独立可选资源，非默认首装</span></article>
+        <article class="feature"><span class="feature-index">c.</span><h3>无线传书，不必来回拔卡</h3><p>在可信网络打开设备传书页，用手机或电脑添加书籍。传完退出，设备便关闭传书服务。</p><span class="feature-note">同网络设备可能访问，仅在可信网络使用</span></article>
+        <article class="feature"><span class="feature-index">d.</span><h3>读过的时间，留下痕迹</h3><p>继续阅读、最近书籍与阅读时长，让日常积累有迹可循。锁屏与静态关机壁纸也可以自己选择。</p><span class="feature-note">书籍、进度与书签保存在 TF 卡</span></article>
+        <article class="feature feature-wide"><div><span class="feature-index">e.</span><h3>微信读书 <span class="tag">实验功能</span></h3></div><div><p>设备端登录、书架与离线内容缓存。基于非公开协议，可能随上游变化失效；仅处理当前账号有权访问的内容，非腾讯官方合作客户端。</p><span class="feature-note">云端进度写回与时长上报不宣称已完成真实验收</span></div></article>
+      </div>
+    </section>
+    <section class="install-section" id="install" aria-labelledby="install-title">
+      <div class="wrap section">
+        <div class="section-label"><span>03 / 安装之前</span><span>BACK UP. THEN BEGIN.</span></div>
+        <div class="section-heading"><h2 id="install-title">先保护好，再翻到新的一页。</h2><p>刷机不是普通下载。型号、发布签名、备份与每一步校验，缺一不可。</p></div>
+        <div class="install-grid">
+          <aside class="install-aside">
+            <p class="kicker">选对你的路径</p>
+            <h3>已经在用 Folio？<br />优先设备 OTA。</h3><p>兼容当前布局的用户，优先在设备端升级应用。USB 重装会清空 OTA 启动记录并切换到 factory，不沿用当前 OTA 启动槽。</p><a class="text-link" href="#updates">查看升级方式 <span aria-hidden="true">↓</span></a>
+            <ol class="step-list"><li><strong>核对硬件</strong><span>根据机身与购买资料确认 RDP-G01-W。ESP32-S3 不是型号证明。</span></li><li><strong>完整备份</strong><span>读取全部 16MiB，保存备份文件与 SHA-256 证据。只留在你的浏览器与电脑。</span></li><li><strong>独立授权</strong><span>明确了解启动槽切换后，才允许四段写入。新增字体资源默认不写。</span></li><li><strong>逐段回读</strong><span>传输 100% 不算成功。回读 SHA-256 一致、串口关闭后才报告完成。</span></li></ol>
+            <div class="notice"><strong>首版支持边界</strong><p>支持 Folio 兼容布局重装，以及经过核对的官方四分区布局迁移（另需授权）。未知原厂 / ThingsOS / 第三方布局仅备份，禁止写入。网页串口流程与原生 USB 复位尚未硬件验证。</p></div>
+          </aside>
+          <div class="installer" aria-labelledby="installer-title">
+            <div class="installer-top"><h3 id="installer-title">USB 安全安装器</h3><span class="tag" id="release-badge">未发布</span></div>
+            <p id="browser-support" class="muted">正在检查浏览器能力。未检查到受信发布前，连接和烧录保持禁用。</p>
+            <noscript><p class="notice">JavaScript 未启用，安装器不可用。其余说明与恢复指南仍可阅读。</p></noscript>
+            <div class="field-row"><label for="channel">发布通道<select id="channel"><option value="stable">稳定版 stable</option><option value="preview">预览版 preview（可能不稳定）</option></select></label><button id="check-release" type="button" disabled>检查签名发布</button></div>
+            <p id="release-info">当前没有已验证的发布清单。不会把开发版本显示为可用正式版。</p>
+            <div class="check-field"><input id="physical-model" type="checkbox" /><label for="physical-model">我已根据实物或可信购买资料确认设备是 <strong>RDP-G01-W</strong>，不是仅凭 ESP32-S3 芯片名称判断；已备份 TF 卡重要数据。</label></div>
+            <label class="reset-label" for="reset-mode">连接方式<select id="reset-mode"><option value="default_reset">标准自动复位（默认）</option><option value="usb_reset">原生 USB 复位（未硬件验证）</option><option value="no_reset">已按官方说明进入下载模式（不自动复位）</option></select></label>
+            <p class="field-hint">连接可能使设备重启进入下载模式。若失败，不自动切换复位方式；请先查阅官方硬件说明。</p>
+            <button id="connect-backup" class="primary full" type="button" disabled>选择设备并读取完整备份</button>
+            <section id="backup-panel" hidden aria-labelledby="backup-title">
+              <h4 id="backup-title" tabindex="-1">备份只属于你</h4><p>内部 Flash 可能含 Wi-Fi 与登录凭据。不要上传备份到 GitHub、聊天或公共网盘。</p>
+              <p id="backup-details" class="checksum"></p>
+              <div class="actions"><button id="save-backup" type="button">保存 16MiB 备份</button><button id="save-evidence" type="button">保存 SHA 证据</button></div>
+              <div class="check-field"><input id="backup-saved" type="checkbox" /><label for="backup-saved">我已在电脑中找到完整 16MiB 备份与 SHA 证据，并确认两者可读。点击下载不等于已保存。</label></div>
+              <div class="check-field" id="migration-field" hidden><input id="migration-confirm" type="checkbox" /><label for="migration-confirm">我明确授权从已识别的官方四分区布局迁移：重写分区表，在高位 Flash 新增 OTA 分区，替换原固件。旧系统可能无法再直接启动；内部数据不会迁移为 Folio 格式。此授权不包括覆盖 storage。</label></div>
+              <div class="check-field"><input id="factory-confirm" type="checkbox" /><label for="factory-confirm">我明确授权四段重装，理解 <strong>otadata 将重置并切换 factory 启动</strong>；不写旧 NVS、不写 5MiB 字体资源。写入中断可能需要恢复。</label></div>
+            </section>
+            <button id="install-button" class="primary full" type="button" disabled>确认后写入四段并回读校验</button>
+            <div class="progress-block"><label for="install-progress">当前步骤进度 <span id="progress-value">—</span></label><progress id="install-progress" max="100" value="0"></progress></div>
+            <p id="install-status" role="status" aria-live="polite" aria-atomic="true">未发布 / 尚无已验证清单，烧录已禁用。</p>
+            <button id="cancel" class="full" type="button" disabled>取消并关闭串口</button>
+            <p class="field-hint">取消写入不能撤回已写字节。刷机中请勿刷新、关闭标签页、让电脑睡眠或断开 USB。系统可能无法在强制退出前显示提示。</p>
+          </div>
+        </div>
+        <details class="technical"><summary>具体会写哪里？哪些区域不会动？</summary><div class="details-body"><div class="table-scroll"><table><caption>USB 默认写入白名单（仅四段）</caption><thead><tr><th>镜像</th><th>地址</th><th>上限 / 要求</th></tr></thead><tbody><tr><td>bootloader</td><td><code>0x0</code></td><td>不超过 32KiB</td></tr><tr><td>partition-table</td><td><code>0x8000</code></td><td>不超过 4KiB，匹配布局</td></tr><tr><td>Folio app</td><td><code>0x10000</code></td><td>不超过 3MiB</td></tr><tr><td>OTA 初始化</td><td><code>0x910000</code></td><td>恰好 8192 字节，切 factory</td></tr></tbody></table></div><p>不提供整片擦除或 merged 刷写。不写 NVS（0x9000 起）、storage 字体资源（0x410000–0x90FFFF）或备用 OTA 应用槽。每段验证签名中的长度、SHA-256、地址白名单与擦除范围；设备读取的布局也必须受支持。</p><p>当前固件运行时使用实验性 Flash / PSRAM 120MHz profile；网页写入门禁额外限制为已确认的 Zbit ZB25VQ128（JEDEC 5E 40 18）。其他 16MiB Flash 仅允许备份，不会因为容量相同就放行。镜像头仍为 DIO / 16MB / 80MHz，网站不修改签名镜像头。不同硬件料号、温度与长期稳定性尚未完成验证。</p><p>固件与清单仅从固定 HTTPS 发布路径下载，不依赖 CDN 执行代码。网页签名验证不等同于芯片的 Secure Boot，不支持已加密或启用安全启动的设备。</p></div></details>
+      </div>
+    </section>
+    <section class="section wrap" id="updates" aria-labelledby="updates-title">
+      <div class="section-label"><span>04 / 持续翻新</span><span>A WORK IN PROGRESS.</span></div>
+      <div class="update-grid"><div><h2 id="updates-title">更新有记录，<br />边界说清楚。</h2><p>没有受信发布清单，就没有“最新版”按钮。预览版不等于稳定版，构建通过也不等于实机验收。</p><a class="text-link" href={`${repo}/releases`}>查看 GitHub 发布记录 <span aria-hidden="true">↗</span></a></div><div class="update-notes"><article><span class="kicker">推荐 · 已有兼容 Folio</span><h3>在设备中更新应用</h3><p>从受信发布获取应用与 SHA 文件，放入 TF 卡 <code>update/</code>，或通过设备无线传书上传。退出传书，在固件升级页核对版本与校验值后安装。在线签名升级仅在支持该功能的固件中可用。</p><p class="muted">OTA 由设备选择备用槽；不要把 USB、merged 或字体资源当成 OTA 应用。</p></article><article><span class="kicker">可选 · 独立字体资源</span><h3>更多字体，另作一次选择</h3><p>Folio 黑体、楷体与圆体位于独立 5MiB storage 区域，安装会覆盖原有内容。首版网页不执行资源写入；仅在发布包提供资源后，按独立说明完整备份、核对布局并逐次授权。</p><p class="muted">普通 USB / OTA 不安装这三款字体。缺资源时保留原宋体回退，不宣称首次安装就有四字体。</p></article></div></div>
+    </section>
+    <section class="section wrap" id="help" aria-labelledby="help-title">
+      <div class="section-label"><span>05 / 帮助与恢复</span><span>WHEN YOU NEED A HAND.</span></div>
+      <h2 id="help-title">不确定的时候，先停下来。</h2>
+      <div class="faq"><details><summary>没有可用版本，或签名校验失败？</summary><div class="details-body"><p>未发布时连接与烧录始终禁用。404 表示尚无该通道发布；网络或签名错误不会被当作可用版本。不要用来历不明的镜像，也不要绕过校验。可查看 GitHub 发布记录与已知问题，等可信发布可用后再试。</p></div></details><details><summary>首次从原厂或其他固件切换怎么办？</summary><div class="details-body"><p>网页只接受两种精确布局：Folio v2，或官方 read_pico_firmware 固定提交 6a247cc 的 nvs / phy_init / factory / storage 四分区（位置与 Folio 前四项相同，另增高位 OTA 分区）。这不意味着所有出厂或 ThingsOS 布局兼容。未知布局即便芯片是 S3 也不放行。迁移必须完整备份、另行授权修改分区表；不迁移旧系统内部数据，不保证原系统设置被 Folio 识别。不要仅刷一个 app。</p><a href={`${repo}/blob/main/docs/刷机说明.md`}>查看项目硬件与手动安装说明 ↗</a></div></details><details id="recovery"><summary>刷写失败、中断或无法启动，如何恢复？</summary><div class="details-body"><ol><li>不要反复点安装。保留完整 16MiB 原始备份、SHA 证据与所用发布版本；写入失败或回读失败都不代表成功。</li><li>按官方硬件说明检查数据线与下载模式，重新确认设备型号、Flash 容量与备份归属。不要向另一台设备写入含凭据的备份。</li><li>恢复原系统需要匹配布局的完整原始备份或完整官方构建，不是仅替换 app。请由了解 esptool 的操作人员，在单独确认后执行恢复并完整回读校验。本页不自动执行恢复或整片擦除。</li><li>TF 卡上的书籍与隐藏 <code>.folio</code> 目录另外备份。内部 Flash 备份不包含 TF 卡数据。</li></ol><a href="https://github.com/MindReset/read_pico_firmware/blob/main/README.zh-CN.md">官方硬件与构建指引 ↗</a></div></details><details><summary>隐私、备份与浏览器能力</summary><div class="details-body"><p>本页没有账号、分析埋点或备份上传。设备数据只在当前浏览器内存中处理，由你主动保存到电脑。关闭页面会丢失未保存备份。发布版本检查只请求公共静态文件；SHA 是完整性证据，不会隐藏备份中的私人内容。</p><p>Web Serial 仅对支持的桌面 Chrome / Edge 开放。浏览器下载许可、硬件复位、串口独占和 USB 断线仍可能导致失败。终端串口监视器与安装器不能同时连接设备。</p></div></details></div>
+    </section>
+    <section class="license-section wrap" id="license" aria-labelledby="license-title"><span class="eyebrow">OPEN BY DESIGN</span><h2 id="license-title">从开源而来，向开源敞开。</h2><p>自研应用以 MIT 许可公开。板级支持、EPDiy、字体与其他第三方组件保留各自许可；MIT 不替代 LGPL、OFL 等义务。微信读书协议适配参考 MIT 许可的 wxBook / CrossMux。</p><div class="actions"><a class="text-link" href={`${repo}/blob/main/LICENSE`}>MIT 许可 ↗</a><a class="text-link" href={`${repo}/blob/main/LICENSES.md`}>固件第三方许可 ↗</a><a class="text-link" href="/folio/third-party-licenses.txt">网页依赖许可 ↗</a><a class="text-link" href={`${repo}/issues`}>反馈问题 ↗</a></div></section>
+  </main>
+  <footer class="wrap"><a class="brand" href="#main">页间 <b>Folio</b></a><p>留一点时间，给阅读。</p><a href="#install">备份之后，再开始 ↑</a></footer>
+  <script>import '../installer/ui';</script>
+</body>
+</html>

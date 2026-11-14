@@ -1,0 +1,64 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "folio_gfx.c"
+        "folio_settings.c"
+        "folio_power.c"
+        "folio_activity.c"
+        "folio_storage.c"
+        "folio_update.c"
+        "folio_online_update.c"
+        "folio_online_guard.c"
+        "folio_remote_manifest.c"
+        "book/folio_catalog.c"
+        "net/folio_transfer.c"
+        "net/folio_upload.c"
+        "net/folio_transfer_validate.c"
+        "net/folio_weread.cpp"
+        "net/folio_weread_time.c"
+        "net/weread/folio_weread_client.cc"
+        "net/weread/folio_weread_crypto.cc"
+        "net/weread/folio_weread_session.cc"
+        "net/weread/folio_weread_transport.cc"
+        "net/weread/vendor/cjson/cJSON.c"
+        "book/folio_weread_cache.c"
+        "vendor/qrcodegen/qrcodegen.c"
+        "book/folio_font.c"
+        "book/folio_font_pack.c"
+        "book/folio_cover.c"
+        "book/folio_wallpaper.c"
+        "book/folio_reader.c"
+        "book/folio_epub.c"
+        "book/folio_zip.c"
+        "book/folio_xml.c"
+        "book/folio_text.c"
+        "book/folio_gbk_table.c"
+    EMBED_FILES "assets/folio_builtin.deflate"
+    INCLUDE_DIRS "." "book" "net"
+    REQUIRES
+        read_pico
+        epdiy
+        e0470_epaper_waveform
+        read_pico_pmu
+        cst836u
+        esp_timer
+        esp_driver_usb_serial_jtag
+        heap
+        fatfs
+        nvs_flash
+        esp_rom
+        esp_wifi
+        esp_netif
+        lwip
+        esp_event
+        esp_http_server
+        esp_http_client
+        esp-tls
+        bootloader_support
+        esp_partition
+        app_update
+        mbedtls
+        esp_app_format
+)
+set_source_files_properties("net/weread/vendor/cjson/cJSON.c" PROPERTIES COMPILE_DEFINITIONS "CJSON_NESTING_LIMIT=32")
+target_compile_definitions(${COMPONENT_LIB} PRIVATE FOLIO_RELEASE_SEQUENCE=${FOLIO_RELEASE_SEQUENCE}u)

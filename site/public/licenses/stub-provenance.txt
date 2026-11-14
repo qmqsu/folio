@@ -1,0 +1,28 @@
+Folio website — RAM flasher stub provenance
+
+esptool-js: version 0.7.1, Apache-2.0
+Source commit: d5b779b0314bdec367125f4c7e3c6d2206b14311
+https://github.com/espressif/esptool-js/tree/d5b779b0314bdec367125f4c7e3c6d2206b14311
+
+The upstream pinned stub-directory notice explicitly identifies esp-flasher-stub v1.2.2:
+https://github.com/espressif/esptool-js/blob/d5b779b0314bdec367125f4c7e3c6d2206b14311/src/targets/stub_flasher/README.md
+All bundled target-stub JSONs retain that upstream Apache-2.0 OR MIT license; Folio selects the MIT option for these RAM binaries. The complete MIT notice accompanies this file and is included in third-party-licenses.txt. This does not relicense esptool-js JavaScript, which remains Apache-2.0.
+
+Stub source release: https://github.com/espressif/esp-flasher-stub/releases/tag/v1.2.2
+Exact source commit: https://github.com/espressif/esp-flasher-stub/tree/23959b780454adf885916d42f2274ec648e96a94
+Required source submodule: https://github.com/espressif/esp-stub-lib/tree/d61983fa4d1f66b9c088608c1f702ad877121279
+Both source projects offer Apache-2.0 OR MIT, copyright 2025 Espressif Systems (Shanghai) CO LTD.
+For rebuilding, obtain the exact source commit plus its pinned submodule and follow its toolchain/build instructions. No rebuilt or locally modified RAM stub is substituted here.
+
+The browser installer permits only ESP32-S3; other chip stub chunks may be present because upstream's dynamic loader is bundled unchanged, but unsupported chips are rejected before stub upload.
+
+ESP32-S3 upstream release artifact:
+https://github.com/espressif/esp-flasher-stub/releases/download/v1.2.2/esp32s3.json
+Upstream JSON SHA-256: 8816e0611701e8f7396a9fee9d1d33bc2021751bf24bda54560fb87c62de3f0b
+npm packaged JSON SHA-256: 1e9e67c529837f12055a9ea87545919502c6db389b9a671f0f0340620028fea3
+The JSON representations differ. The actual runtime fields text, data, text_start, data_start, entry and bss_start were independently compared and are identical.
+Decoded text: 7832 bytes, SHA-256 c37a7d12d52633fd629fbed13f3a7418216af368d8e80f17853ce6de29741374
+Decoded data: 264 bytes, SHA-256 75be8e20e5c91b2b92cd02be9abe2462436648780e4878ea173598c5ed14df93
+
+Local builds verify the pinned packaged ESP32-S3 JSON hash before generating the notice. Network access is not needed at build time.
+This provenance comparison is not a USB hardware test and does not establish successful installation or native-USB reset behavior.

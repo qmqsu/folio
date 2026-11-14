@@ -1,0 +1,18 @@
+Protocol source notices
+
+wxBook — https://github.com/danleegle/wxBook
+MIT copyright/license retained verbatim in LICENSE.wxBook.
+Adapted protocol ID/signature/shard algorithms and Web API request shapes; no UI/reader code copied.
+Retrieved public main source 2026-10-28; SHA-256 of inspected upstream source:
+784dfc681236cb8fdbfb5f6b5b0099a86170cd0ae382a42d5cc534e5be4d6fb7  main/weread/weread_client.cc
+a6d04a84d75b92fec48da0571c3c58721184c8460dfdaaa34a2fd395d45342b7  main/weread/weread_crypto.cc
+
+CrossMux — https://github.com/0x1abin/crossmux
+MIT license retained in LICENSE.CrossMux.
+Position-only enter/report and independent getProgress behavior researched from author source; no UI/reader/store implementation copied.
+Inspected commit: 6b5566c844667857acebfe565d373423cdd16e06
+00cc97dd650ff3da74ec380f2f2d635ba1cca745dce92484b28ee482e6fa47bf  lib/WeReadWebApi/src/WeReadClient.cpp
+
+cJSON — see vendor/cjson/SOURCE.txt and vendor/cjson/LICENSE.
+
+These are unofficial Web protocol implementations. Source availability and host tests do not establish current server or hardware interoperability.

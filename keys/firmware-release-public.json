@@ -1,0 +1,6 @@
+{
+  "key_id": "folio-release-2026-1",
+  "algorithm": "ECDSA-P256-SHA256",
+  "sec1_hex": "041d8acd2248a202762eef06c029d4fbf3df2cb4012fe069e01bb0d8e2aec5a1364347a6b59d95642c6cf6d252c44fc5e640f47cb6eddcec9e3045f6419abb24dc",
+  "public_key_sha256": "7b5ebb1d1b59caacf6e82f17ba19ef4efb50f597678f7a188b36bbd6d2cd95f5"
+}

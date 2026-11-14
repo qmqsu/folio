@@ -1,0 +1,8 @@
+Project Nayuki QR Code generator, v1.8.0, MIT.
+Source: https://github.com/nayuki/QR-Code-generator/tree/v1.8.0/c
+Retrieved through the source reader after local HTTPS connections failed.
+Line labels removed; overlapping source ranges checked for exact agreement.
+Files contain the complete upstream source including its license.
+
+b3390891debbaa24919fc7d406e23a5340c5e338bccd6c6e2121dcaeee1e0ec5  qrcodegen.c
+b662a998df504cd3c95c4dd6b746f1c6b58602a0204d21ab7326806ca247938c  qrcodegen.h

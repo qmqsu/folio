@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "publisher": "qmqsu",
+  "repository": "https://github.com/qmqsu/folio",
+  "project_license": "MIT",
+  "third_party_reviewed": false,
+  "corresponding_source_reviewed": false,
+  "font_licenses_reviewed": true,
+  "review_note": "Font licenses/current UI coverage and browser dependency/stub notices verified. Firmware linked-component and exact-build source/relink materials remain pending; source/site development is not firmware release approval."
+}

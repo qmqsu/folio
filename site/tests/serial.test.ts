@@ -1,0 +1,63 @@
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { md5 } from '@noble/hashes/legacy.js';
+import { readStubFlash, browserSupport } from '../src/installer/serial';
+import { fetchBounded } from '../src/installer/manifest';
+
+function protocol(bytes: Uint8Array, options: { digest?: Uint8Array; short?: boolean; extra?: boolean } = {}) {
+  const frames: Uint8Array[] = [];
+  for (let i = 0; i < bytes.length; i += 4096) frames.push(bytes.slice(i, i + 4096));
+  if (options.short) frames[0] = frames[0].slice(0, 10);
+  if (options.extra) frames[0] = new Uint8Array(4097);
+  frames.push(options.digest ?? md5(bytes));
+  const acknowledgements: number[] = [];
+  const requests: Uint8Array[] = [];
+  const loader = { IS_STUB: true, ESP_READ_FLASH: 0xd2, FLASH_READ_TIMEOUT: 3000,
+    async checkCommand(_description: string, op: number, request: Uint8Array) { expect(op).toBe(0xd2); requests.push(request); return 0; },
+    transport: { async read() { const frame = frames.shift(); if (!frame) throw Error('Missing frame'); return frame; },
+      async write(bytes: Uint8Array) { acknowledgements.push(new DataView(bytes.buffer).getUint32(0, true)); } } };
+  return { loader, frames, acknowledgements, requests };
+}
+describe('stub serial read protocol (no actual serial port)', () => {
+  it('reads bounded data with exact ACKs and consumes/verifies terminal MD5', async () => {
+    const bytes = new Uint8Array(9000).fill(0x42), p = protocol(bytes), progress: number[] = [];
+    const output = await readStubFlash(p.loader, 0, bytes.length, new AbortController().signal, n => progress.push(n));
+    expect(output).toEqual(bytes); expect(p.frames).toEqual([]); expect(p.acknowledgements).toEqual([4096, 8192, 9000]); expect(progress).toEqual(p.acknowledgements);
+    const view = new DataView(p.requests[0].buffer); expect([0, 4, 8, 12].map(n => view.getUint32(n, true))).toEqual([0, 9000, 4096, 64]);
+  });
+  it.each([{ digest: new Uint8Array(16) }, { digest: new Uint8Array(15) }, { short: true }, { extra: true }])('rejects corrupted or malformed read stream %j', async options => {
+    const p = protocol(new Uint8Array(4096).fill(1), options);
+    await expect(readStubFlash(p.loader, 0, 4096, new AbortController().signal, () => {})).rejects.toThrow();
+  });
+  it('respects cancellation and rejects ROM reads or out-of-range addresses', async () => {
+    const p = protocol(new Uint8Array(4096)); const abort = new AbortController(); abort.abort();
+    await expect(readStubFlash(p.loader, 0, 4096, abort.signal, () => {})).rejects.toThrow();
+    expect(p.requests).toHaveLength(0); p.loader.IS_STUB = false;
+    await expect(readStubFlash(p.loader, 0, 4096, new AbortController().signal, () => {})).rejects.toThrow();
+    p.loader.IS_STUB = true;
+    await expect(readStubFlash(p.loader, 0x1000000, 4096, new AbortController().signal, () => {})).rejects.toThrow();
+  });
+});
+afterEach(() => vi.unstubAllGlobals());
+describe('network isolation and browser gates', () => {
+  it('fetches without redirects, credentials, cache or referrer; bounds streamed bytes', async () => {
+    const url = 'https://qmqsu.github.io/folio/firmware/v/image.bin';
+    const mock = vi.fn(async () => { const response = new Response(new Uint8Array([1, 2, 3])); Object.defineProperty(response, 'url', { value: url }); return response; });
+    vi.stubGlobal('fetch', mock);
+    expect(await fetchBounded(url, 3)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(mock.mock.calls[0]).toEqual([url, expect.objectContaining({ redirect: 'error', credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-store' })]);
+    await expect(fetchBounded(url, 2)).rejects.toThrow('超过');
+  });
+  it('404 is unpublished, never a fabricated version', async () => {
+    vi.stubGlobal('fetch', async () => new Response(null, { status: 404 }));
+    await expect(fetchBounded('https://qmqsu.github.io/folio/channels/stable-usb.json', 2000)).rejects.toThrow('未发布');
+  });
+  it.each([
+    ['Mozilla/5.0 Chrome/130.0', true, true, true], ['Mozilla/5.0 Edg/130.0 Chrome/130.0', true, true, true],
+    ['Mozilla/5.0 Safari/605.1', true, true, false], ['Mozilla/5.0 Firefox/130.0', true, true, false],
+    ['Mozilla/5.0 Android Chrome/130.0', true, true, false], ['Mozilla/5.0 Chrome/130.0', false, true, false],
+    ['Mozilla/5.0 Chrome/130.0', true, false, false],
+  ])('detects browser %s / secure %s / serial %s', (userAgent, secure, serial, supported) => {
+    vi.stubGlobal('isSecureContext', secure); vi.stubGlobal('navigator', { userAgent, platform: 'MacIntel', maxTouchPoints: 0, ...(serial ? { serial: {} } : {}) });
+    expect(browserSupport().supported).toBe(supported);
+  });
+});

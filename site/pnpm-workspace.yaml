@@ -1,0 +1,8 @@
+storeDir: .pnpm-store
+cacheDir: .pnpm-cache
+verifyDepsBeforeRun: false
+allowBuilds:
+  esbuild: true
+  sharp: false
+overrides:
+  rollup: npm:@rollup/wasm-node@4.52.5

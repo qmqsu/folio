@@ -1,0 +1,19 @@
+{
+  "name": "reading",
+  "steps": [
+    {"wait": {"view": "LIBRARY", "timeout": 8}},
+    {"shot": "01-library"},
+    {"tap": [133, 360]},
+    {"wait": {"view": "READING", "timeout": 15}},
+    {"shot": "02-reading"},
+    {"tap": [600, 700]},
+    {"sleep": 800},
+    {"shot": "03-next-page"},
+    {"tap": [342, 700]},
+    {"wait": {"view": "TOOLS", "timeout": 8}},
+    {"shot": "04-menu"},
+    {"tap": [76, 56]},
+    {"wait": {"view": "READING", "timeout": 8}},
+    {"shot": "05-back"}
+  ]
+}

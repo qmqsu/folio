@@ -1,0 +1,17 @@
+{
+  "name": "smoke",
+  "steps": [
+    {"note": "start from wherever the device is; the first wait establishes a known view"},
+    {"wait": {"timeout": 5}},
+    {"shot": "01-start"},
+    {"tap": [76, 56]},
+    {"wait": {"not_view": "WEREAD", "timeout": 8}},
+    {"shot": "02-back"},
+    {"key": 1},
+    {"wait": {"timeout": 5}},
+    {"shot": "03-key2"},
+    {"key": 0},
+    {"wait": {"timeout": 5}},
+    {"shot": "04-key1"}
+  ]
+}

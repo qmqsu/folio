@@ -1,0 +1,488 @@
+{
+  "schema": "folio-font-assets-v1",
+  "revision": "0830-1",
+  "source_manifest": "source-manifest.json",
+  "source_manifest_sha256": "d5cf38b7df53e0d4d425a08ac4d80f7b9db2d2f950ec59f9cdeab4276dae0e26",
+  "builder": "tools/build_font_assets.py",
+  "compression": {
+    "format": "raw-deflate",
+    "level": 9,
+    "wbits": -15,
+    "zlib": "1.2.12"
+  },
+  "checksum": "CRC32 IEEE as zlib.crc32(data, 0) / mz_crc32(0, data, len); stored as 8 lowercase hex digits; SHA256 authenticates pinned sources and artifacts, not a signature",
+  "charsets": {
+    "A": {
+      "path": "charsets/A.txt",
+      "count": 4538,
+      "sha256": "8167a9fbea8728fe5115fb145b5b9b7423df52efe496b81954832e662df7230f"
+    },
+    "B": {
+      "path": "charsets/B.txt",
+      "count": 7545,
+      "sha256": "b193ee3449bccad309632ea2eded29d918dab10a91855d1bcdec0bfd0261f38c"
+    },
+    "GB2312_HAN": {
+      "path": "charsets/GB2312_HAN.txt",
+      "count": 6763,
+      "sha256": "1bb7285bd36009a6c6dab2d8a20977659bd89328ba2c7c2def240e28109ad3fb"
+    },
+    "CURRENT_UI_SOURCE_SCAN": {
+      "path": "charsets/CURRENT_UI_SOURCE_SCAN.txt",
+      "count": 569,
+      "sha256": "2891a654414fe6b42cac007b11b21191e0bf8a209f1743d7ec4eecccffb1f696"
+    },
+    "SYMBOLS_REQUIRED": {
+      "path": "charsets/SYMBOLS_REQUIRED.txt",
+      "count": 38,
+      "sha256": "72b43df17eb58bc84fa2f26c4f009f7dedcc0d40a11e2707bd4181cf399994e8"
+    },
+    "SYMBOLS_CALIBRATION": {
+      "path": "charsets/SYMBOLS_CALIBRATION.txt",
+      "count": 5,
+      "sha256": "e902e554393afbceee939651fc70b06544fafd8edb03d4124bb3f220380a1f54"
+    },
+    "SYMBOLS_ALL": {
+      "path": "charsets/SYMBOLS_ALL.txt",
+      "count": 43,
+      "sha256": "693c5787334f0c8f4a6cc5b2b639051e859e5d2aefab68fa11b6bfdd1808cf39"
+    }
+  },
+  "fonts": [
+    {
+      "id": "hei",
+      "family": "Folio Hei",
+      "style": "Regular",
+      "upstream": "Sarasa Gothic SC Regular",
+      "version": "v1.0.43",
+      "source_sha256": "4ba7932c490b2d47f4a55d03cb6168a2a2e3056137d45f584c2354f960376eb2",
+      "license_path": "licenses/Sarasa-LICENSE.txt",
+      "ttf_path": "folio_hei.ttf",
+      "deflate_path": "folio_hei.deflate",
+      "fallback_id": null,
+      "selectable": true,
+      "calibration_cps": [],
+      "required_fallback_cps": [],
+      "ttf_bytes": 2043496,
+      "deflate_bytes": 1320869,
+      "ttf_sha256": "6fdbc417cbb4128a4377fc5d844f817519e039dfddf0a32acc8d58db3dd941b7",
+      "deflate_sha256": "9c12bfa943c6c25a146eb32d0a2c18cb2f8ec0c94098895185674d27e405ea5a",
+      "ttf_crc32": "1d15a952",
+      "deflate_crc32": "50c082c1",
+      "codepoint_count": 7545,
+      "target_count": 7545,
+      "missing_codepoints": [],
+      "glyph_count": 7569,
+      "cmap4_segments": 3662,
+      "static_glyf_cmap4": true,
+      "weight": 400,
+      "outline_and_advance_checked_count": 7545,
+      "outline_or_hmtx_mismatches": 0,
+      "outline_metrics_digest_sha256": "afe2293fe734a69b57c2b6dca296661c6f1422e130b052622311773ee5392c0f",
+      "unmodified_non_primary_name_metadata": true,
+      "all_primary_names_renamed": true,
+      "normalization_sample_bboxes": {
+        "U+4E66": [
+          60,
+          -79,
+          951,
+          837
+        ],
+        "U+56FD": [
+          86,
+          -81,
+          914,
+          795
+        ],
+        "U+6C38": [
+          35,
+          -79,
+          965,
+          839
+        ],
+        "U+95F4": [
+          91,
+          -80,
+          913,
+          827
+        ],
+        "U+9605": [
+          91,
+          -80,
+          909,
+          828
+        ]
+      },
+      "allocation_budget": {
+        "raw_ttf_bytes": 2043496,
+        "validator_tree_arrays_bytes": 60552,
+        "validator_simple_flags_max_bytes": 253,
+        "raw_plus_validator_peak_bytes": 2104048,
+        "excludes": "font state, inflater, input buffers, allocator overhead, glyph raster/cache, existing fonts, framebuffers, reader/network allocations; not device PSRAM measurement"
+      }
+    },
+    {
+      "id": "kai",
+      "family": "Folio Kai",
+      "style": "Regular",
+      "upstream": "LXGW WenKai Regular",
+      "version": "v1.530",
+      "source_sha256": "2d73eea94ad808999d90c0000c239a84a33b09d4bc6ab6c5b8bbf1eda8a7fc8b",
+      "license_path": "licenses/LXGW-WenKai-OFL.txt",
+      "ttf_path": "folio_kai.ttf",
+      "deflate_path": "folio_kai.deflate",
+      "fallback_id": null,
+      "selectable": true,
+      "calibration_cps": [],
+      "required_fallback_cps": [],
+      "ttf_bytes": 3477784,
+      "deflate_bytes": 2152452,
+      "ttf_sha256": "afd2b9962948eb675ac654dc2c10476f6aa7a2f227852b0992ad06003642e13c",
+      "deflate_sha256": "409152e3ccab7ee39fc4f9c8a56a424dd028634113bb6868ca9dff9473536b0e",
+      "ttf_crc32": "889c189d",
+      "deflate_crc32": "7d30ede5",
+      "codepoint_count": 7545,
+      "target_count": 7545,
+      "missing_codepoints": [],
+      "glyph_count": 7547,
+      "cmap4_segments": 3637,
+      "static_glyf_cmap4": true,
+      "weight": 400,
+      "outline_and_advance_checked_count": 7545,
+      "outline_or_hmtx_mismatches": 0,
+      "outline_metrics_digest_sha256": "8c30827215170035da30d78128f3547b210b0dab6b95ea3719f400db80a2c8c0",
+      "unmodified_non_primary_name_metadata": true,
+      "all_primary_names_renamed": true,
+      "normalization_sample_bboxes": {
+        "U+4E66": [
+          82,
+          -107,
+          898,
+          806
+        ],
+        "U+56FD": [
+          123,
+          -91,
+          888,
+          763
+        ],
+        "U+6C38": [
+          28,
+          -96,
+          974,
+          800
+        ],
+        "U+95F4": [
+          110,
+          -102,
+          903,
+          799
+        ],
+        "U+9605": [
+          102,
+          -90,
+          891,
+          797
+        ]
+      },
+      "allocation_budget": {
+        "raw_ttf_bytes": 3477784,
+        "validator_tree_arrays_bytes": 60376,
+        "validator_simple_flags_max_bytes": 413,
+        "raw_plus_validator_peak_bytes": 3538160,
+        "excludes": "font state, inflater, input buffers, allocator overhead, glyph raster/cache, existing fonts, framebuffers, reader/network allocations; not device PSRAM measurement"
+      }
+    },
+    {
+      "id": "yuan",
+      "family": "Folio Yuan",
+      "style": "Regular",
+      "upstream": "ChillRoundF Regular",
+      "version": "v3.200",
+      "source_sha256": "7ccfc2cd0e971edeac7f65516df8db379f0f84d0d8ff79ee4dfe377956418d3b",
+      "license_path": "licenses/ChillRound-LICENSE.txt",
+      "ttf_path": "folio_yuan.ttf",
+      "deflate_path": "folio_yuan.deflate",
+      "fallback_id": "symbols",
+      "selectable": true,
+      "calibration_cps": [],
+      "required_fallback_cps": [
+        "U+2245",
+        "U+2504",
+        "U+2505",
+        "U+2508",
+        "U+2509",
+        "U+250D",
+        "U+250E",
+        "U+2511",
+        "U+2512",
+        "U+2515",
+        "U+2516",
+        "U+2519",
+        "U+251A",
+        "U+251E",
+        "U+251F",
+        "U+2521",
+        "U+2522",
+        "U+2526",
+        "U+2527",
+        "U+2529",
+        "U+252A",
+        "U+252D",
+        "U+252E",
+        "U+2531",
+        "U+2532",
+        "U+2535",
+        "U+2536",
+        "U+2539",
+        "U+253A",
+        "U+2540",
+        "U+2541",
+        "U+2543",
+        "U+2544",
+        "U+2545",
+        "U+2546",
+        "U+2547",
+        "U+2548",
+        "U+30F4"
+      ],
+      "ttf_bytes": 2689336,
+      "deflate_bytes": 1633395,
+      "ttf_sha256": "f77353972bd5e4b3b476c0c9aa81aca7ddc1b02fc92fbada1be88aa395430630",
+      "deflate_sha256": "676690404580be1cc57e38bd9472f3e1d90f29ab757aa53a0ed53b89847ceced",
+      "ttf_crc32": "7628e18e",
+      "deflate_crc32": "fbe3b489",
+      "codepoint_count": 7507,
+      "target_count": 7545,
+      "missing_codepoints": [
+        "U+2245",
+        "U+2504",
+        "U+2505",
+        "U+2508",
+        "U+2509",
+        "U+250D",
+        "U+250E",
+        "U+2511",
+        "U+2512",
+        "U+2515",
+        "U+2516",
+        "U+2519",
+        "U+251A",
+        "U+251E",
+        "U+251F",
+        "U+2521",
+        "U+2522",
+        "U+2526",
+        "U+2527",
+        "U+2529",
+        "U+252A",
+        "U+252D",
+        "U+252E",
+        "U+2531",
+        "U+2532",
+        "U+2535",
+        "U+2536",
+        "U+2539",
+        "U+253A",
+        "U+2540",
+        "U+2541",
+        "U+2543",
+        "U+2544",
+        "U+2545",
+        "U+2546",
+        "U+2547",
+        "U+2548",
+        "U+30F4"
+      ],
+      "glyph_count": 7512,
+      "cmap4_segments": 3678,
+      "static_glyf_cmap4": true,
+      "weight": 400,
+      "outline_and_advance_checked_count": 7507,
+      "outline_or_hmtx_mismatches": 0,
+      "outline_metrics_digest_sha256": "3cf783f2ad25a959f0459a1a6eb8fbd21c2079368291c7e5dcdcaa30df7aee96",
+      "unmodified_non_primary_name_metadata": true,
+      "all_primary_names_renamed": true,
+      "normalization_sample_bboxes": {
+        "U+4E66": [
+          92,
+          -92,
+          904,
+          790
+        ],
+        "U+56FD": [
+          92,
+          -80,
+          908,
+          762
+        ],
+        "U+6C38": [
+          56,
+          -101,
+          944,
+          795
+        ],
+        "U+95F4": [
+          96,
+          -95,
+          918,
+          792
+        ],
+        "U+9605": [
+          98,
+          -98,
+          913,
+          793
+        ]
+      },
+      "allocation_budget": {
+        "raw_ttf_bytes": 2689336,
+        "validator_tree_arrays_bytes": 60096,
+        "validator_simple_flags_max_bytes": 344,
+        "raw_plus_validator_peak_bytes": 2749432,
+        "excludes": "font state, inflater, input buffers, allocator overhead, glyph raster/cache, existing fonts, framebuffers, reader/network allocations; not device PSRAM measurement"
+      }
+    },
+    {
+      "id": "symbols",
+      "family": "Folio Symbols",
+      "style": "Medium",
+      "upstream": "Unchanged Folio Songti Medium (Noto Serif SC derivative)",
+      "version": "existing-sha256-458fce0b8ceece06",
+      "source_sha256": "458fce0b8ceece06a182d09baceecfe358093e1ab948d0fe51cd06b32512a1ff",
+      "license_path": "licenses/NotoSerifSC-OFL.txt",
+      "ttf_path": "folio_symbols.ttf",
+      "deflate_path": "folio_symbols.deflate",
+      "fallback_id": null,
+      "selectable": false,
+      "calibration_cps": [
+        "U+4E66",
+        "U+56FD",
+        "U+6C38",
+        "U+95F4",
+        "U+9605"
+      ],
+      "required_fallback_cps": [
+        "U+2245",
+        "U+2504",
+        "U+2505",
+        "U+2508",
+        "U+2509",
+        "U+250D",
+        "U+250E",
+        "U+2511",
+        "U+2512",
+        "U+2515",
+        "U+2516",
+        "U+2519",
+        "U+251A",
+        "U+251E",
+        "U+251F",
+        "U+2521",
+        "U+2522",
+        "U+2526",
+        "U+2527",
+        "U+2529",
+        "U+252A",
+        "U+252D",
+        "U+252E",
+        "U+2531",
+        "U+2532",
+        "U+2535",
+        "U+2536",
+        "U+2539",
+        "U+253A",
+        "U+2540",
+        "U+2541",
+        "U+2543",
+        "U+2544",
+        "U+2545",
+        "U+2546",
+        "U+2547",
+        "U+2548",
+        "U+30F4"
+      ],
+      "ttf_bytes": 5144,
+      "deflate_bytes": 2990,
+      "ttf_sha256": "1dee19f020a75589814762b6d32e4427cdd2ece98479a949dc9cc1b82aa0cedd",
+      "deflate_sha256": "bb1f58a62b6de6db6bbaf4ceb44d0eb9ef38b7e08f88efb590f4eb71cc412d64",
+      "ttf_crc32": "f7f13d6f",
+      "deflate_crc32": "213fd4ea",
+      "codepoint_count": 43,
+      "target_count": 43,
+      "missing_codepoints": [],
+      "glyph_count": 44,
+      "cmap4_segments": 24,
+      "static_glyf_cmap4": true,
+      "weight": 500,
+      "outline_and_advance_checked_count": 43,
+      "outline_or_hmtx_mismatches": 0,
+      "outline_metrics_digest_sha256": "74f73f26f38f4429f36767cb3c8a16c6b49de996056b725432d729bea6dda2be",
+      "unmodified_non_primary_name_metadata": true,
+      "all_primary_names_renamed": true,
+      "normalization_sample_bboxes": {
+        "U+4E66": [
+          54,
+          -82,
+          948,
+          842
+        ],
+        "U+56FD": [
+          94,
+          -81,
+          948,
+          827
+        ],
+        "U+6C38": [
+          30,
+          -80,
+          970,
+          838
+        ],
+        "U+95F4": [
+          110,
+          -81,
+          935,
+          847
+        ],
+        "U+9605": [
+          105,
+          -81,
+          938,
+          842
+        ]
+      },
+      "allocation_budget": {
+        "raw_ttf_bytes": 5144,
+        "validator_tree_arrays_bytes": 352,
+        "validator_simple_flags_max_bytes": 151,
+        "raw_plus_validator_peak_bytes": 5496,
+        "excludes": "font state, inflater, input buffers, allocator overhead, glyph raster/cache, existing fonts, framebuffers, reader/network allocations; not device PSRAM measurement"
+      }
+    }
+  ],
+  "existing_songti": {
+    "path": "main/assets/folio_builtin.ttf",
+    "sha256": "458fce0b8ceece06a182d09baceecfe358093e1ab948d0fe51cd06b32512a1ff",
+    "deflate_path": "main/assets/folio_builtin.deflate",
+    "deflate_sha256": "58d8e2eaef18c5935217aa1d1d8cd2f9468ec7df01451395ea7c1477d9c37320",
+    "upstream_sha256": "050080d9255a86808f2945bffac582b31ef32bc36411ce29563b4961670c66f9",
+    "unchanged": true
+  },
+  "coverage": {
+    "hei_B_complete": true,
+    "kai_B_complete": true,
+    "yuan_plus_symbols_B_complete": true,
+    "symbols_required_count": 38,
+    "symbols_calibration_count": 5,
+    "A_preserved_count": 4538,
+    "B_count": 7545,
+    "songti_remains_A_only": true
+  },
+  "notice": {
+    "path": "NOTICE.txt",
+    "bytes": 20736,
+    "sha256": "331611a753a3e2db7901a8e4df575cf46c1858c2107450a07e85117e14f8225f"
+  },
+  "resource_container": "Not generated by this tool; pack only deflates plus bounded manifest/notices under an independently agreed format."
+}

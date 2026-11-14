@@ -1,0 +1,27 @@
+{
+  "name": "folio-site",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "packageManager": "pnpm@11.28.5",
+  "engines": { "node": ">=22.23.4" },
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1",
+    "build": "node scripts/collect-licenses.mjs && astro build",
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:browser": "node tests/browser.mjs"
+  },
+  "dependencies": {
+    "astro": "5.18.2",
+    "esptool-js": "0.7.1",
+    "@noble/hashes": "2.0.1"
+  },
+  "devDependencies": {
+    "@types/w3c-web-serial": "1.0.8",
+    "typescript": "7.0.2",
+    "vitest": "3.2.6",
+    "playwright-core": "1.56.1"
+  }
+}

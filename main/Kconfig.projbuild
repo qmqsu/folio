@@ -1,0 +1,9 @@
+menu "Folio diagnostics"
+    config FOLIO_USB_DEBUG
+        bool "USB-only screen capture and UI control"
+        default n
+        help
+            Development-only commands over the physical USB console. Allows
+            status, framebuffer capture and normal touchscreen/key events.
+            No network listener, arbitrary file access or credential export.
+endmenu
