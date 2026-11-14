@@ -6,7 +6,9 @@ static void online_mock_finish(folio_online_state_t state,const char* message) {
     refresh_online();
 }
 static void online_mock_check(void) {
+    unsigned stations=mock_https_station_calls,connects=mock_native_connect_calls;
     online_connect(1);assert(s_online_wait && mock_network.running);
+    assert(mock_https_station_calls==stations+1 && mock_native_connect_calls==connects);
     refresh_online();assert(mock_online.busy && s_online_snapshot.state==FOLIO_ONLINE_CHECKING);
 }
 static void online_mock_ready(void) {
@@ -15,7 +17,9 @@ static void online_mock_ready(void) {
     mock_online.total=3000000;
     online_mock_finish(FOLIO_ONLINE_AVAILABLE,"已找到比当前版本更新的签名发布。");
     assert(!online_active() && !mock_network.running);
+    unsigned stations=mock_https_station_calls,connects=mock_native_connect_calls;
     tap_rect(done_rect());assert(s_online_wait==2 && !online_installs);
+    assert(mock_https_station_calls==stations+1 && mock_native_connect_calls==connects);
     refresh_online();assert(mock_online.state==FOLIO_ONLINE_DOWNLOADING);
     mock_online.received=mock_online.total;
     online_mock_finish(FOLIO_ONLINE_READY,"签名、SHA-256 与固件格式验证成功。");
@@ -79,6 +83,21 @@ static void test_online_update_ui(const char* directory,const char* font_path) {
     assert(online_checks==checks && !mock_network.running); // No background polling.
     handle_tap(480,364);assert(s_online_beta && s_online_snapshot.state==FOLIO_ONLINE_IDLE);
     save_pgm(directory,"191-online-beta-ui-mock");
+    char channel_error[80];
+    assert(!folio_online_update_start_check("beta",channel_error,sizeof(channel_error)));
+    assert(strstr(channel_error,"更新通道无效") && !mock_online.busy && online_checks==checks);
+    mock_network.has_credentials=true;
+    unsigned stations=mock_https_station_calls,connects=mock_native_connect_calls;
+    tap_rect(done_rect());assert(s_online_wait==1);refresh_online();
+    assert(mock_https_station_calls==stations+1 && mock_native_connect_calls==connects);
+    // Exercise the real channel selection -> check action, not just its label.
+    assert(!strcmp(mock_online_requested_channel,"preview"));
+    assert(mock_online.busy && !strcmp(mock_online.channel,"preview") &&
+        s_online_snapshot.state==FOLIO_ONLINE_CHECKING && online_checks==checks+1);
+    save_pgm(directory,"206-online-preview-checking-ui-mock");
+    online_mock_finish(FOLIO_ONLINE_NO_RELEASE,"测试通道尚无发布（HTTP 404）。");
+    assert(!online_active() && !mock_network.running);
+    checks=online_checks;mock_network.has_credentials=previous_credentials;
     handle_tap(180,364);assert(!s_online_beta);
     s_card_ready=false;tap_rect(done_rect());assert(online_checks==checks && strstr(s_online_message,"TF"));
     save_pgm(directory,"192-online-no-card-ui-mock");s_card_ready=true;

@@ -147,13 +147,21 @@ static bool mock_online_worker, mock_wr_cancelled;
 static folio_online_snapshot_t mock_online;
 static folio_online_hooks_t mock_online_hooks;
 static unsigned online_checks, online_downloads, online_installs, online_cancels;
+static char mock_online_requested_channel[16];
 static bool mock_online_cancel, mock_online_start_fail;
 // UI simulation only: these mocks perform no network, signature or OTA work.
 bool folio_online_update_init(const folio_online_hooks_t* hooks) {
     assert(!mock_online.busy);mock_online_hooks=*hooks;memset(&mock_online,0,sizeof(mock_online));return true;
 }
 bool folio_online_update_start_check(const char* channel,char* error,size_t cap) {
-    (void)error;(void)cap;assert(!mock_online.busy);++online_checks;
+    snprintf(mock_online_requested_channel,sizeof(mock_online_requested_channel),"%s",channel?channel:"");
+    // Match the real folio_remote_manifest_url contract; beta is not an alias.
+    if(!channel || (strcmp(channel,"stable") && strcmp(channel,"preview"))) {
+        if(error && cap)snprintf(error,cap,"更新通道无效。");
+        return false;
+    }
+    if(error && cap)*error=0;
+    assert(!mock_online.busy);++online_checks;
     memset(&mock_online,0,sizeof(mock_online));mock_online_cancel=false;
     mock_online.busy=true;mock_online.state=FOLIO_ONLINE_CHECKING;
     snprintf(mock_online.channel,sizeof(mock_online.channel),"%s",channel);return true;
@@ -184,17 +192,21 @@ static folio_weread_action_t wr_last_action;
 static size_t wr_last_index;
 static char wr_last_value[16], mock_wr_path[256];
 static uint32_t mock_wr_position;
-bool folio_network_start_station(char* error,size_t cap) {
-    if(cap)*error=0;
+static unsigned mock_https_station_calls, mock_native_connect_calls;
+static bool mock_network_start_transport(char* error,size_t cap) {
+    if(error && cap)*error=0;
     if(!mock_network.has_credentials)return false;
     mock_network.running=true;mock_network.connecting=mock_network_delay_connect;
     mock_network.connected=!mock_network_delay_connect;return true;
+}
+bool folio_network_start_station(char* error,size_t cap) {
+    ++mock_https_station_calls;return mock_network_start_transport(error,cap);
 }
 void folio_network_get_status(folio_network_status_t* out){*out=mock_network;}
 bool folio_network_stop(void){if(!folio_transfer_stop())return false;mock_network.running=mock_network.connected=mock_network.connecting=false;return true;}
 bool folio_network_take_utc(uint32_t* utc){(void)utc;return false;}
 bool folio_network_configure(const char* s,const char* p,char* e,size_t c){(void)s;(void)p;(void)e;(void)c;mock_network.has_credentials=true;return true;}
-bool folio_network_connect(char* e,size_t c){return folio_network_start_station(e,c);}
+bool folio_network_connect(char* e,size_t c){++mock_native_connect_calls;return mock_network_start_transport(e,c);}
 bool folio_network_scan_start(char* e,size_t c){(void)e;(void)c;return true;}
 bool folio_network_scan_result(folio_network_ap_t* a,size_t c,size_t* n){(void)a;(void)c;(void)n;return false;}
 bool folio_network_sync_time(char* e,size_t c){(void)e;(void)c;return true;}

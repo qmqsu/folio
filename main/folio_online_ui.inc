@@ -88,7 +88,7 @@ static void online_start_worker(unsigned action) {
     char error[192]={0};s_online_wait=0;s_online_message[0]=0;
     atomic_fetch_and(&s_online_safety,~(unsigned)(ONLINE_CANCEL|ONLINE_AUTH));
     online_publish_safety();
-    bool okay=action==1?folio_online_update_start_check(s_online_beta?"beta":"stable",error,sizeof(error)):
+    bool okay=action==1?folio_online_update_start_check(s_online_beta?"preview":"stable",error,sizeof(error)):
         folio_online_update_start_download(error,sizeof(error));
     s_online_operation=okay;
     if(!okay){online_error(error);}
@@ -107,9 +107,10 @@ static void online_connect(unsigned action) {
     s_online_stopping=false;s_online_confirm=false;s_online_message[0]=0;
     atomic_fetch_and(&s_online_safety,~(unsigned)(ONLINE_CANCEL|ONLINE_AUTH));
     char error[192]={0};
-    // connect() is asynchronous STA-only and uses the saved native Wi-Fi profile.
+    // HTTPS station entry seeds an unset POSIX clock from the UI's valid PMU
+    // holdover; it does not write the PMU or start background time sync.
     s_online_network=true;
-    if(!folio_network_connect(error,sizeof(error))) {
+    if(!folio_network_start_station(error,sizeof(error))) {
         online_error(*error?error:"无法连接已保存网络，请先设置 Wi-Fi。");
         if(folio_network_stop())s_online_network=false;
         show_view(VIEW_UPDATE,true);return;
