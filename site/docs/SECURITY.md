@@ -4,7 +4,7 @@
 
 ```json
 {
-  "key_id": "folio-release-2026-1",
+  "key_id": "folio-release-2026-2",
   "payload": "base64 of original UTF-8 JSON bytes",
   "signature": "base64 of raw 64-byte P-256 r||s signature"
 }

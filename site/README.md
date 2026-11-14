@@ -29,7 +29,7 @@ export ASTRO_TELEMETRY_DISABLED=1
 - 版本资源：`https://qmqsu.github.io/folio/firmware/<version>/*.bin`
 - **不放示例生产清单、不捏造版本、不内置测试密钥。** 用户点击“检查签名发布”才请求公共清单。404 为“未发布”，网络或签名错误为“不可用”，连接/写入均禁用。
 - 发布流水线可将渠道指针和固件合并至 [静态产物](<dist/>) 后部署。本站不生成固件、生产密钥或签名。
-- 固定公钥 SEC1 SHA-256：`7b5ebb1d1b59caacf6e82f17ba19ef4efb50f597678f7a188b36bbd6d2cd95f5`；key id：`folio-release-2026-1`。这是 lead 提供的生产**公钥**。
+- 固定公钥 SEC1 SHA-256：`2e3d9f0853c515c0e650224ba68cd169baf50534ce638ea54b86826e8b763e6a`；key id：`folio-release-2026-2`。这是 lead 提供的生产**公钥**。
 
 详见 [安全契约](<docs/SECURITY.md>)。OTA `kind:'ota'` 清单绝不能用于 USB。
 
