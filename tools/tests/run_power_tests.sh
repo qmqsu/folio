@@ -11,7 +11,8 @@ fi
 power_variant() {
     folio_variant=$1
     shift
-    "$folio_cc" -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -fsanitize=address,undefined -g "$@" \
+    "$folio_cc" -std=c11 -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror \
+        -Wmissing-braces -Wparentheses -fsanitize=address,undefined -g "$@" \
         -I"$folio_project/tools/tests/power_stubs" -I"$folio_project/main" \
         -I"$folio_project/components/read_pico_pmu/include" \
         "$folio_project/tools/tests/test_power.c" "$folio_project/main/folio_power.c" -o "$folio_tmp/test_power_$folio_variant"

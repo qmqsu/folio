@@ -20,7 +20,9 @@ typedef int psa_status_t;
 typedef struct { host_sha_context context; bool active; } psa_hash_operation_t;
 #define PSA_SUCCESS 0
 #define PSA_ALG_SHA_256 0x02000009u
-#define PSA_HASH_OPERATION_INIT {0}
+// Omitted context members are zero-initialized, including nested SHA arrays.
+// A bare {0} here triggers GCC -Wmissing-braces inside image_reader_t.
+#define PSA_HASH_OPERATION_INIT { .active = false }
 extern bool fail_crypto_init, fail_hash_setup, fail_hash_finish;
 static inline psa_status_t psa_crypto_init(void) { return fail_crypto_init ? -1 : 0; }
 static inline psa_status_t psa_hash_setup(psa_hash_operation_t* operation, unsigned algorithm) {

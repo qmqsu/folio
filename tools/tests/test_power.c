@@ -141,7 +141,7 @@ esp_err_t read_pico_pmu_cmd(uint16_t code, const uint8_t* payload, uint8_t lengt
         last_clock_write=(uint32_t)payload[0]|((uint32_t)payload[1]<<8)|((uint32_t)payload[2]<<16)|((uint32_t)payload[3]<<24);
         if(fail_clock_write)return ESP_FAIL;
         if(!ignore_clock_write){
-            state.unix_sec=(uint32_t)((int64_t)last_clock_write+clock_readback_delta);state.time_ok=state.time_synced=true;
+            state.unix_sec=(uint32_t)((int64_t)last_clock_write+clock_readback_delta);state.time_synced=true;state.time_ok=true;
             if(rtc_running){rtc_epoch=state.unix_sec;rtc_anchor=now;}
         }
         if(shutdown_during_sync){push(PMU_EVT_SHUTDOWN_REQUESTED,901);state.power_state=PMU_PWR_SHUTDOWN_PENDING;}
@@ -492,7 +492,7 @@ static void test_clock(void) {
     assert(!folio_power_datetime(&local, 480));
     folio_power_status(status, sizeof(status), 480); assert(strncmp(status, "--:--", 5) == 0);
 
-    reset(); state.time_ok = state.time_synced = true;
+    reset(); state.time_synced = true; state.time_ok = true;
     state.unix_sec = 1767196799u; // 2025-12-31 15:59:59 UTC.
     folio_power_init();
     assert(folio_power_unix_time() == 1767196799u && clock_reads == 1);
@@ -534,7 +534,7 @@ static void test_clock(void) {
 static void test_clock_init_priority(void) {
     unsigned failures=0;
     for(unsigned kind=1;kind<=4;++kind) {
-        reset();state.time_ok=state.time_synced=true;state.unix_sec=1794144000u;
+        reset();state.time_synced=true;state.time_ok=true;state.unix_sec=1794144000u;
         boot_fault_after_ready=kind;folio_power_init();
         if(clock_reads || folio_power_unix_time()!=0) {
             fprintf(stderr,"After HOST_READY fault=%u: TIME_GET count=%u runtime=%u (expected no read/anchor)\n",kind,clock_reads,folio_power_unix_time());
@@ -577,7 +577,7 @@ static void test_clock_drift(void) {
     const uint32_t epoch=1794144000u;
     for(unsigned explicit_sync=0;explicit_sync<2;++explicit_sync) {
         for(unsigned r=0;r<sizeof(rates)/sizeof(rates[0]);++r) {
-            reset();state.time_ok=state.time_synced=true;state.unix_sec=epoch;
+            reset();state.time_synced=true;state.time_ok=true;state.unix_sec=epoch;
             rtc_running=true;rtc_epoch=epoch;rtc_rate_ppm=rates[r];folio_power_init();
             if(explicit_sync)assert(folio_power_set_time(epoch));
             unsigned reads=clock_reads,writes=clock_writes;
@@ -625,7 +625,7 @@ static void test_clock_transaction(void) {
 static void test_clock_bootstrap(void) {
     const uint32_t epoch=1794144000u;
     reset();folio_power_init();assert(clock_reads==1 && folio_power_unix_time()==0);
-    state.time_ok=state.time_synced=true;state.unix_sec=epoch;
+    state.time_synced=true;state.time_ok=true;state.unix_sec=epoch;
     now=59999999;folio_power_poll();assert(clock_reads==1 && folio_power_unix_time()==0);
     now=60000000;fail_clock=true;folio_power_poll();assert(clock_reads==2 && folio_power_unix_time()==0);
     fail_clock=false;now=119999999;folio_power_poll();assert(clock_reads==2);
@@ -635,14 +635,14 @@ static void test_clock_bootstrap(void) {
     // Valid flags do not make an unsupported or absent epoch acceptable.
     const uint32_t invalid[]={0,1704067199u,4102444800u,UINT32_MAX};
     for(unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) {
-        reset();state.time_ok=state.time_synced=true;state.unix_sec=invalid[i];folio_power_init();
+        reset();state.time_synced=true;state.time_ok=true;state.unix_sec=invalid[i];folio_power_init();
         assert(folio_power_unix_time()==0 && clock_reads==1);
     }
     for(unsigned flags=0;flags<3;++flags) {
         reset();state.time_ok=(flags&1)!=0;state.time_synced=(flags&2)!=0;state.unix_sec=epoch;
         folio_power_init();assert(folio_power_unix_time()==0);
     }
-    reset();state.time_ok=state.time_synced=true;state.unix_sec=epoch;
+    reset();state.time_synced=true;state.time_ok=true;state.unix_sec=epoch;
     clock_response_status=PMU_STATUS_ACCEPTED;folio_power_init();assert(folio_power_unix_time()==0);
     puts("Clock bootstrap: bounded retry, failed/stale/invalid samples, valid recovery and no post-bootstrap revocation pass");
 }
@@ -671,7 +671,7 @@ static void test_clock_diagnostic(void) {
     assert(!folio_power_rtc_time(&raw) && raw==0 && clock_reads==reads && poll_count==polls);
 
     // A diagnostic sample never seeds an unset clock or postpones its retry.
-    reset();folio_power_init();state.time_ok=state.time_synced=true;state.unix_sec=epoch;
+    reset();folio_power_init();state.time_synced=true;state.time_ok=true;state.unix_sec=epoch;
     now=1000000;assert(folio_power_rtc_time(&raw) && raw==epoch && folio_power_unix_time()==0);
     reads=clock_reads;now=59999999;folio_power_poll();assert(clock_reads==reads && folio_power_unix_time()==0);
     now=60000000;folio_power_poll();assert(clock_reads==reads+1 && folio_power_unix_time()==epoch);
@@ -695,7 +695,7 @@ static void test_clock_wake(void) {
         assert(refresh_count>0 && !ioe_sleeping && !request_count && !ready_count);
     }
     // No initial clock: a successful bounded retry may seed it while locked.
-    reset();rtc_running=true;rtc_epoch=1794144000u;state.time_ok=state.time_synced=true;
+    reset();rtc_running=true;rtc_epoch=1794144000u;state.time_synced=true;state.time_ok=true;
     fail_clock=true;folio_power_init();assert(folio_power_unix_time()==0 && clock_reads==1);
     now=3000000;key_after_light_calls=0;key_at=now+360000000;recover_clock_on_sleep=1;
     assert(folio_power_lock_refresh(&hardware,lock_refresh,&refresh_count)==ESP_OK);

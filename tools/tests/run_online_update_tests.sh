@@ -28,7 +28,7 @@ compile() {
     # Intentional word splitting for compiler/linker option lists only.
     "$cc" -std=c11 -D_POSIX_C_SOURCE=200809L -g -O1 -fno-omit-frame-pointer \
         -fsanitize=address,undefined -fno-sanitize-recover=all -Wall -Wextra -Werror \
-        -Wno-deprecated-declarations $platform "-DFOLIO_SD_ROOT=\"$tmp/card\"" \
+        -Wmissing-braces -Wparentheses -Wno-deprecated-declarations $platform "-DFOLIO_SD_ROOT=\"$tmp/card\"" \
         "-DFOLIO_RELEASE_KEY_HEADER=\"$tmp/fixtures/test_release_key.h\"" \
         -Itools/tests/online_update_stubs -Itools/tests/update_stubs -Itools/tests/ui_stubs -Imain "$@"
 }
