@@ -1,4 +1,5 @@
 # Exact reviewed public source paths; refresh and review explicitly when adding files.
+.github/RELEASING.md
 .github/release-legal.json
 .github/release-requirements.txt
 .github/release-source-files.txt

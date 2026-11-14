@@ -176,6 +176,56 @@ class ReleaseTests(unittest.TestCase):
             (root / "main/omitted.c").write_bytes(b"-----BEGIN " + b"PRIVATE KEY-----")
             with self.assertRaisesRegex(ValueError, "Private key/token"): bundle.source_snapshot(root, allowlist)
 
+    def test_relink_instructions_are_auxiliary_not_standalone(self):
+        for text in (bundle.RELINK_SCOPE, bundle.RELINK_INSTRUCTIONS.decode()):
+            self.assertIn("not a standalone complete relink kit", text)
+            self.assertIn("complete corresponding project source", text)
+            self.assertIn("pinned ESP-IDF", text)
+            self.assertIn("toolchain and public native release defaults", text)
+            self.assertIn("does not establish compliance with every LGPL", text)
+        instructions = bundle.RELINK_INSTRUCTIONS
+        self.assertIn(b"folio/.github/RELEASING.md", instructions)
+        self.assertIn(b"not a native sdkconfig input", instructions)
+        self.assertIn(b"External SDK libraries and toolchain runtimes are omitted", instructions)
+        self.assertNotIn(b"/Users/", instructions)
+        self.assertIsNone(bundle.PRIVATE.search(instructions))
+
+    def test_release_guide_is_required_and_packaged(self):
+        name = ".github/RELEASING.md"
+        self.assertIn(name, bundle.REQUIRED_SOURCE)
+        guide = (Path(__file__).resolve().parents[2] / name).read_bytes()
+        self.assertNotIn(b"/Users/", guide)
+        self.assertNotIn(b".local-secrets/", guide)
+        self.assertIsNone(bundle.PRIVATE.search(guide))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for filename in bundle.REQUIRED_SOURCE:
+                path = root / filename
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(guide if filename == name else b"MIT License fixture public source")
+            allowlist = root / "allowlist.txt"
+            allowlist.write_text("\n".join(sorted(bundle.REQUIRED_SOURCE)))
+            snapshot = bundle.source_snapshot(root, allowlist)
+            with tarfile.open(fileobj=io.BytesIO(bundle.archive_sources(snapshot)), mode="r:gz") as archive:
+                self.assertEqual(archive.extractfile("folio/" + name).read(), guide)
+            allowlist.write_text("\n".join(sorted(bundle.REQUIRED_SOURCE - {name})))
+            with self.assertRaisesRegex(ValueError, "Incomplete"):
+                bundle.source_snapshot(root, allowlist)
+
+    def test_release_guide_matches_pinned_build_and_signing_environments(self):
+        root = Path(__file__).resolve().parents[2]
+        guide = (root / ".github/RELEASING.md").read_text()
+        for token in (protocol.IDF_COMMIT, '"$IDF_PATH/install.sh" esp32s3',
+                      'mkdir -p "$FOLIO_BUILD_DIR/log"', 'SDKCONFIG_DEFAULTS=',
+                      '$FOLIO_SOURCE/sdkconfig.defaults;$FOLIO_SOURCE/.github/sdkconfig.release',
+                      'config["FOLIO_USB_DEBUG"] is False', '--no-ccache',
+                      'not a standalone complete relink kit', 'Prevent self-review',
+                      'FOLIO_SIGNING_KEY_PEM', 'GitHub Actions'):
+            self.assertIn(token, guide)
+        for workflow, environment in (("release.yml", "release-signing"), ("promote.yml", "release-stable")):
+            self.assertIn("environment: " + environment, (root / ".github/workflows" / workflow).read_text())
+            self.assertIn("`" + environment + "`", guide)
+
     def test_environment_protection_is_executable_gate(self):
         for record in ({}, {"protection_rules": []}, {"protection_rules": [{"type": "required_reviewers", "reviewers": ["maintainer"]}]}):
             with patch.object(transport, "gh", return_value=json.dumps(record)), self.assertRaises(ValueError):

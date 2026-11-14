@@ -26,7 +26,19 @@ REQUIRED_SOURCE = (ROOT_FILES - {".gitignore", "AGENTS.md"}) | {
     "keys/firmware-release-public.pem", "main/assets/fonts/NOTICE.txt", "main/assets/fonts/source-manifest.json",
     "main/assets/fonts/manifest.json", "licenses/NotoSerifSC-OFL.txt", "licenses/LGPL-3.0.txt", "licenses/GPL-3.0.txt",
     "tools/idf.sh", "tools/folio_release_version.cmake", ".github/sdkconfig.release", ".github/release-source-files.txt",
-    ".github/release-requirements.txt", ".github/release-legal.json", "tools/release_sdk_notices.json"}
+    ".github/release-requirements.txt", ".github/release-legal.json", ".github/RELEASING.md", "tools/release_sdk_notices.json"}
+RELINK_SCOPE = (
+    "Auxiliary archives, linker fragments, ELF and reference configuration only; not a standalone complete relink kit. "
+    "Rebuilding and replacing EPDiy requires the complete corresponding project source plus the pinned ESP-IDF, "
+    "recursive submodules, toolchain and public native release defaults. "
+    "Successful rebuilding does not establish compliance with every LGPL or other license obligation.\n")
+RELINK_INSTRUCTIONS = (RELINK_SCOPE +
+    "Follow folio/.github/RELEASING.md inside source.tar.gz. Replace/modify components/epdiy, then rebuild/relink "
+    "using the original source build scripts and sdkconfig.defaults plus .github/sdkconfig.release. "
+    "The JSON configuration here is reference output, not a native sdkconfig input. "
+    "External SDK libraries and toolchain runtimes are omitted; this auxiliary archive does not contain all required linker inputs. "
+    "Archives retain symbols and relocations; only debugging data was stripped. "
+    "The supported firmware profile disables secure boot; publisher OTA signatures are a separate policy.\n").encode()
 
 
 def safe_relative(name):
@@ -210,7 +222,7 @@ def prepare(root, build, output, version, sequence, commit):
     import release_licenses
     files.update(release_licenses.collect(root, description))
     files["source.tar.gz"] = archive_sources(snapshot)
-    # SDK source/license notices are pinned and the relink artifacts preserve LGPL replacement capability.
+    # Auxiliary evidence only; the supported replacement path rebuilds source with the pinned SDK/toolchain.
     relink = {}
     compiler = Path(description["c_compiler"])
     objcopy = compiler.with_name(compiler.name.removesuffix("gcc") + "objcopy")
@@ -226,7 +238,7 @@ def prepare(root, build, output, version, sequence, commit):
             relink[path.relative_to(build).as_posix()] = path.read_bytes()
     protocol.require(any(name.endswith(".a") for name in relink), "LGPL static relink archives missing")
     relink["sdkconfig.release.json"] = protocol.canonical(config)
-    relink["RELINK.txt"] = b"Rebuild the included corresponding source with pinned ESP-IDF and the provided release configuration. Replace/modify components/epdiy, then relink using the original source build scripts. Archives retain symbols and relocations; only debugging data was stripped. No secure-boot signing is required on the supported hardware.\n"
+    relink["RELINK.txt"] = RELINK_INSTRUCTIONS
     for raw in relink.values():
         protocol.require(b"/Users/" not in raw and not PRIVATE.search(raw), "Private host path/key found in relink materials; use compiler prefix maps")
     files["relink.tar.gz"] = archive_sources(relink)
@@ -246,7 +258,8 @@ def prepare(root, build, output, version, sequence, commit):
         "No default font resource write. Preserve NVS and storage 0x410000..0x90FFFF. OTA uses folio.bin only.\n"
         "Font installation is a separate licensed-resource operation requiring a complete storage backup and explicit permission.\n"
         "Source and licenses are included; ESP-IDF source/submodules must be fetched at the exact provenance commit. "
-        "relink.tar.gz includes static archives/linker files/ELF and release configuration for LGPL component replacement.\n"
+        "See the source archive's .github/RELEASING.md for the native source-rebuild/replacement procedure. "
+        "relink.tar.gz: " + RELINK_SCOPE +
         "A successful CI build is NOT hardware verification. Preview is not a stable acceptance record.\n").encode()
     write_new(output, files)
 
