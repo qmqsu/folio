@@ -192,7 +192,8 @@ const esp_partition_t* esp_partition_find_first(unsigned type, unsigned subtype,
 static void patch_candidate(void) { FILE* f = fopen(candidate, "r+b"); assert(f && fseek(f, 8192, SEEK_SET) == 0 && fputc(0xaa,f) != EOF && fclose(f) == 0); }
 esp_err_t esp_ota_begin(const esp_partition_t* p, size_t size, esp_ota_handle_t* handle) {
     assert(p == &target && size == image_size && !tls_live && storage_depth && !ota_live); ++begins; ota_live = true; ota_size = 0; *handle = 1;
-    if (mutate_begin) patch_candidate(); return ESP_OK;
+    if (mutate_begin) patch_candidate();
+    return ESP_OK;
 }
 esp_err_t esp_ota_write(esp_ota_handle_t handle, const void* bytes, size_t size) {
     assert(handle == 1 && bytes && ota_live && storage_depth && !tls_live); ++writes; ota_size += (uint32_t)size;
@@ -301,7 +302,8 @@ static void test_download_failures(void) {
     const char* signed_bad[]={"wrong-hash","signed-bad-chip-image","signed-wrong-version-image"};
     for(unsigned i=0;i<3;++i){
         setup(false); select_manifest(signed_bad[i]); check_good();
-        if(i==1)select_image("bad-chip.bin"); if(i==2)select_image("different.bin");
+        if(i==1)select_image("bad-chip.bin");
+        if(i==2)select_image("different.bin");
         assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED); assert(!begins && !boots);
     }
     setup(false); check_good(); cancel_read=true; assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_CANCELLED);
