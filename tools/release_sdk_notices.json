@@ -1,0 +1,990 @@
+{
+  "schema": 1,
+  "idf_commit": "fff9895c82d744c7237be8847347bdd1b07c6643",
+  "scope": "Fixed source-header spans and README notices; not a complete legal attribution audit. Descriptive-only source headers do not imply a license. Existing legal gates remain required.",
+  "source_scope_components": [
+    "wpa_supplicant",
+    "xtensa",
+    "sdmmc",
+    "fatfs"
+  ],
+  "sdk": [
+    {
+      "component": "esp_phy",
+      "path": "components/esp_phy/lib/LICENSE",
+      "lines": 202,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "component": "esp_phy",
+      "path": "components/esp_phy/lib/README.rst",
+      "lines": 10,
+      "sha256": "ba87dc777ff15fdf6b10d7a31035fae20c9a30ff0ab3e64a6d9e8cb4aa889382"
+    },
+    {
+      "component": "esp_system",
+      "path": "components/esp_system/ubsan.c",
+      "lines": 25,
+      "sha256": "2129f5aa2184656f084fbe304baca72ed43dc93bd213a70c6edb570bef683e45"
+    },
+    {
+      "component": "esp_wifi",
+      "path": "components/esp_wifi/lib/LICENSE",
+      "lines": 202,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "component": "esp_wifi",
+      "path": "components/esp_wifi/lib/README.rst",
+      "lines": 10,
+      "sha256": "022e8b5b4aef443c7284f09ad3b5f78db534b42c7d018bc19c274b8af01cf46e"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/diskio/diskio.c",
+      "lines": 9,
+      "sha256": "783659b8a317f6026e3bd6d858d00707ded43b390e8911e5b60bede4e467e6e2"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/diskio/diskio_bdl.c",
+      "lines": 5,
+      "sha256": "8cb33be26420419aa21538f114e4598886479b4556213bd4d94dfc8dafceec46"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/diskio/diskio_rawflash.c",
+      "lines": 5,
+      "sha256": "5b649eca17ae68aa41cbe5e4280f724f8dfdd1ed755f8b4c2e73f6ee290f2c54"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/diskio/diskio_sdmmc.c",
+      "lines": 5,
+      "sha256": "5b649eca17ae68aa41cbe5e4280f724f8dfdd1ed755f8b4c2e73f6ee290f2c54"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/diskio/diskio_wl.c",
+      "lines": 5,
+      "sha256": "5b649eca17ae68aa41cbe5e4280f724f8dfdd1ed755f8b4c2e73f6ee290f2c54"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/port/freertos/ffsystem.c",
+      "lines": 3,
+      "sha256": "74e18c5dda3430135a3d35ff6ec45a2cd2c41ad2aad5316dc4fb9b48f0fba54b"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/src/diskio.h",
+      "lines": 3,
+      "sha256": "b6d45ec72d5d2d61ede97af90d8d8dba9810d146bc87e6ab5bec436194f2bc6b"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/src/ff.c",
+      "lines": 19,
+      "sha256": "296abc7ad8f9eaf7a2dbd245323f2cde706208ff6b519192be709c843e1a65a9"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/src/ff.h",
+      "lines": 19,
+      "sha256": "ff4e257c9d2f04595617b312e8b784e63223dc1538fad14bc4221c984d58f3d4"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/src/ffunicode.c",
+      "lines": 23,
+      "sha256": "336c629370e0c36bc9822bd284a8a95ea3577304cd200e691a9ddf3196fdc3bb"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/vfs/vfs_fat.c",
+      "lines": 5,
+      "sha256": "9e84b68b6624c50dd65304b9199927541e0b732933f300f9a8d8e3671d373e5a"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/vfs/vfs_fat_bdl.c",
+      "lines": 5,
+      "sha256": "8cb33be26420419aa21538f114e4598886479b4556213bd4d94dfc8dafceec46"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/vfs/vfs_fat_sdmmc.c",
+      "lines": 5,
+      "sha256": "5b649eca17ae68aa41cbe5e4280f724f8dfdd1ed755f8b4c2e73f6ee290f2c54"
+    },
+    {
+      "component": "fatfs",
+      "path": "components/fatfs/vfs/vfs_fat_spiflash.c",
+      "lines": 5,
+      "sha256": "9e84b68b6624c50dd65304b9199927541e0b732933f300f9a8d8e3671d373e5a"
+    },
+    {
+      "component": "heap",
+      "path": "components/heap/tlsf/README.md",
+      "lines": 92,
+      "sha256": "968c3f0d60fb9ee8cc1047503823e75ccc28bf6e7e7b0451894b01c1e400d939"
+    },
+    {
+      "component": "heap",
+      "path": "components/heap/tlsf/include/tlsf.h",
+      "lines": 5,
+      "sha256": "07dce9c632a797a49e33686cd4165522f8d7fa229b4c3285b74c24282d83ed96"
+    },
+    {
+      "component": "heap",
+      "path": "components/heap/tlsf/tlsf.c",
+      "lines": 5,
+      "sha256": "07dce9c632a797a49e33686cd4165522f8d7fa229b4c3285b74c24282d83ed96"
+    },
+    {
+      "component": "heap",
+      "path": "components/heap/tlsf/tlsf_block_functions.h",
+      "lines": 5,
+      "sha256": "4e39c615e48a0a7dc684226b3eea21b4109ab5b7a0d00642d4acbfaa1c7047b4"
+    },
+    {
+      "component": "heap",
+      "path": "components/heap/tlsf/tlsf_control_functions.h",
+      "lines": 5,
+      "sha256": "afcd759fe015e30a91770d459a09894d7a0747ca307adb55b35454f30fff98bb"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/include/esp_private/sdmmc_common.h",
+      "lines": 16,
+      "sha256": "de73fa325ac15f22ab2046df659f47eb58636fb8bd43041126582c192d384a02"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/include/sd_protocol_defs.h",
+      "lines": 22,
+      "sha256": "b4a1cd639ee574c9f91b345034a5adbf1245fb4a8ff9f54a5acafce442497757"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/include/sd_protocol_types.h",
+      "lines": 22,
+      "sha256": "0b98e959b481766b934171a0ba9f2fd922da2a64262265eeb3befad104679943"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sd_pwr_ctrl/sd_pwr_ctrl.c",
+      "lines": 5,
+      "sha256": "8a72184ffac513f9eba3ccbf53f28ab9ca855c790b50436427f24421e6cfbfc3"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sdmmc_blockdev.c",
+      "lines": 5,
+      "sha256": "b91edce9de5fa658e7f7598a5aec2e32a81469542eca340e47149cea90804b3a"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sdmmc_cmd.c",
+      "lines": 5,
+      "sha256": "9e84b68b6624c50dd65304b9199927541e0b732933f300f9a8d8e3671d373e5a"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sdmmc_common.c",
+      "lines": 16,
+      "sha256": "de73fa325ac15f22ab2046df659f47eb58636fb8bd43041126582c192d384a02"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sdmmc_init.c",
+      "lines": 16,
+      "sha256": "de73fa325ac15f22ab2046df659f47eb58636fb8bd43041126582c192d384a02"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sdmmc_io.c",
+      "lines": 16,
+      "sha256": "de73fa325ac15f22ab2046df659f47eb58636fb8bd43041126582c192d384a02"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sdmmc_mmc.c",
+      "lines": 16,
+      "sha256": "de73fa325ac15f22ab2046df659f47eb58636fb8bd43041126582c192d384a02"
+    },
+    {
+      "component": "sdmmc",
+      "path": "components/sdmmc/sdmmc_sd.c",
+      "lines": 16,
+      "sha256": "de73fa325ac15f22ab2046df659f47eb58636fb8bd43041126582c192d384a02"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/COPYING",
+      "lines": 22,
+      "sha256": "a87ac4e333d0f120408a9d814e40c3672cd27f365af89b4f2f6631f7a9338953"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/README",
+      "lines": 41,
+      "sha256": "17ccbcf4b17a910795292fb4a95f4742d2ecda37d06fcf20d60ffbd70cfbc609"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/crypto/crypto_mbedtls-bignum.c",
+      "lines": 5,
+      "sha256": "9e84b68b6624c50dd65304b9199927541e0b732933f300f9a8d8e3671d373e5a"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/crypto/crypto_mbedtls-ec.c",
+      "lines": 5,
+      "sha256": "9e84b68b6624c50dd65304b9199927541e0b732933f300f9a8d8e3671d373e5a"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/crypto/crypto_mbedtls-rsa.c",
+      "lines": 5,
+      "sha256": "9e84b68b6624c50dd65304b9199927541e0b732933f300f9a8d8e3671d373e5a"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/crypto/crypto_mbedtls.c",
+      "lines": 5,
+      "sha256": "7904f49ebe36f1127dfd7f324c0231495f5ca60c403ebf23f3658efaf27efc30"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/crypto/fastpsk.c",
+      "lines": 57,
+      "sha256": "5db85a66b6210797a2b4faa576478867877523e7956921acbc1cf413ca88db1c"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/crypto/tls_mbedtls.c",
+      "lines": 5,
+      "sha256": "7904f49ebe36f1127dfd7f324c0231495f5ca60c403ebf23f3658efaf27efc30"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_common.c",
+      "lines": 5,
+      "sha256": "d58f3b2115edcb9829dcd8c7bd4a83b9eb0299f5f073d416ae6e5f86eb3926b0"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_eap_client.c",
+      "lines": 5,
+      "sha256": "d3a4c009ce031c92374b49542bb04626b2902de2f4dfcd0d11107339c5f9d685"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_hostap.c",
+      "lines": 5,
+      "sha256": "d3a4c009ce031c92374b49542bb04626b2902de2f4dfcd0d11107339c5f9d685"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_nan_supplicant.c",
+      "lines": 7,
+      "sha256": "4c25de8d017f8fcbffe4a6353b7e30bf9f9b47d4ccf2e57f36ca9b6dbc1be800"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_owe.c",
+      "lines": 5,
+      "sha256": "7904f49ebe36f1127dfd7f324c0231495f5ca60c403ebf23f3658efaf27efc30"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_wpa2_api_port.c",
+      "lines": 5,
+      "sha256": "c68d802b3df7fb7d123f194b5a46d0d2bb0e14bdf6599a044a452e7fd2e4e857"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_wpa3.c",
+      "lines": 5,
+      "sha256": "583218cc7348bba9aa96e80eb6e83ec5beb326b31b08f595ea75a6053fb777f1"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_wpa_main.c",
+      "lines": 5,
+      "sha256": "d3a4c009ce031c92374b49542bb04626b2902de2f4dfcd0d11107339c5f9d685"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_wpas_glue.c",
+      "lines": 5,
+      "sha256": "583218cc7348bba9aa96e80eb6e83ec5beb326b31b08f595ea75a6053fb777f1"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/esp_supplicant/src/esp_wps.c",
+      "lines": 17,
+      "sha256": "73d13669421bbab9be1e178736dc355c60c09cc6e115ed97a952b475d83dbcaa"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/port/eloop.c",
+      "lines": 12,
+      "sha256": "a4024aaac475a5b1214803fc8ef9617a2294326093e530eafe6d9440344e4a70"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/port/os_xtensa.c",
+      "lines": 23,
+      "sha256": "0d929bc54fee9cab61a03e7004c08196e8bd40b10b32de440323c038d427457b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/ap_config.c",
+      "lines": 7,
+      "sha256": "c00042e8765dcc2a23d5e8109689f5627ffd33def554d6b86453e308a0b6a3cd"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/comeback_token.c",
+      "lines": 7,
+      "sha256": "55d57ca0cf9b702d9b758b36de8403f12f655cb44e025a14d9b6343b6031bccf"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/ieee802_11.c",
+      "lines": 7,
+      "sha256": "3360dee0120c7c51ee4fcbaa1893c58c62491f06670a368526859c9b6a4ecf4b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/ieee802_1x.c",
+      "lines": 7,
+      "sha256": "4f8123b138bc860ccbc4ab2f3a64b2602e658146035917935b5daea2d8680701"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/pmksa_cache_auth.c",
+      "lines": 7,
+      "sha256": "40225cb7551030b20054ce66eafefabe3851acb41564970b3945f75f70a2b2d7"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/sta_info.c",
+      "lines": 7,
+      "sha256": "6a361a1b93f6806064bec4155050ad732d400f256848fd5f4c6d380e16689190"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/wpa_auth.c",
+      "lines": 7,
+      "sha256": "c7dbcec12fe3251765d05264453c82776e02778f4c557c28ee4065972ee8289e"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/ap/wpa_auth_ie.c",
+      "lines": 7,
+      "sha256": "8424eb7a9b39a99d947126c589be028c105e12a43b79a74520fa1f1ef24d5a9c"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/common/dragonfly.c",
+      "lines": 8,
+      "sha256": "2d91f1675af1c45999516a9f45ccde8f846e75c82650956f1066d753c32ba235"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/common/ieee802_11_common.c",
+      "lines": 7,
+      "sha256": "788bc80e7dc453c1a76c8ffbf64c6e7769a66d0b7b5dfa86b6c93cba17322bad"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/common/sae.c",
+      "lines": 7,
+      "sha256": "5f0a42da89010e7fc60acc7e8ecaa4e538a5046261dcf354fc9d269aa91dcd30"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/common/sae_pk.c",
+      "lines": 7,
+      "sha256": "0614a240286072d03be9cbf40950e9f03cd383020083a1c067467253f3b84ec4"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/common/wpa_common.c",
+      "lines": 7,
+      "sha256": "c6ae14d0b83c26f651dcaf1242980d011fc488b147cfc46ef044d736f0fc1ab6"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/aes-ccm.c",
+      "lines": 8,
+      "sha256": "d0afb2d69d39abb1ac7a4c75314dbc16528aa2358c14740c65fa08b82371a09e"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/aes-gcm.c",
+      "lines": 8,
+      "sha256": "9e7fb35411bd1059fd2c68adcf56117180084187a7348c47f9024557b88553bd"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/aes-siv.c",
+      "lines": 7,
+      "sha256": "c8853650b73558eb9b3b3a9c85dbe10e3332cedd5c7424c0d517e43f5dff7f1b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/aes-unwrap.c",
+      "lines": 8,
+      "sha256": "1a813cbbf0833d5186ad21aaa3ed130a0f75338a88effe6b858c5ebd5358105b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/aes-wrap.c",
+      "lines": 8,
+      "sha256": "5ae0b83c89bae8136161c0bd9312b8d3f223ef7aea8f59cc8c055aaa6078d7ea"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/ccmp.c",
+      "lines": 7,
+      "sha256": "1afdf6b92595dd8af1194309041c20a517aec5f74a260cc7f5faae738e46d8f7"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/crypto_ops.c",
+      "lines": 5,
+      "sha256": "8be51682fb2bd4252353d136213f81c153a5658ecddefb68f0bc84bfa9a8a249"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/des-internal.c",
+      "lines": 9,
+      "sha256": "d3e499e5255fe78f6facdf34fbe5103c4dce262048c0aae89b17984d91f76266"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/dh_group5.c",
+      "lines": 7,
+      "sha256": "ebc75807b86786a5db65e3aa40b5842c80e7069e61db557ad3d11791c345f91c"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/dh_groups.c",
+      "lines": 7,
+      "sha256": "d15ceda89100bad0ce6c4b0f9ef975a3d9d9cca227853d6f5312a44ae2a4fe44"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/md4-internal.c",
+      "lines": 64,
+      "sha256": "f624df929a1d054d73ddf4fb173a42856a0f4b8b7580186c09b760eba4b165c6"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/ms_funcs.c",
+      "lines": 7,
+      "sha256": "e4acd9c379068bbb9b94d62dff15219b5c218d27966e75308fb2ff98b071f1e8"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/rc4.c",
+      "lines": 7,
+      "sha256": "76eaea673ca6c3179052a9af95a6b1510994e93fe6b8d669ab2cbfc34c73ff6b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha1-prf.c",
+      "lines": 7,
+      "sha256": "32919efba6f12c1e2ca7b1626959bf7227aba8f715d078a16db84c7c30778abf"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha1-tlsprf.c",
+      "lines": 7,
+      "sha256": "9c88aa0fac0bd8f2304ea6357bbc7699a401afea35fb994bf7487efb1aa62fcf"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha1-tprf.c",
+      "lines": 7,
+      "sha256": "251d6b71fc61d0d09bf46add5fc78c7ed2d36428613c5fca8b0ebe614b9fe565"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha256-kdf.c",
+      "lines": 7,
+      "sha256": "73db5088a58ecc6cac193b7e08f294781a75a3e308414600c0393c674580bf6c"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha256-prf.c",
+      "lines": 7,
+      "sha256": "3abfa5cdab184dc4d3bcdaaf8e5a6eef3d5860d5fb5699d59633bd7e424aa9be"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha256-tlsprf.c",
+      "lines": 7,
+      "sha256": "7f681d17d814ed31dc4dd56427c622eebcc376d2000596bb008781a782a3f6cc"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha384-prf.c",
+      "lines": 7,
+      "sha256": "7f2b50a543391c8283ce4ac7a9843d4b01e43f99ff907e75f38aeb426d6b9c0a"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/crypto/sha384-tlsprf.c",
+      "lines": 7,
+      "sha256": "c57016781180b3bf787f1052a99dd90f5f79f52ee762aa212cb858dc3dee9c1b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_common/eap_wsc_common.c",
+      "lines": 7,
+      "sha256": "58f82bad208db4f027cebf2a2bb0b31399c69e403dca3f736bbd1c5228f0d54c"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/chap.c",
+      "lines": 4,
+      "sha256": "50e7b1fe9885b13e4759cb5beb56805be2738673ef76e63fdb051a3dea47a318"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap.c",
+      "lines": 16,
+      "sha256": "7f9bdadaa90bca004c518ad4974f2845c101a571dceeb5af874d204f2a23b959"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_common.c",
+      "lines": 7,
+      "sha256": "937a8692d1df6e04af067f5a3a8a2cf84e698a3b7f7af33738eafd6957a3d691"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_fast.c",
+      "lines": 7,
+      "sha256": "9b4e647dcfb8dea9328efceb5880c65afd58f0e57eb42df064c74cb28199c9cc"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_fast_common.c",
+      "lines": 7,
+      "sha256": "df240a815a008cf14747f5f2186744106d82d2ea4fc8def4991b4d4c47bd67bd"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_fast_pac.c",
+      "lines": 7,
+      "sha256": "c0b596a9d5bc8e865b82802b132c9539d870d4b2d75e57cec6c994340f34285a"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_mschapv2.c",
+      "lines": 7,
+      "sha256": "e2dc29492f2f5cec85e560336022323f5cd24426664cba637f12a4ff2e850f21"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_peap.c",
+      "lines": 7,
+      "sha256": "71ae51c963630eb8b329540d98ccd605c5095a89c1bc642a29719e44495dc7e3"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_peap_common.c",
+      "lines": 7,
+      "sha256": "604e2cad3dfc2fb6843ca2d7f16a8d801cf4c269fbd9a3bd28d6386c5a8928a6"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_tls.c",
+      "lines": 7,
+      "sha256": "f960135a9cd58d7ff43265fe859b1305449d3c439b31843b696ec73057752b2b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_tls_common.c",
+      "lines": 7,
+      "sha256": "8925423f5bd795bf4cc1462798b5acc1028d5e30efbc6467f1548e0fe08dcb9f"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/eap_ttls.c",
+      "lines": 7,
+      "sha256": "356037ca6651c3e6d87ab959a4d759214d8ce693ae43c4de88ef43ce8e954ba1"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/eap_peer/mschapv2.c",
+      "lines": 3,
+      "sha256": "83a961a34e1dc461071735b62313353ef5e9fbdf23045719bc89ad7554c16a5c"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/rsn_supp/pmksa_cache.c",
+      "lines": 7,
+      "sha256": "e2bafbf4859d312f956726598994b7c7d6651ecdbe3f63144bcd8b5e8ba61d35"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/rsn_supp/wpa.c",
+      "lines": 13,
+      "sha256": "752915627d172e8c239f038b11d7991f6629d444938ef93b7907df6d339b06c5"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/rsn_supp/wpa_ie.c",
+      "lines": 13,
+      "sha256": "e098cbdcf0c8a075a3d000cc5f20addef3aa718254d0fa37915896a651f89dd8"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/base64.c",
+      "lines": 7,
+      "sha256": "5a22e6eb25a355da9e5d3abf702681a4180f2f1f37182b7285895f25591f6324"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/bitfield.c",
+      "lines": 7,
+      "sha256": "e759fa3b7b09337f0ff9a4341d2bb4c3d4bcfeb3a66b1e839cd7eeeee3f8081a"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/common.c",
+      "lines": 7,
+      "sha256": "fe3220a1081880d9b8c0e668616dd43cd5f488227fff610066f78f6870dbfe69"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/ext_password.c",
+      "lines": 7,
+      "sha256": "f4a1ffff105d99c62ec20b48aacd2fd053e8ccf321bbdd99b153a5f6189a81e5"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/json.c",
+      "lines": 7,
+      "sha256": "6b2da37555f74f42705deea8fd407440c024e8303e0e93e2497ae16ab3c21128"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/uuid.c",
+      "lines": 7,
+      "sha256": "260b2cec2c4206be836fd83e5d50d7b45befc93688fb622a6467f7907de15d20"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/wpa_debug.c",
+      "lines": 7,
+      "sha256": "9e1da9c793e3dec8714c8814e4bedb296a1c8c56578d34155c1fdabf83ea2e6a"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/utils/wpabuf.c",
+      "lines": 13,
+      "sha256": "c6142e25c93ca08b1b5aa1dbd7754d3cefbb69aacf10885788d856fa73f0dfa0"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/wps/wps.c",
+      "lines": 7,
+      "sha256": "746b1003c9d583f3359bbd5041cc82cf494d3375315bb44c796b40ab9a0cd37b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/wps/wps_attr_build.c",
+      "lines": 7,
+      "sha256": "6cd4dcdc19cc7af530b03b323604f4b17beddc11dee330461cbd7f79c5dee600"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/wps/wps_attr_parse.c",
+      "lines": 7,
+      "sha256": "78ca1f7b070976b738f677f57e7a9e2e11e5a728a10247733a9617a7963fbe0c"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/wps/wps_attr_process.c",
+      "lines": 7,
+      "sha256": "ce072eb5147cdc4bad4c63f469228bd9bef7d95d0ee753b54abcde251082e8b5"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/wps/wps_common.c",
+      "lines": 7,
+      "sha256": "cc1e1a10de62c89301d499a82c463ee02129005ca4a5d0e0727e286e81caf33b"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/wps/wps_dev_attr.c",
+      "lines": 7,
+      "sha256": "a4cd479944ac2947d9209dc5060f15e24529f12b6c59ae42a581b241fd9f7c79"
+    },
+    {
+      "component": "wpa_supplicant",
+      "path": "components/wpa_supplicant/src/wps/wps_enrollee.c",
+      "lines": 7,
+      "sha256": "f404f0f9c0e566905e71b32d0e9ec5ede0aa86bd8463ce55fabc5a6909ae5d24"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/eri.c",
+      "lines": 5,
+      "sha256": "49f1eb5f212ca6baf2d4275cf0535126ce5182ddb8a8e29987fe7faa49cf163b"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/core-isa.h",
+      "lines": 29,
+      "sha256": "c9a2d4dec8cd40af14e750a65994cccbf1b36d804a3c7e4883d05155ce559140"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/core-matmap.h",
+      "lines": 44,
+      "sha256": "5fbdbf9a55c447bbc139af5ca6e44f5322b45f39ae877218b83f869e19fbb843"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/core.h",
+      "lines": 33,
+      "sha256": "12acd2d4f902039754e8033908b21b8c58845fbce1c90d0145a6ef342affd94f"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/defs.h",
+      "lines": 26,
+      "sha256": "4c57b8a3bb71b967db75a9989f7e5a5c423ddb21c851719ef8262277811c40b8"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/specreg.h",
+      "lines": 26,
+      "sha256": "43701d8af806bb9659d90c81f200736559c2f17b52c954cbaca98ae7880e847c"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/system.h",
+      "lines": 32,
+      "sha256": "8afe0a5802ebfbd7468975d1ca6c31b9ed5ba77084115c3c898fd2d7e7c3efa1"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/tie-asm.h",
+      "lines": 30,
+      "sha256": "faff7ff0762c0a6c8b755477a48315f45cf1e303ec79133b48f1b88282d974c7"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/tie.h",
+      "lines": 30,
+      "sha256": "74ce6d411eac4d8af870c6b3af2cdefae90239233cc357e131c3ef1c5bad4349"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/esp32s3/include/xtensa/config/xt_specreg.h",
+      "lines": 33,
+      "sha256": "9c4f8452d8c95861d0a5ec46dc81e627d7923034f8a6b7073d6e0be3169bf827"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/cacheasm.h",
+      "lines": 30,
+      "sha256": "34e0f7f7aea1dc37556462e10d778d910c4fe9ea75ff94274b6747440e38a9b5"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/cacheattrasm.h",
+      "lines": 30,
+      "sha256": "a6ded00e36be5871d528189a6e24471ca41e6c9a6909eb1c7d20cd370b44cd63"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/core-macros.h",
+      "lines": 27,
+      "sha256": "72283f61a30cf8db227eb3335325e7eaf7935876e58d34b42b6f8741291cb150"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/coreasm.h",
+      "lines": 39,
+      "sha256": "341bc60d67ac9df618db09c12a0224c49814687c9989f98599c7802a411af73e"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/corebits.h",
+      "lines": 31,
+      "sha256": "e23ef60817852a2b19382d3ab286060cdf404dabe817a57753939fb212f24716"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/hal.h",
+      "lines": 37,
+      "sha256": "082caa3b03b0563e4e419897fa5f9edb0994b0004b209c6e3f88473569fe5e65"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/idmaasm.h",
+      "lines": 24,
+      "sha256": "9b916e5a6f092d86760b1e89ceb1ac5f868aef46560aa2c7e0cf65843ab3bf5e"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/mpuasm.h",
+      "lines": 24,
+      "sha256": "9b916e5a6f092d86760b1e89ceb1ac5f868aef46560aa2c7e0cf65843ab3bf5e"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/specreg.h",
+      "lines": 28,
+      "sha256": "75cd711abf967b795fb97709ceb1d5d490f28e0eb032b4bae944ede5ddce7a11"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/traxreg.h",
+      "lines": 22,
+      "sha256": "c0c24db3317e0b88b7ef5ea7c9f2c72c9f0fea9c9c1569a3a499477f122c4422"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xdm-regs.h",
+      "lines": 23,
+      "sha256": "9ebcb94b1fb75440d83f0472302d36fdf92e45f3f8b369b2995a675027589fb4"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xt_perf_consts.h",
+      "lines": 21,
+      "sha256": "7d7d51870b57db02ae4e5ae5879cf01a34914937d38f07c686f62049bbf0c0fa"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xt_specreg.h",
+      "lines": 35,
+      "sha256": "56399010a639e8129c87b56120c1e5eba77e2c0f93dc9b8e9f579660dda97b12"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xtensa-libdb-macros.h",
+      "lines": 26,
+      "sha256": "0b7acef268eadf90cac151164197531511d680e253290b5c1ff315b170ed19bc"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xtensa-versions.h",
+      "lines": 33,
+      "sha256": "b5ccd8ed5b50d708cebfd42c46a835019b86025d594f8182d13aa23692fce1b8"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xtensa-xer.h",
+      "lines": 29,
+      "sha256": "be249414bbc5a0c8cc29decfaf1ab2db2013c179e8d5f230413cac4fe60253c9"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xtruntime-core-state.h",
+      "lines": 25,
+      "sha256": "b14c33fa55c6ae34d6c8e5f85dc0bd01c6242a4aa3965c367cf15a9dfc321af2"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xtruntime-frames.h",
+      "lines": 25,
+      "sha256": "f7147d962692086a7e3dea7727e6f7ea8b354bdb9913aa909a38b6fc1e20edf3"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa/xtruntime.h",
+      "lines": 24,
+      "sha256": "9608504c086bc96751ac459a8cbb8b26ae4e28802c00f3e3bf298020f3f9b04a"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa_api.h",
+      "lines": 33,
+      "sha256": "38e6853f8517c85c6b9d4f21c0b3533c19711ec24d64095598b5fcc8b93a55b2"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa_config.h",
+      "lines": 38,
+      "sha256": "cc4f8d8b61fb5d8b27a242f82ad12261bd0475fd672ead02caf2e363a8574913"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa_context.h",
+      "lines": 42,
+      "sha256": "1e9ccb84fdf94d52a9dd3d12ff9ef87c4f5db2a7d4139a5da7f4c071e105cd20"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/include/xtensa_timer.h",
+      "lines": 45,
+      "sha256": "44f4f3efa7abb5567cd4203474b9154e8fc87bc9d67b376036fc9c61f1d3d76b"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/xt_trax.c",
+      "lines": 13,
+      "sha256": "a88cff1c08d0006960e208dd6194155efd60cb667a20e46d4972da703e394b66"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/xtensa_context.S",
+      "lines": 53,
+      "sha256": "117eb59e4b09640958bb4a2dcc2f3959077db7c54670bf63eb3053c5894e2c7e"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/xtensa_intr.c",
+      "lines": 28,
+      "sha256": "8601685a9fb4c78132336435cf203a8c9ca87e7d02fcd86a64f2d01cf258e5fd"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/xtensa_intr_asm.S",
+      "lines": 34,
+      "sha256": "09c0e495da7695e1aa86f3d40fd819eb8b02d071edc04686b8c7e646bbb0ba5a"
+    },
+    {
+      "component": "xtensa",
+      "path": "components/xtensa/xtensa_vectors.S",
+      "lines": 99,
+      "sha256": "e1fcdc92bcb0b17bde8183819286408273c5853d5928064392325ee3292775f0"
+    }
+  ],
+  "external": [
+    {
+      "component": "heap",
+      "name": "tlsf-BSD-3-Clause.txt",
+      "source_url": "https://raw.githubusercontent.com/espressif/tlsf/deff9ab509341f264addbd3c8ada533678591905/tlsf.h",
+      "source_sha256": "f7f73c48810ba60203095667c226e5a600a6ea0f69afba48efff6efbaa628d4f",
+      "start_line": 4,
+      "end_line": 39,
+      "sha256": "a56c3866a46f99654b0402c177e3baee91d3de58af65f996d77b350f729015a5",
+      "text": "/*\r\n** Two Level Segregated Fit memory allocator, version 3.1.\r\n** Written by Matthew Conte\r\n**\thttp://tlsf.baisoku.org\r\n**\r\n** Based on the original documentation by Miguel Masmano:\r\n**\thttp://www.gii.upv.es/tlsf/main/docs\r\n**\r\n** This implementation was written to the specification\r\n** of the document, therefore no GPL restrictions apply.\r\n** \r\n** Copyright (c) 2006-2016, Matthew Conte\r\n** All rights reserved.\r\n** \r\n** Redistribution and use in source and binary forms, with or without\r\n** modification, are permitted provided that the following conditions are met:\r\n**     * Redistributions of source code must retain the above copyright\r\n**       notice, this list of conditions and the following disclaimer.\r\n**     * Redistributions in binary form must reproduce the above copyright\r\n**       notice, this list of conditions and the following disclaimer in the\r\n**       documentation and/or other materials provided with the distribution.\r\n**     * Neither the name of the copyright holder nor the\r\n**       names of its contributors may be used to endorse or promote products\r\n**       derived from this software without specific prior written permission.\r\n** \r\n** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS \"AS IS\" AND\r\n** ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED\r\n** WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE\r\n** DISCLAIMED. IN NO EVENT SHALL MATTHEW CONTE BE LIABLE FOR ANY\r\n** DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES\r\n** (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;\r\n** LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND\r\n** ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT\r\n** (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS\r\n** SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.\r\n*/\r\n",
+      "sdk_submodule_path": "components/heap/tlsf",
+      "sdk_submodule_commit": "2867f6883a12920b1969ff9624c0ab0e4185c2ce",
+      "basis": "Fixed SDK TLSF submodule descends from deff9ab509341f264addbd3c8ada533678591905; commit 61bbda7f4ac344081ac4758a6138d6accad1ac67 later replaced its complete BSD-3-Clause header with SPDX. Original bytes including CRLF are preserved. Current SDK attribution headers including 2024 are also retained unchanged."
+    }
+  ],
+  "toolchain": {
+    "gcc/COPYING.RUNTIME": "9d6b43ce4d8de0c878bf16b54d8e7a10d9bd42b75178153e3af6a815bdc90f74",
+    "gcc/COPYING3": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903",
+    "newlib/COPYING.NEWLIB": "fcfb5ec69b6ab52676dcc4dab7cf4338c8000ef97812dadd35b8592a640a8419",
+    "picolibc/COPYING.picolibc": "1e427387b690483dad761268beb0f09a824ecba6132c4dfee78d1fb21a6e75b5",
+    "picolibc/COPYING.NEWLIB": "fcfb5ec69b6ab52676dcc4dab7cf4338c8000ef97812dadd35b8592a640a8419",
+    "picolibc/COPYING.GPL2": "231f7edcc7352d7734a96eef0b8030f77982678c516876fcb81e25b32d68564c"
+  }
+}

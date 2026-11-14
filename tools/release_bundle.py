@@ -26,7 +26,7 @@ REQUIRED_SOURCE = (ROOT_FILES - {".gitignore", "AGENTS.md"}) | {
     "keys/firmware-release-public.pem", "main/assets/fonts/NOTICE.txt", "main/assets/fonts/source-manifest.json",
     "main/assets/fonts/manifest.json", "licenses/NotoSerifSC-OFL.txt", "licenses/LGPL-3.0.txt", "licenses/GPL-3.0.txt",
     "tools/idf.sh", "tools/folio_release_version.cmake", ".github/sdkconfig.release", ".github/release-source-files.txt",
-    ".github/release-requirements.txt", ".github/release-legal.json"}
+    ".github/release-requirements.txt", ".github/release-legal.json", "tools/release_sdk_notices.json"}
 
 
 def safe_relative(name):

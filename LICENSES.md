@@ -22,7 +22,7 @@
 | GBK 映射表 | 本项目生成 | 由 Python 标准库 GBK codec 生成 | 生成脚本为 `tools/gen_gbk_table.py`；不打包第三方字库或编码器。 |
 | ZIP 解压 | ESP32-S3 ROM miniz，经 ESP-IDF `esp_rom` 声明调用 | 随芯片 ROM / SDK 提供 | 本项目实现 ZIP 与 EPUB 解析，未复制第三方固件阅读器；桌面回归以系统 zlib 替代 ROM 解压调用。 |
 | ESP-IDF | [Espressif ESP-IDF](https://github.com/espressif/esp-idf) | Apache-2.0（含单独许可组件） | 以实际链接组件及其文件声明为准。发行工具按实际 build_components 收集 SDK 许可、版权、子模块提交并生成 license-inventory；这不是完整 SPDX/SBOM 或法律合规保证。 |
-| 编译器运行时与 C 标准库 | ESP-IDF 固定工具清单指定的 Espressif GCC 15.2.0 / picolibc / newlib | GCC Runtime Library Exception 3.1 及各库原许可 | 发行附带实际工具链 share/licenses 中的原始声明，包括 GCC COPYING.RUNTIME / COPYING3 和 newlib COPYING.NEWLIB；不把编译器 GPL 误声明为整个自研应用的许可证。 |
+| 编译器运行时与 C 标准库 | ESP-IDF 固定工具清单指定的 Espressif GCC 15.2.0；本次配置实际使用 picolibc | GCC Runtime Library Exception 3.1 及各库原许可 | 实际配置为 `LIBC_PICOLIBC=true`、`LIBC_NEWLIB=false`。收集器按每次构建配置强制保留 GCC COPYING.RUNTIME / COPYING3，以及 picolibc 目录完整 COPYING.picolibc / COPYING.NEWLIB / COPYING.GPL2；若实际选择 newlib，则核对其 COPYING.NEWLIB。安装工具链的其它原始声明也保留，但不据此断言全部工具或库均链接进固件，不把编译器 GPL 误声明为整个自研应用的许可证。 |
 | 内置 Folio 宋体 | Google Fonts / Noto Serif SC | SIL Open Font License 1.1 | 字重 500（Medium）静态子集，修改后的字体更名为 Folio Songti；版权与许可保留，完整许可见 `licenses/NotoSerifSC-OFL.txt`。上游与输出 SHA-256 见 `main/assets/folio_builtin.json`，构建脚本 `tools/build_builtin_font.py`。 |
 | 内置 Folio Hei Regular 派生字体 | [Sarasa Gothic SC Regular v1.0.43](https://github.com/be5invis/Sarasa-Gothic/releases/tag/v1.0.43) | SIL Open Font License 1.1 | Renzhi Li、Inter、Adobe、Google原版权保留；裁剪／去hint及布局表／全语言主名改为Folio Hei，避开RFN `Source`；[完整许可](<main/assets/fonts/licenses/Sarasa-LICENSE.txt>)。 |
 | 内置 Folio Kai Regular 派生字体 | [LXGW WenKai Regular v1.530](https://github.com/lxgw/LxgwWenKai/releases/tag/v1.530) | SIL Open Font License 1.1 | LXGW及Klee作者原版权保留；修改版主名Folio Kai，避开霞鹜／霞鶩／落霞孤鹜／落霞孤鶩／LXGW，不套用仅网页字体沿用名的例外；[完整许可及额外许可](<main/assets/fonts/licenses/LXGW-WenKai-OFL.txt>)。 |
@@ -30,6 +30,8 @@
 | Folio Symbols Medium 微型回退 | 未改变的现有Folio Songti Medium，源自Google Noto Serif SC | SIL Open Font License 1.1 | 仅为圆体缺少的38码点及5个视觉校准字制作43码点子集；保留源轮廓／度量与Google版权，主名改为Folio Symbols；不是额外用户字体，不替换原宋体。[完整许可](<main/assets/fonts/licenses/NotoSerifSC-OFL.txt>)。 |
 | TF 卡外部字体 | 用户提供 | 由字体作者指定 | 不随固件分发；用户应保留字体授权文件。 |
 | 封面测试图片 | 本项目原创几何插图 | 测试素材 | 仅用于虚构测试书的预览与 PNG/JPEG 回归，不是用户书籍或下载的出版物封面，不嵌入固件。来源见 `tools/tests/fixtures/SOURCES.txt`。 |
+
+SDK 的补充声明由[固定路径／许可段映射](<tools/release_sdk_notices.json>)记录原始行段与 SHA-256；[收集器](<tools/release_licenses.py>)保留 wpa_supplicant README、Cadence/Tensilica、SD/MMC、UBSan、FatFs 源文件声明及 TLSF 祖先完整 BSD-3-Clause，不用单个根 Apache 文本替代。TLSF 原文来自固定子模块可追溯的 [deff9ab 祖先头文件](<https://github.com/espressif/tlsf/blob/deff9ab509341f264addbd3c8ada533678591905/tlsf.h>)，当前额外的 2024 Matthew Conte 声明也保留。WiFi 与 PHY 的固定 README/Object-form 授权随各自 LICENSE 收集；SDK 提到的 FreeBSD net80211 / Sam Leffler / Errno Consulting 完整声明与 WiFi blob 的精确对应仍待核实，不能推定 PHY 同样包含它。补充收集不代表固件法律核查已经通过。
 
 官方组件基线：`MindReset/read_pico_firmware`，提交 `6a247cc94420b85c650b32a6b2c063a360070eee`（2026-10-11）。每个拷入组件的 LICENSE 文件随源码保留；若后续增加组件，应在此表追加精确路径、版本和许可证。上游 EPDiy 子组件采用 LGPL-3.0-or-later，发布计划必须包含对应源码或可获取源码的方式。
 

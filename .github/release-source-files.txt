@@ -360,6 +360,7 @@ tools/release_ci.py
 tools/release_licenses.py
 tools/release_manifest.py
 tools/release_pages.py
+tools/release_sdk_notices.json
 tools/scenarios/reading.json
 tools/scenarios/smoke.json
 tools/tests/cover_integration_runner.c
@@ -473,6 +474,7 @@ tools/tests/test_power.c
 tools/tests/test_qr.swift
 tools/tests/test_reader.c
 tools/tests/test_release.py
+tools/tests/test_release_licenses.py
 tools/tests/test_remote_manifest.c
 tools/tests/test_sd_format.c
 tools/tests/test_sd_format.py
