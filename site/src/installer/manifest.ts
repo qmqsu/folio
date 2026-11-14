@@ -4,10 +4,10 @@ export const ORIGIN = 'https://qmqsu.github.io';
 export const FLASH_SIZE = 0x1000000;
 export const MAX_ENVELOPE_BYTES = 4096;
 export const LAYOUT = 'folio-16m-factory-storage-ota-v2';
-export const KEY_ID = 'folio-release-2026-2';
+export const KEY_ID = 'folio-release-2026-3';
 // Public trust anchor supplied by the release owner. Never fetch a key from a manifest.
-export const PUBLIC_KEY_HEX = '0467c1efb911dea6df8e1818491b54c2fc791acda21a968b6d25aa99833a46b58c52b1e3ba1dbc90263d0d3c0166b3b65416742f5af4fb1daa93e32bd199d774df';
-export const PUBLIC_KEY_SHA256 = '2e3d9f0853c515c0e650224ba68cd169baf50534ce638ea54b86826e8b763e6a';
+export const PUBLIC_KEY_HEX = '048cdecdea854ca7781c99b095a73e627a8ced1cd2336771829cf4a1deb9f785aae239be70af815d0faa295112d1d1c119d27f9e130b190aef8d83d99be1a96db7';
+export const PUBLIC_KEY_SHA256 = '46d906373e6ad72238432ccacab0a0d56de0c41a99a651dfb50257a718c6f928';
 export interface Part { readonly url: string; readonly offset: number; readonly size: number; readonly sha256: string }
 export interface Release {
   readonly schema: 1; readonly kind: 'usb'; readonly project: 'Folio'; readonly chip: 'esp32s3';

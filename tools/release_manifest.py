@@ -13,7 +13,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 
-KEY_ID = "folio-release-2026-2"
+KEY_ID = "folio-release-2026-3"
 BASE_URL = "https://qmqsu.github.io/folio"
 BASELINE = 8032000
 APP_LIMIT = 3 * 1024 * 1024

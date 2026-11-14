@@ -15,7 +15,7 @@ root.mkdir(parents=True, exist_ok=True)
 image_builder = runpy.run_path(str(Path(__file__).with_name('generate_update_fixtures.py')))['image']
 key = ec.derive_private_key(12345, ec.SECP256R1())
 public = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
-(root / 'test_release_key.h').write_text('#pragma once\n#include <stdint.h>\n#define FOLIO_RELEASE_KEY_ID "folio-release-2026-2"\nstatic const uint8_t folio_release_public_key[65] = {' + ','.join(hex(b) for b in public) + '};\n')
+(root / 'test_release_key.h').write_text('#pragma once\n#include <stdint.h>\n#define FOLIO_RELEASE_KEY_ID "folio-release-2026-3"\nstatic const uint8_t folio_release_public_key[65] = {' + ','.join(hex(b) for b in public) + '};\n')
 version = '0.8.32-dev.1'
 image = image_builder(version)
 (root / 'online.bin').write_bytes(image)
@@ -32,7 +32,7 @@ def envelope(payload, signer=key):
     if not isinstance(payload, bytes):
         payload = raw_json(payload)
     r, s = utils.decode_dss_signature(signer.sign(payload, ec.ECDSA(hashes.SHA256())))
-    return dict(key_id='folio-release-2026-2', payload=base64.b64encode(payload).decode(),
+    return dict(key_id='folio-release-2026-3', payload=base64.b64encode(payload).decode(),
                 signature=base64.b64encode(r.to_bytes(32, 'big') + s.to_bytes(32, 'big')).decode())
 def save(name, payload=None, *, env=None, raw=None, good=False):
     if raw is None:
