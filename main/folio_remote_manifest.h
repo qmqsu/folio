@@ -6,7 +6,7 @@
 
 #define FOLIO_REMOTE_MANIFEST_MAX 4096u
 #define FOLIO_REMOTE_ORIGIN "https://qmqsu.github.io/folio/"
-#define FOLIO_REMOTE_CDN_ORIGIN "https://gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/"
+#define FOLIO_REMOTE_CDN_ORIGIN "https://testingcf.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/"
 #define FOLIO_REMOTE_LAYOUT "folio-16m-factory-storage-ota-v2"
 #define FOLIO_REMOTE_HARDWARE "RDP-G01-W"
 

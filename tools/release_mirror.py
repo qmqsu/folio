@@ -17,7 +17,8 @@ from release_bundle import PRIVATE
 
 REPO = "qmqsu/folio"
 BRANCH = "folio-release-assets"
-PREFIX = f"https://gcore.jsdelivr.net/gh/{REPO}@{BRANCH}/"
+PREFIX = f"https://testingcf.jsdelivr.net/gh/{REPO}@{BRANCH}/"
+PURGE_PREFIX = f"https://purge.jsdelivr.net/gh/{REPO}@{BRANCH}/"
 ALLOWED = ("channels/", "firmware/", "acceptance/")
 
 
@@ -53,6 +54,13 @@ def download(url, limit=50 * 1024 * 1024):
     return raw
 
 
+def purge_channel(name, branch=BRANCH):
+    protocol.require(name.startswith("channels/"), "Only channel pointers need cache purging")
+    with urlopen(PURGE_PREFIX + name, timeout=30) as response:
+        result = json.loads(response.read(8192))
+    protocol.require(result.get("status") == "finished", "CDN channel purge failed: " + name)
+
+
 def publish(root, branch=BRANCH, downloader=download, retries=12):
     files = mirror_files(root)
     ref = f"refs/heads/{branch}"
@@ -75,6 +83,9 @@ def publish(root, branch=BRANCH, downloader=download, retries=12):
                                        "parents": [head]}))["sha"]
     gh("--method", "PATCH", f"repos/{REPO}/git/refs/heads/{branch}", "--input", "-",
        input_text=json.dumps({"sha": commit, "force": False}))
+    for name in files:
+        if name.startswith("channels/"):
+            purge_channel(name, branch)
     for name, expected in files.items():
         url = PREFIX + name
         for attempt in range(retries):

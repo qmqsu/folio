@@ -33,7 +33,7 @@ export ASTRO_TELEMETRY_DISABLED=1
 - 用户只使用稳定 USB 指针：`https://qmqsu.github.io/folio/channels/stable-usb.json`；preview 仅用于内部签名候选，不在网页或设备设置中提供选择。
 - 版本资源：`https://qmqsu.github.io/folio/firmware/<version>/*.bin`
 - **不放示例生产清单、不捏造版本、不内置测试密钥。** 用户点击检查后才请求公共清单。404 为“未发布”，网络或签名错误为“不可用”，连接/写入均禁用。
-- 国内主源不可达时，仅在网络传输失败（TypeError）后尝试备用 CDN `https://gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/`。只映射相同路径，禁止重定向；404、地址变化、超长、签名或 SHA 错误不切换。发布器在 Pages 验证成功后，将相同固件/清单写入该分支并逐文件校验。
+- 国内主源不可达时，仅在网络传输失败（TypeError）后尝试备用 CDN `https://testingcf.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/`。只映射相同路径，禁止重定向；404、地址变化、超长、签名或 SHA 错误不切换。发布器在 Pages 验证成功后，将相同固件/清单写入该分支并逐文件校验。
 - 发布流水线可将渠道指针和固件合并至 [静态产物](<dist/>) 后部署。本站不生成固件、生产密钥或签名。
 - 固定公钥 SEC1 SHA-256：`46d906373e6ad72238432ccacab0a0d56de0c41a99a651dfb50257a718c6f928`；key id：`folio-release-2026-3`。这是 lead 提供的生产**公钥**。
 

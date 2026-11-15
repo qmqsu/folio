@@ -1,7 +1,7 @@
 import { validatePartitionTable } from './partition';
 
 export const ORIGIN = 'https://qmqsu.github.io';
-export const MIRROR_ORIGIN = 'https://gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets';
+export const MIRROR_ORIGIN = 'https://testingcf.jsdelivr.net/gh/qmqsu/folio@folio-release-assets';
 export const FLASH_SIZE = 0x1000000;
 export const MAX_ENVELOPE_BYTES = 4096;
 export const LAYOUT = 'folio-16m-factory-storage-ota-v2';

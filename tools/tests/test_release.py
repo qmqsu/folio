@@ -353,12 +353,14 @@ class ReleaseTests(unittest.TestCase):
                     return {"sha": "d" * 40}
                 return {}
             downloads = []
+            purges = []
             def fake_download(url):
                 name = url.removeprefix(mirror.PREFIX)
                 downloads.append(url)
                 return expected[name]
-            with patch.object(mirror, "gh", fake_gh):
+            with patch.object(mirror, "gh", fake_gh), patch.object(mirror, "purge_channel", side_effect=lambda name, branch: purges.append(name)):
                 result = mirror.publish(root, downloader=fake_download, retries=1)
+            self.assertEqual(purges, ["channels/stable.json"])
             self.assertEqual(result, {"branch": "folio-release-assets", "files": 2, "verified": True})
             self.assertEqual(sorted(downloads), sorted(mirror.PREFIX + name for name in expected))
             patch_calls = [json.loads(body) for args, body in calls if "--method" in args and args[args.index("--method") + 1] == "PATCH"]

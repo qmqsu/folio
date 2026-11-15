@@ -111,7 +111,7 @@ describe('ECDSA envelope and strict USB contract', () => {
     const bytes = await fetchWithMirror(primary, 4096);
     expect(new TextDecoder().decode(bytes)).toBe(JSON.stringify(envelope));
     expect(calls).toEqual([primary, mirror]);
-    expect(mirror).toContain('gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/');
+    expect(mirror).toContain('testingcf.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/');
   });
   it('does not mirror an unpublished 404 or an arbitrary origin', async () => {
     const primary = 'https://qmqsu.github.io/folio/channels/stable-usb.json';
