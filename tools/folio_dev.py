@@ -5,13 +5,17 @@ Owns the USB serial port for one whole session, so logs keep flowing while
 commands run. Talks the @FOLIO debug protocol implemented by
 main/folio_debug.inc and reuses the framing helpers from tools/pico_usb.py.
 
-Commands never reset, flash, or touch the network on their own.
+Commands never reset or flash. Debug-only preview check, download and install
+require separate explicit preview-* commands; none advances automatically.
 
 Usage:
     python3 tools/folio_dev.py status
     python3 tools/folio_dev.py shot /tmp/home.png
     python3 tools/folio_dev.py tap 342 600
     python3 tools/folio_dev.py key 1
+    python3 tools/folio_dev.py preview-check
+    python3 tools/folio_dev.py preview-download
+    python3 tools/folio_dev.py preview-install
     python3 tools/folio_dev.py wait --view READING --timeout 8
     python3 tools/folio_dev.py scenario tools/scenarios/smoke.json
     python3 tools/folio_dev.py diff a.png b.png
@@ -184,6 +188,18 @@ class Device:
             raise ValueError('key must be 0..2')
         return self.command(f'KEY {index}')[1]
 
+    def preview_check(self):
+        """Start a debug-only signed manifest check; never download or install."""
+        return self.command('PREVIEW_CHECK')[1]
+
+    def preview_download(self):
+        """Explicitly download the checked preview candidate; never install."""
+        return self.command('PREVIEW_DOWNLOAD')[1]
+
+    def preview_install(self):
+        """Explicitly confirm installation of an already verified preview READY file."""
+        return self.command('PREVIEW_INSTALL')[1]
+
     def wait(self, predicate, timeout=10.0, interval=0.15):
         deadline = time.monotonic() + timeout
         last = None
@@ -339,6 +355,15 @@ def main():
     tap.add_argument('y', type=int)
     key = subs.add_parser('key')
     key.add_argument('index', type=int, choices=range(3))
+    subs.add_parser(
+        'preview-check',
+        help='debug builds only: from UPDATE, check preview without downloading or installing')
+    subs.add_parser(
+        'preview-download',
+        help='debug builds only: explicitly download a preview AVAILABLE candidate')
+    subs.add_parser(
+        'preview-install',
+        help='debug builds only: explicitly install a verified preview READY candidate')
     wait = subs.add_parser('wait')
     wait.add_argument('--view')
     wait.add_argument('--not-view')
@@ -369,6 +394,12 @@ def main():
             print(json.dumps(device.tap(args.x, args.y)))
         elif args.command == 'key':
             print(json.dumps(device.key(args.index)))
+        elif args.command == 'preview-check':
+            print(json.dumps(device.preview_check(), ensure_ascii=False))
+        elif args.command == 'preview-download':
+            print(json.dumps(device.preview_download(), ensure_ascii=False))
+        elif args.command == 'preview-install':
+            print(json.dumps(device.preview_install(), ensure_ascii=False))
         elif args.command == 'wait':
             status = device.wait(
                 lambda s: (args.view is None or s['view_name'] == args.view)

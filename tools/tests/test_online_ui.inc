@@ -18,7 +18,8 @@ static void online_mock_ready(void) {
     online_mock_finish(FOLIO_ONLINE_AVAILABLE,"已找到比当前版本更新的签名发布。");
     assert(!online_active() && !mock_network.running);
     unsigned stations=mock_https_station_calls,connects=mock_native_connect_calls;
-    tap_rect(done_rect());assert(s_online_wait==2 && !online_installs);
+    unsigned installs=online_installs;
+    tap_rect(done_rect());assert(s_online_wait==2 && online_installs==installs);
     assert(mock_https_station_calls==stations+1 && mock_native_connect_calls==connects);
     refresh_online();assert(mock_online.state==FOLIO_ONLINE_DOWNLOADING);
     mock_online.received=mock_online.total;
@@ -74,6 +75,83 @@ static void test_online_install_faults_isolated(void) {
         int status;assert(waitpid(pid,&status,0)==pid && WIFEXITED(status) && WEXITSTATUS(status)==0);
     }
 }
+static void online_debug_preview_command(void) {
+    debug_execute(&(folio_debug_command_t){.kind=DBG_PREVIEW_CHECK,.id=40});
+}
+static void online_debug_preview_download_command(void) {
+    debug_execute(&(folio_debug_command_t){.kind=DBG_PREVIEW_DOWNLOAD,.id=41});
+}
+static void online_debug_preview_install_command(void) {
+    debug_execute(&(folio_debug_command_t){.kind=DBG_PREVIEW_INSTALL,.id=42});
+}
+static void online_debug_preview_available(void) {
+    online_debug_preview_command();refresh_online();
+    assert(mock_online.busy && !strcmp(mock_online.channel,"preview"));
+    snprintf(mock_online.version,sizeof(mock_online.version),"0.8.33-preview-test");
+    online_mock_finish(FOLIO_ONLINE_AVAILABLE,"模拟 preview 签名清单有效。");
+    assert(!online_active() && !mock_network.running);
+}
+static void test_online_debug_preview(void) {
+    assert(s_view==VIEW_UPDATE && !online_active());
+    unsigned checks=online_checks,downloads=online_downloads,installs=online_installs;
+    unsigned restarts=restart_calls;
+    // Every preview command is internal to UPDATE and requires an idle online state.
+    s_view=VIEW_DEVICE;online_debug_preview_command();online_debug_preview_download_command();
+    online_debug_preview_install_command();
+    assert(online_checks==checks && online_downloads==downloads && online_installs==installs);
+    assert(!s_online_wait && !mock_network.running);
+    s_view=VIEW_UPDATE;online_debug_preview_download_command();online_debug_preview_install_command();
+    assert(online_downloads==downloads && online_installs==installs);
+    online_debug_preview_command();
+    assert(s_online_wait==ONLINE_ACTION_CHECK_PREVIEW && mock_network.running);
+    // Neither waiting nor a running worker permits another check/download/install.
+    online_debug_preview_command();online_debug_preview_download_command();online_debug_preview_install_command();
+    assert(online_checks==checks && online_downloads==downloads && online_installs==installs);
+    refresh_online();
+    assert(online_checks==checks+1 && mock_online.busy && !strcmp(mock_online.channel,"preview"));
+    online_debug_preview_download_command();online_debug_preview_install_command();
+    assert(online_downloads==downloads && online_installs==installs);
+    online_mock_finish(FOLIO_ONLINE_FAILED,"模拟 preview 签名检查失败。");
+    assert(!online_active() && !mock_network.running);
+    // Failure retains no preview preference: the ordinary UI action checks stable.
+    tap_rect(done_rect());assert(s_online_wait==ONLINE_ACTION_CHECK_STABLE);
+    refresh_online();assert(online_checks==checks+2 && !strcmp(mock_online.channel,"stable"));
+    online_mock_finish(FOLIO_ONLINE_NO_RELEASE,"stable 暂无发布。");
+    // AVAILABLE does not authorize installation or enable preview in the ordinary UI.
+    online_debug_preview_available();assert(online_checks==checks+3);
+    online_debug_preview_install_command();assert(online_installs==installs);
+    tap_rect(done_rect());assert(s_online_wait==ONLINE_ACTION_CHECK_STABLE);
+    assert(online_downloads==downloads && online_installs==installs);
+    refresh_online();assert(online_checks==checks+4 && !strcmp(mock_online.channel,"stable"));
+    online_mock_finish(FOLIO_ONLINE_NO_RELEASE,"stable 暂无发布。");
+    // Download is a separate explicit command. READY never installs automatically.
+    online_debug_preview_available();assert(online_checks==checks+5);
+    online_debug_preview_download_command();
+    assert(s_online_wait==ONLINE_ACTION_DOWNLOAD_PREVIEW && online_downloads==downloads);
+    online_debug_preview_install_command();assert(online_installs==installs);
+    refresh_online();assert(online_downloads==downloads+1 && mock_online.busy);
+    assert(mock_online.state==FOLIO_ONLINE_DOWNLOADING && !strcmp(mock_online.channel,"preview"));
+    online_mock_finish(FOLIO_ONLINE_READY,"模拟 preview 签名、SHA-256 与固件格式验证成功。");
+    assert(!online_active() && online_installs==installs && restart_calls==restarts);
+    // The normal UI cannot install a preview READY file; it starts a stable check instead.
+    tap_rect(done_rect());assert(s_online_wait==ONLINE_ACTION_CHECK_STABLE && online_installs==installs);
+    refresh_online();assert(online_checks==checks+6 && !strcmp(mock_online.channel,"stable"));
+    online_mock_finish(FOLIO_ONLINE_NO_RELEASE,"stable 暂无发布。");
+    online_debug_preview_available();online_debug_preview_download_command();refresh_online();
+    online_mock_finish(FOLIO_ONLINE_READY,"模拟 preview 下载验证成功。");
+    assert(online_checks==checks+7 && online_downloads==downloads+2 && online_installs==installs);
+    // Explicit install still passes through the existing fresh PMU and authorization checks.
+    mock_update_power_safe=false;online_debug_preview_install_command();
+    assert(online_installs==installs && !s_online_operation && !s_online_install_owned);
+    assert(s_font && s_activity && s_catalog && strstr(s_online_message,"20%"));
+    mock_update_power_safe=true;online_debug_preview_install_command();
+    assert(online_installs==installs+1 && s_online_operation && s_online_install_owned && mock_online.busy);
+    assert(!s_reader && !s_activity && !s_catalog && restart_calls==restarts);
+    online_mock_finish(FOLIO_ONLINE_CANCELLED,"模拟 preview 安装取消。");
+    assert(!online_active() && !s_online_install_owned && s_font && s_activity && s_catalog);
+    assert(restart_calls==restarts);
+    puts("Debug preview UI SIMULATION passed: separate check/download/install, AVAILABLE/READY gates, stable-only touch UI, power refusal, no automatic install/reboot");
+}
 static void test_online_update_ui(const char* directory,const char* font_path) {
     s_power_initialized=true;s_ui_task=xTaskGetCurrentTaskHandle();
     bool previous_credentials=mock_network.has_credentials;
@@ -116,6 +194,8 @@ static void test_online_update_ui(const char* directory,const char* font_path) {
     online_mock_finish(FOLIO_ONLINE_NO_RELEASE,"此通道尚无发布（HTTP 404），请稍后重试。");
     assert(!online_active() && !mock_network.running);
     save_pgm(directory,"196-online-no-release-ui-mock");
+    test_online_debug_preview();
+    checks=online_checks;downloads=online_downloads;installs=online_installs;
     const char* errors[]={"HTTPS 证书验证失败，请检查日期与时间。","设备时间无效，请先在日期与时间中校时。",
         "发布签名验证失败，未接受更新文件。","网络连接失败，请设置 Wi-Fi 后重试。"};
     for(unsigned i=0;i<4;++i) {

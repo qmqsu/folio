@@ -5,7 +5,12 @@
 #include <stdio.h>
 #include <string.h>
 
-typedef enum { DBG_STATUS, DBG_SCREEN, DBG_TAP, DBG_KEY, DBG_CANCEL } folio_debug_kind_t;
+typedef enum {
+    DBG_STATUS, DBG_SCREEN, DBG_TAP, DBG_KEY, DBG_CANCEL,
+#if defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
+    DBG_PREVIEW_CHECK, DBG_PREVIEW_DOWNLOAD, DBG_PREVIEW_INSTALL,
+#endif
+} folio_debug_kind_t;
 typedef struct { unsigned id; folio_debug_kind_t kind; int x,y; } folio_debug_command_t;
 static inline bool folio_debug_number(const char** cursor,unsigned limit,unsigned* value) {
     const char* p=*cursor;while(*p==' ' || *p=='\t')++p;
@@ -22,7 +27,7 @@ static inline bool folio_debug_parse(const char* line,folio_debug_command_t* out
     const char* p=line+7;unsigned id,x=0,y=0;
     if(!folio_debug_number(&p,1000000000u,&id))return false;
     while(*p==' ' || *p=='\t')++p;
-    char op[16];size_t len=0;
+    char op[24];size_t len=0;
     while(*p && *p!=' ' && *p!='\t'){if(len+1>=sizeof(op))return false;op[len++]=*p++;}op[len]=0;
     folio_debug_kind_t kind;
     if(!strcmp(op,"TAP")){kind=DBG_TAP;if(!folio_debug_number(&p,683,&x) || !folio_debug_number(&p,1215,&y))return false;}
@@ -30,6 +35,11 @@ static inline bool folio_debug_parse(const char* line,folio_debug_command_t* out
     else if(!strcmp(op,"STATUS"))kind=DBG_STATUS;
     else if(!strcmp(op,"SCREEN"))kind=DBG_SCREEN;
     else if(!strcmp(op,"CANCEL"))kind=DBG_CANCEL;
+#if defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
+    else if(!strcmp(op,"PREVIEW_CHECK"))kind=DBG_PREVIEW_CHECK;
+    else if(!strcmp(op,"PREVIEW_DOWNLOAD"))kind=DBG_PREVIEW_DOWNLOAD;
+    else if(!strcmp(op,"PREVIEW_INSTALL"))kind=DBG_PREVIEW_INSTALL;
+#endif
     else return false;
     while(*p==' ' || *p=='\t')++p;
     if(*p)return false;

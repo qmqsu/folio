@@ -1,4 +1,12 @@
 // Native online-update orchestration. No worker callback touches UI/PMU state.
+enum {
+    ONLINE_ACTION_CHECK_STABLE=1,
+    ONLINE_ACTION_DOWNLOAD=2,
+#if defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
+    ONLINE_ACTION_CHECK_PREVIEW=3,
+    ONLINE_ACTION_DOWNLOAD_PREVIEW=4,
+#endif
+};
 static bool online_active(void) {
     return s_online_wait || s_online_operation || s_online_install_owned ||
         s_online_network || s_online_leaving || folio_online_update_busy();
@@ -88,8 +96,18 @@ static void online_start_worker(unsigned action) {
     char error[192]={0};s_online_wait=0;s_online_message[0]=0;
     atomic_fetch_and(&s_online_safety,~(unsigned)(ONLINE_CANCEL|ONLINE_AUTH));
     online_publish_safety();
-    bool okay=action==1?folio_online_update_start_check("stable",error,sizeof(error)):
-        folio_online_update_start_download(error,sizeof(error));
+    // Channel selection is action-scoped: no failed preview can become the UI default.
+    bool okay=false;
+    if(action==ONLINE_ACTION_CHECK_STABLE)
+        okay=folio_online_update_start_check("stable",error,sizeof(error));
+#if defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
+    else if(action==ONLINE_ACTION_CHECK_PREVIEW)
+        okay=folio_online_update_start_check("preview",error,sizeof(error));
+    else if(action==ONLINE_ACTION_DOWNLOAD_PREVIEW)
+        okay=folio_online_update_start_download(error,sizeof(error));
+#endif
+    else if(action==ONLINE_ACTION_DOWNLOAD)
+        okay=folio_online_update_start_download(error,sizeof(error));
     s_online_operation=okay;
     if(!okay){online_error(error);}
     folio_online_update_get_snapshot(&s_online_snapshot);
@@ -207,11 +225,14 @@ static void online_tap(int x,int y) {
     if(hit((EpdRect){48,984,282,96},x,y)) {
         s_online_wifi_setup=true;enter_wifi_for(VIEW_UPDATE);return;
     }
-    if(hit((EpdRect){354,984,282,96},x,y)){online_connect(1);return;}
+    if(hit((EpdRect){354,984,282,96},x,y)){online_connect(ONLINE_ACTION_CHECK_STABLE);return;}
     if(!hit(done_rect(),x,y))return;
-    if(s_online_snapshot.state==FOLIO_ONLINE_READY) {
+    // A debug preview result is observational only; the user UI remains stable-only.
+    bool stable=!strcmp(s_online_snapshot.channel,"stable");
+    if(s_online_snapshot.state==FOLIO_ONLINE_READY && stable) {
         s_online_message[0]=0;s_online_confirm=true;show_view(VIEW_UPDATE,true);
-    } else online_connect(s_online_snapshot.state==FOLIO_ONLINE_AVAILABLE?2:1);
+    } else online_connect(s_online_snapshot.state==FOLIO_ONLINE_AVAILABLE && stable?
+        ONLINE_ACTION_DOWNLOAD:ONLINE_ACTION_CHECK_STABLE);
 }
 static void refresh_online(void) {
     if(!online_active())return;
@@ -320,8 +341,9 @@ static void draw_online_update(void) {
     } else {
         action((EpdRect){48,984,282,96},"Wi-Fi 设置",false);
         action((EpdRect){354,984,282,96},"重新检查",false);
-        const char* button=s_online_snapshot.state==FOLIO_ONLINE_READY?"安装此版本":
-            s_online_snapshot.state==FOLIO_ONLINE_AVAILABLE?"下载此版本":"检查更新";
+        bool stable=!strcmp(s_online_snapshot.channel,"stable");
+        const char* button=s_online_snapshot.state==FOLIO_ONLINE_READY && stable?"安装此版本":
+            s_online_snapshot.state==FOLIO_ONLINE_AVAILABLE && stable?"下载此版本":"检查更新";
         action(done_rect(),button,true);
     }
 }

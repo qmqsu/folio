@@ -255,6 +255,9 @@ static void expect_open(unsigned index, const char* url) {
 static void check_good(void) {
     char error[192]; assert(folio_online_update_start_check("preview", error, sizeof(error)));
     folio_online_snapshot_t s = wait_for(FOLIO_ONLINE_AVAILABLE); assert(s.sequence == 8032001 && !strcmp(s.version,"0.8.32-dev.1"));
+    // A checked candidate is not downloaded and cannot skip the explicit download state.
+    assert(!s.received && !s.candidate_path[0] && !begins && !boots);
+    assert(!folio_online_update_start_install(error, sizeof(error)) && !begins && !boots);
 }
 static void check_stable_good(void) {
     select_manifest("wrong-channel"); // Same valid signed release, with channel=stable.
@@ -264,6 +267,8 @@ static void check_stable_good(void) {
 static void download_good(void) {
     char error[192]; check_good(); assert(folio_online_update_start_download(error, sizeof(error)));
     folio_online_snapshot_t s = wait_for(FOLIO_ONLINE_READY); assert(s.received == image_size && s.total == image_size && s.candidate_path[0]);
+    // READY is only a verified staging state; installation still requires a separate call.
+    assert(!begins && !boots);
     snprintf(candidate,sizeof(candidate),"%s",s.candidate_path);
     assert(strstr(candidate,"/.folio/online-update/0.8.32-dev.1/"));
 }

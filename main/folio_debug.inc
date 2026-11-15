@@ -59,6 +59,35 @@ static void debug_execute(const folio_debug_command_t* c) {
     // Observation is not user activity: STATUS/SCREEN must not prevent idle lock.
     if(c->kind==DBG_STATUS){debug_status(c->id);return;}
     if(c->kind==DBG_CANCEL){debug_release();printf("@FOLIO %u OK\n",c->id);return;}
+    if(c->kind==DBG_PREVIEW_CHECK){
+        if(s_view!=VIEW_UPDATE){printf("@FOLIO %u ERROR preview_requires_update_view\n",c->id);return;}
+        if(online_active()){printf("@FOLIO %u ERROR online_busy\n",c->id);return;}
+        online_connect(ONLINE_ACTION_CHECK_PREVIEW);
+        s_last_activity=esp_timer_get_time();
+        printf("@FOLIO %u OK {\"channel\":\"preview\",\"check_only\":true}\n",c->id);return;
+    }
+    if(c->kind==DBG_PREVIEW_DOWNLOAD || c->kind==DBG_PREVIEW_INSTALL){
+        if(s_view!=VIEW_UPDATE){printf("@FOLIO %u ERROR preview_requires_update_view\n",c->id);return;}
+        if(online_active()){printf("@FOLIO %u ERROR online_busy\n",c->id);return;}
+        folio_online_snapshot_t snapshot;folio_online_update_get_snapshot(&snapshot);
+        bool preview=!strcmp(snapshot.channel,"preview");
+        if(c->kind==DBG_PREVIEW_DOWNLOAD){
+            if(!preview || snapshot.state!=FOLIO_ONLINE_AVAILABLE){
+                printf("@FOLIO %u ERROR preview_available_required\n",c->id);return;
+            }
+            online_connect(ONLINE_ACTION_DOWNLOAD_PREVIEW);
+            s_last_activity=esp_timer_get_time();
+            printf("@FOLIO %u OK {\"channel\":\"preview\",\"action\":\"download\"}\n",c->id);return;
+        }
+        if(!preview || snapshot.state!=FOLIO_ONLINE_READY){
+            printf("@FOLIO %u ERROR preview_ready_required\n",c->id);return;
+        }
+        // This explicit command is the second confirmation; online_install repeats every safety check.
+        s_online_confirm=true;online_install();
+        if(!s_online_operation){printf("@FOLIO %u ERROR preview_install_rejected\n",c->id);return;}
+        s_last_activity=esp_timer_get_time();
+        printf("@FOLIO %u OK {\"channel\":\"preview\",\"install_started\":true}\n",c->id);return;
+    }
     if(c->kind==DBG_SCREEN){
         if(s_debug_frame){printf("@FOLIO %u ERROR capture_busy\n",c->id);return;}
         folio_weread_status_t wr;folio_weread_get_status(&wr);

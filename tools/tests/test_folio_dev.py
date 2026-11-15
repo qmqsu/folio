@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure-mock Device.close regression; never opens or configures a serial port."""
+"""Pure-mock folio_dev regressions; never opens or configures a serial port."""
 from contextlib import ExitStack
 from pathlib import Path
 import sys
@@ -46,6 +46,22 @@ class DeviceCloseTests(unittest.TestCase):
 
     def test_flush_termios_error_still_closes_once(self):
         self.assert_close_once(termios.error(6, 'Device not configured'))
+
+    def test_preview_check_is_explicit_and_check_only(self):
+        device = folio_dev.Device.__new__(folio_dev.Device)
+        device.command = mock.Mock(return_value=(
+            'OK', {'channel': 'preview', 'check_only': True}))
+        self.assertEqual(
+            device.preview_check(), {'channel': 'preview', 'check_only': True})
+        device.command.assert_called_once_with('PREVIEW_CHECK')
+
+    def test_preview_download_and_install_are_separate_explicit_commands(self):
+        device = folio_dev.Device.__new__(folio_dev.Device)
+        device.command = mock.Mock(return_value=('OK', {}))
+        device.preview_download()
+        device.preview_install()
+        self.assertEqual(device.command.call_args_list, [
+            mock.call('PREVIEW_DOWNLOAD'), mock.call('PREVIEW_INSTALL')])
 
 
 if __name__ == '__main__':
