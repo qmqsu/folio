@@ -181,7 +181,6 @@ def prepare(root, build, output, version, sequence, commit):
         oid = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
         protocol.require(committed.get(name) == oid, "Source archive differs from exact tagged commit: " + name)
     legal = legal_review(snapshot.get(".github/release-legal.json", b"{}"))
-    files["legal-review.json"] = protocol.canonical(legal)
     description = protocol.load_json((build / "project_description.json").read_bytes())
     protocol.require(description.get("project_name") == "Folio" and description.get("target") == "esp32s3" and description.get("project_version") == version, "Build metadata identity/version mismatch")
     protocol.require(Path(description["project_path"]).resolve() == root, "Mixed build/source checkout")
@@ -198,6 +197,7 @@ def prepare(root, build, output, version, sequence, commit):
     protocol.require(set(images) == set(protocol.PARTS) and len(images) == len(flash["flash_files"]), "Unexpected default flash parts")
     protocol.require(flash["extra_esptool_args"].get("chip") == "esp32s3" and flash["flash_settings"].get("flash_size") == "16MB", "Flash metadata mismatch")
     files = {protocol.PARTS[offset]: path.read_bytes() for offset, path in images.items()}
+    files["legal-review.json"] = protocol.canonical(legal)
     protocol.require(protocol.app_descriptor(files["folio.bin"])["version"] == version, "App descriptor version mismatch")
     validate_esp_image(files["folio.bin"])
     validate_esp_image(files["bootloader.bin"])
