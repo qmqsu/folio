@@ -27,7 +27,17 @@ let lastStage = '';
 
 function guardActive(): boolean { return operation || pickerPending || installer?.connected === true; }
 function announce(message: string): void { status.textContent = message; }
+function updateWorkflowStage(): void {
+  const stage = installer?.stage;
+  const current = installer && (installer.stage === 'awaiting-confirmation' || operation || ['success', 'failed', 'cancelled'].includes(stage ?? '')) ? 3 : (element('backup-panel').hidden ? 1 : 2);
+  for (const [index, item] of [...document.querySelectorAll('.workbench-steps li')].entries()) {
+    item.classList.toggle('is-current', index + 1 === current);
+    if (index + 1 === current) item.setAttribute('aria-current', 'step');
+    else item.removeAttribute('aria-current');
+  }
+}
 function updateControls(): void {
+  updateWorkflowStage();
   const active = guardActive();
   channel.disabled = active || checking;
   reset.disabled = active;

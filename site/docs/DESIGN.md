@@ -1,23 +1,25 @@
 # 视觉与交互设计
 
-已调用 `ui-ux-pro-max`。先查询 `reading editorial monochrome minimal --design-system`，得到 Swiss Modernism / 栅格、留白和清晰层级；自动配色偏棕琥珀、推荐评价轮播不适合本项目，因此未照搬。进一步用 `minimal editorial monochrome --domain style` 命中 **Minimalism & Swiss Style**（黑白、高对比、功能优先）。用 `static client script accessibility --stack astro` 核对静态默认、无JS回退。未导入远程字体或GSAP。
+已调用 `ui-ux-pro-max`。本轮以 `firmware flashing tool minimalist editorial trustworthy --design-system` 得到 Minimalism / Swiss Style：高对比、栅格、留白和功能优先。结合第三方固件网站的真实截图，保留书香气质，但把安装页改为更直观的任务路径，而不是继续堆叠说明文字。
 
 ## 本项目选择
 
-- 白纸/墨色：paper `#f8f7f3`、ink `#22221f`、muted `#62625c`、浅灰分区。无彩色渐变、玻璃效果和装饰性动效。
-- 书刊结构：编号栏目、细分隔线、左文右图Hero、原生details折叠长风险说明。
-- 标题使用本机宋体/serif栈，英文Folio为Georgia；正文系统sans。完全没有运行时字体下载。
-- 原创HTML/CSS阅读器示意与原创短句；明确“非实机照片或硬件验收”。未使用任何真实书籍、设备截图、头像或个人姓名。
-- 首页按 关于 → 功能 → 安装 → 更新 → 帮助恢复 → 许可。Hero主按钮先到安装说明，不直接触发USB。
-- 功能边界：微信读书标“实验”，不宣传PDF/固定版式阅读，不把独立三字体当作默认安装。
-- 安装流程渐进披露：能力/签名 → 实物确认 → 备份 → 保存证据 → 授权 → 写入/回读。危险按钮原生disabled，不仅改变颜色。
-- 原生按钮、select、checkbox、summary；label明确，44px级操作区，3px键盘焦点和跳过导航链接；状态为单一`role=status / aria-live=polite / aria-atomic=true`。
-- 进度来自实际字节，250ms节流播报；无虚假计时百分比。下载100%不会触发成功。
-- 窄屏重排，不隐藏关键风险文本；支持 reduced-motion，允许缩放，没有自定义手势或轮播。
-- 只有浅色主题，明确 `color-scheme:light`，不声称测试了另一套深色视觉。
+- 暖纸背景 `#f5f3ed`、深海军蓝正文 `#182b3a`、可信绿行动色 `#0b6e63`。浅灰卡片和细分隔线，不使用渐变、玻璃拟态或装饰性动画。
+- Hero 采用“把时间，还给阅读”主文案、明确主次按钮和原创阅读器示意。标题使用本机宋体/serif 栈，正文系统 sans；没有运行时字体下载。
+- 首屏之后先展示四步流程：核对设备 → 验证发布 → 完整备份 → 写入回读。没有可信发布，不开放连接。
+- 安装区使用三步工作台：设备与发布 → 备份与授权 → 写入与校验。步骤随真实备份和写入状态更新，并设置 `aria-current="step"`。
+- 发布检查、实物确认、备份下载、用户授权、写入回读仍沿用原有全部安全约束；没有为了视觉简化而删除确认项、布局检查或私钥/备份保护。
+- 原生按钮、select、checkbox、summary 和 details。长风险说明折叠展示，不隐藏关键边界；禁用状态由原生 `disabled` 表达，不只靠颜色。
+- 正文采用 16px 系统字体和 4/8 间距节奏。`--muted` 对纸色背景对比度实测为 4.69:1，主行动色对白色为 6.13:1。
+- 1440 桌面双栏、窄屏单栏；手机不隐藏关键风险文本。支持键盘焦点、跳过导航、缩放和 `prefers-reduced-motion`。
+- 进度来自实际字节，250ms 节流播报；下载 100% 不自动等于成功。只有浅色主题，明确 `color-scheme:light`，不声称测试了深色模式。
 
 ## 已做检查
 
-真实Edge headless完成1440、1024、768、375、320与844×390视口，无横向溢出；键盘skip-link与焦点、无JS回退通过。人工查看桌面/手机Hero与未发布安装器截图，留白、排版和禁用态符合上述方向。浏览器网络状态是测试夹具，USB被明确禁用；不是硬件安装演示。
+- 84 项单元测试、TypeScript 检查和 Astro 构建通过。
+- 真实 Edge headless 覆盖 1440、1024、768、375、320 与 844×390 横屏，无横向溢出。
+- 键盘 skip-link 与可见焦点、无 JavaScript 回退、未发布与恶意签名拦截均通过。
+- 人工查看桌面/手机 Hero、安装工作台和长页面截图，检查留白、层级、禁用态与文案密度。
+- 浏览器网络状态为测试夹具，USB 明确禁用；这些检查不是硬件安装或真实签名发布验收。
 
-文件：[页面](<../src/pages/index.astro>) · [样式](<../src/styles/global.css>) · [浏览器测试](<../tests/browser.mjs>)。
+文件：[页面](<../src/pages/index.astro>) · [样式](<../src/styles/global.css>) · [安装交互](<../src/installer/ui.ts>) · [浏览器测试](<../tests/browser.mjs>)。
