@@ -348,20 +348,6 @@ static bool create_stage(char* error, size_t cap) {
     if (!opened && error && cap && !*error) error_text(error, cap, "无法创建独立更新暂存目录，旧文件保持不变。");
     unlock_card(); return opened;
 }
-// A transport retry reuses only this attempt's file. Truncate it under the
-// same short card lock so no primary-response prefix can survive the retry.
-static bool reset_stage(char* error, size_t cap) {
-    if (!lock_card(error, cap)) return false;
-    bool okay = folio_storage_validate_parent(s_work.path, error, cap);
-    int fd = okay ? open(s_work.path, O_WRONLY | O_TRUNC) : -1;
-    struct stat status;
-    if (fd < 0) okay = false;
-    if (okay) okay = fstat(fd, &status) == 0 && S_ISREG(status.st_mode) && status.st_size == 0;
-    if (fd >= 0 && close(fd) != 0) okay = false;
-    unlock_card();
-    if (!okay && error && cap && !*error) error_text(error, cap, "无法从头重置固件暂存文件，更新已停止。");
-    return okay;
-}
 // No descriptor escapes this short lock. Cancellation/lock-timeout cleanup
 // therefore never waits forever or accesses an unmounted volume to close it.
 static bool stage_write(const uint8_t* bytes, size_t count, uint32_t offset,
@@ -435,7 +421,9 @@ static folio_online_state_t download_image(char* error, size_t cap) {
         if (!retryable || use_mirror || !can_mirror || cancelled(NULL)) break;
         close_connection();
         if (cancelled(NULL)) break;
-        if (stage_exists && !reset_stage(error, cap)) break;
+        // Keep the old partial untouched. A retry gets a new unique attempt
+        // path, and only that new complete file can reach validation/install.
+        if (stage_exists && !create_stage(error, cap)) break;
         received = 0; progress(0, s_work.manifest.image.size);
         use_mirror = true;
         if (error && cap) *error = 0;

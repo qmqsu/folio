@@ -44,7 +44,7 @@ static unsigned storage_depth, locks, opens, closes, reads, begins, writes, abor
 static bool present_card = true, power_ok = true, connected = true, lock_fail, disk_full, sync_fail;
 static bool tls_live, complete_response = true, unknown_length, fail_open, fail_open_primary_once, fail_read, extra_byte;
 static bool fail_read_primary_once, incomplete_primary_once, server_error_primary_once, check_mirror_progress;
-static bool corrupt_primary_prefix, fail_reset_lock;
+static bool corrupt_primary_prefix, track_retry_paths;
 static bool cancel_open, cancel_read, cancel_write, cancel_end, lose_card, mutate_begin, shorten_body, close_cancel;
 static bool cancel_global, default_tls_checked, drop_power_write, drop_power_end;
 static time_t test_utc = 1800000000;
@@ -62,6 +62,9 @@ static unsigned char* image_bytes;
 static size_t image_size;
 static const char* fixtures;
 static char candidate[256];
+static char primary_stage_path[FOLIO_ONLINE_PATH_CAP], backup_stage_path[FOLIO_ONLINE_PATH_CAP];
+static unsigned char primary_partial[4096];
+static size_t primary_partial_size;
 static esp_partition_t running = {0x10000, 0x400000, ESP_PARTITION_TYPE_APP, 0};
 static esp_partition_t target = {0x920000, 0x300000, ESP_PARTITION_TYPE_APP, ESP_PARTITION_SUBTYPE_APP_OTA_MIN};
 static esp_partition_t metadata = {0x910000, 8192, ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_OTA};
@@ -110,6 +113,14 @@ bool folio_storage_validate_parent(const char* path, char* error, size_t cap) {
     assert(storage_depth && !strncmp(path, FOLIO_SD_ROOT, strlen(FOLIO_SD_ROOT)));
     struct stat st;
     if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode)) { snprintf(error, cap, "Unsafe staged file"); return false; }
+    if (track_retry_paths) {
+        if (!primary_stage_path[0]) snprintf(primary_stage_path, sizeof(primary_stage_path), "%s", path);
+        else if (!strcmp(primary_stage_path, path)) assert(!backup_stage_path[0]);
+        else {
+            if (!backup_stage_path[0]) snprintf(backup_stage_path, sizeof(backup_stage_path), "%s", path);
+            assert(!strcmp(backup_stage_path, path));
+        }
+    }
     return true;
 }
 ssize_t online_test_write(int fd, const void* bytes, size_t count) {
@@ -158,7 +169,14 @@ static int transport_read(void* ctx, uint8_t* bytes, size_t capacity) {
     if ((fail_read || (fail_read_primary_once && !response_mirror)) && response_offset) {
         if (!response_mirror) {
             fail_read_primary_once = false;
-            if (fail_reset_lock) { fail_reset_lock = false; lock_fail = true; }
+            if (track_retry_paths && response_image) {
+                assert(primary_stage_path[0] && !backup_stage_path[0]);
+                FILE* f = fopen(primary_stage_path, "rb"); assert(f && fseek(f, 0, SEEK_END) == 0);
+                long size = ftell(f); assert(size > 0 && (size_t)size <= sizeof(primary_partial));
+                assert(fseek(f, 0, SEEK_SET) == 0);
+                primary_partial_size = (size_t)size;
+                assert(fread(primary_partial, 1, primary_partial_size, f) == primary_partial_size && fclose(f) == 0);
+            }
         }
         return -1;
     }
@@ -265,7 +283,8 @@ static void setup(bool defaults) {
     present_card = power_ok = connected = complete_response = true;
     lock_fail = disk_full = sync_fail = unknown_length = fail_open = fail_open_primary_once = fail_read = extra_byte = false;
     fail_read_primary_once = incomplete_primary_once = server_error_primary_once = check_mirror_progress = false;
-    corrupt_primary_prefix = fail_reset_lock = false;
+    corrupt_primary_prefix = track_retry_paths = false;
+    primary_stage_path[0] = backup_stage_path[0] = 0; primary_partial_size = 0;
     cancel_open = cancel_read = cancel_write = cancel_end = lose_card = mutate_begin = shorten_body = close_cancel = false;
     cancel_global = default_tls_checked = task_fail = drop_power_write = drop_power_end = false; test_utc=1800000000;
     response_status = active_status = 200; response_mirror = response_image = false; mirror_progress_checks = 0;
@@ -414,16 +433,19 @@ static void test_cdn_fallback(void) {
     assert_candidate_image(ready.candidate_path);
 
     setup(false); check_stable_good();
-    fail_read_primary_once = corrupt_primary_prefix = check_mirror_progress = true;
+    fail_read_primary_once = corrupt_primary_prefix = check_mirror_progress = track_retry_paths = true;
     assert(folio_online_update_start_download(error,sizeof(error))); ready = wait_for(FOLIO_ONLINE_READY);
     assert(opens == 3 && closes == 3 && mirror_progress_checks == 1);
     expect_open(2, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
-    assert_candidate_image(ready.candidate_path); // No corrupted primary prefix or concatenation survives.
-
-    setup(false); check_stable_good(); fail_read_primary_once = fail_reset_lock = true;
-    assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
-    assert(opens == 2 && closes == 2 && !begins && !boots); // Reset/lock failure must not open the CDN.
-    expect_open(1, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+    assert(primary_stage_path[0] && backup_stage_path[0] && strcmp(primary_stage_path, backup_stage_path));
+    assert(!strcmp(ready.candidate_path, backup_stage_path));
+    assert_candidate_image(ready.candidate_path); // Only the new complete attempt reaches READY.
+    assert(primary_partial_size && primary_partial_size < image_size && primary_partial[0] != image_bytes[0]);
+    unsigned char old_partial[sizeof(primary_partial)];
+    FILE* old = fopen(primary_stage_path, "rb"); assert(old && fseek(old, 0, SEEK_END) == 0);
+    assert(ftell(old) == (long)primary_partial_size && fseek(old, 0, SEEK_SET) == 0);
+    assert(fread(old_partial, 1, primary_partial_size, old) == primary_partial_size && fclose(old) == 0);
+    assert(!memcmp(old_partial, primary_partial, primary_partial_size)); // Old corrupted partial is untouched.
 
     setup(false); check_stable_good(); incomplete_primary_once = true;
     assert(folio_online_update_start_download(error,sizeof(error))); ready = wait_for(FOLIO_ONLINE_READY);
@@ -459,7 +481,7 @@ static void test_cdn_fallback(void) {
     assert(opens == 3 && !begins && !boots);
     expect_open(1, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
     expect_open(2, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
-    puts("Online CDN fallback: open/read/incomplete/5xx retry once within deadline; mid-stream truncate resets progress and rejects stale/corrupt prefixes");
+    puts("Online CDN fallback: open/read/incomplete/5xx retry once within deadline; fresh attempt resets progress and preserves old partial");
 }
 static void test_check_failures(void) {
     char error[192]; setup(false);
