@@ -137,7 +137,7 @@ PY
 
 两个环境分别放置同一已受控生产 P-256 私钥的 PEM，必须对应[仓库发布公钥](<../keys/firmware-release-public.pem>)。通过环境 secret 的受控界面配置，不把它变成 repository/org 级共享 secret、不写入源码或日志、不生成临时生产密钥。允许 self-review 仅允许维护者手动批准自己发起的运行，不取消 required reviewers，也不自动提升 stable。
 
-当前 [API 门禁](<../tools/release_ci.py#L88-L94>)要求真实存在 required reviewers 和 branch/tag restriction；它只检查限制存在，**不会替管理员验证具体模式是否正好是上述值**，也不检查 self-review 开关。因此还须人工核对具体类型和模式；不要误将 `v*` 配成 Branch。
+两个环境都必须关闭 **Allow administrators to bypass configured protection rules**。[API 门禁](<../tools/release_ci.py#L88-L95>)要求 `can_admins_bypass=false`，并真实存在 required reviewers 和 branch/tag restriction；它只检查限制存在，**不会替管理员验证具体模式是否正好是上述值**，也不检查 self-review 开关。因此还须人工核对具体类型和模式；不要误将 `v*` 配成 Branch。
 
 另外，[发布器](<workflows/publish.yml>)使用独立 `github-pages` 部署环境，不放生产签名 secret。若该环境设置 ref 限制，应允许 Branch `main` 和 Tag `v*`：标签工作流即使 checkout 当前 main 网站，部署来源仍可能是 tag。
 

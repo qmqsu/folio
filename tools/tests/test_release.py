@@ -227,10 +227,10 @@ class ReleaseTests(unittest.TestCase):
             self.assertIn("`" + environment + "`", guide)
 
     def test_environment_protection_is_executable_gate(self):
-        for record in ({}, {"protection_rules": []}, {"protection_rules": [{"type": "required_reviewers", "reviewers": ["maintainer"]}]}):
+        protected = {"can_admins_bypass": False, "protection_rules": [{"type": "required_reviewers", "reviewers": ["maintainer"]}], "deployment_branch_policy": {"custom_branch_policies": True}}
+        for record in ({}, {"protection_rules": []}, {"protection_rules": [{"type": "required_reviewers", "reviewers": ["maintainer"]}], "deployment_branch_policy": {"custom_branch_policies": True}}, dict(protected, can_admins_bypass=True)):
             with patch.object(transport, "gh", return_value=json.dumps(record)), self.assertRaises(ValueError):
                 transport.require_environment("release-signing")
-        protected = {"protection_rules": [{"type": "required_reviewers", "reviewers": ["maintainer"]}], "deployment_branch_policy": {"custom_branch_policies": True}}
         with patch.object(transport, "gh", return_value=json.dumps(protected)):
             transport.require_environment("release-signing")
 

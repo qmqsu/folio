@@ -88,6 +88,7 @@ def commit_state(authority, site):
 def require_environment(name):
     protocol.require(name in ("release-signing", "release-stable"), "Unknown signing environment")
     data = protocol.load_json(gh("api", f"repos/{REPO}/environments/{name}"))
+    protocol.require(data.get("can_admins_bypass") is False, "Signing environment must not allow administrators to bypass protection")
     rules = data.get("protection_rules", [])
     protocol.require(any(row.get("type") == "required_reviewers" and row.get("reviewers") for row in rules), "Signing environment requires configured human reviewers")
     policy = data.get("deployment_branch_policy")
