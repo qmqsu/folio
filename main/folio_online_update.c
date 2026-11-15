@@ -212,29 +212,18 @@ static void close_connection(void) {
     s_connection_open = false;
     s_transport.close(s_transport.context);
 }
-static bool http_begin(const char* url, const char* signed_version, int* status, int64_t* length,
-    int64_t deadline, char* error, size_t cap) {
+static bool http_begin(const char* primary, const char* mirror, bool use_mirror,
+    int* status, int64_t* length, int64_t deadline, char* error, size_t cap) {
     *status = 0; *length = -1;
-    char mirror[192];
-    bool can_mirror = folio_remote_cdn_url(url, signed_version, mirror, sizeof(mirror));
-    bool default_https = s_transport.open == https_open;
-    if (default_https) { s_https.deadline_us = deadline; s_https.mirror_url[0] = 0; }
-    bool okay = open_connection(url, status, length, error, cap);
-    // Only an open failure can select the mirror. Keep the signed envelope,
-    // manifest URL and verification state bound to the primary URL.
-    if (!okay && can_mirror && !cancelled(NULL)) {
-        close_connection();
-        if (!cancelled(NULL)) {
-            if (default_https) snprintf(s_https.mirror_url, sizeof(s_https.mirror_url), "%s", mirror);
-            if (error && cap) *error = 0;
-            okay = open_connection(mirror, status, length, error, cap);
-        }
+    const char* url = use_mirror ? mirror : primary;
+    if (s_transport.open == https_open) {
+        s_https.deadline_us = deadline; s_https.mirror_url[0] = 0;
+        if (use_mirror) snprintf(s_https.mirror_url, sizeof(s_https.mirror_url), "%s", mirror);
     }
-    if (!okay) {
+    if (!open_connection(url, status, length, error, cap)) {
         if (error && cap && !*error) error_text(error, cap, "HTTPS 请求失败。");
         return false;
     }
-    if (*length < -1) { error_text(error, cap, "服务器文件长度无效。"); return false; }
     return true;
 }
 static bool response_ok(int status, char* error, size_t cap) {
@@ -253,33 +242,58 @@ static bool verify_manifest(folio_remote_manifest_t* result, char* error, size_t
 }
 static folio_online_state_t check_manifest(char* error, size_t cap) {
     if (!connection_ready(error, cap)) return FOLIO_ONLINE_FAILED;
+    const char* primary = folio_remote_manifest_url(s_work.channel);
+    char mirror[192];
+    bool can_mirror = folio_remote_cdn_url(primary, NULL, mirror, sizeof(mirror));
     int status; int64_t length;
     int64_t deadline = esp_timer_get_time() + ONLINE_MANIFEST_BUDGET_US;
-    bool okay = http_begin(folio_remote_manifest_url(s_work.channel), NULL, &status, &length, deadline, error, cap);
-    if (okay && status == 404) {
-        close_connection();
-        error_text(error, cap, "此通道暂未发布在线更新。"); return FOLIO_ONLINE_NO_RELEASE;
-    }
-    if (okay) okay = response_ok(status, error, cap);
-    if (okay && (length == 0 || length > FOLIO_REMOTE_MANIFEST_MAX)) {
-        error_text(error, cap, "发布清单大小无效或超过 4096 字节。"); okay = false;
-    }
+    bool okay = false, retryable = false, use_mirror = false;
     size_t used = 0; uint8_t buffer[512];
-    while (okay) {
-        if (!within_budget(deadline, error, cap)) { okay = false; break; }
-        int n = s_transport.read(s_transport.context, buffer, sizeof(buffer));
-        if (n < 0 || (size_t)n > sizeof(buffer)) { error_text(error, cap, "发布清单下载中断。"); okay = false; break; }
-        if (!n) {
-            okay = s_transport.complete(s_transport.context) && (length < 0 || (uint64_t)length == used);
-            if (!okay) error_text(error, cap, "发布清单长度不符或连接中断。");
-            break;
+    for (;;) {
+        if (use_mirror && !within_budget(deadline, error, cap)) { okay = false; break; }
+        used = 0; retryable = false;
+        okay = http_begin(primary, mirror, use_mirror, &status, &length, deadline, error, cap);
+        if (!okay) retryable = true;
+        if (okay && length < -1) { error_text(error, cap, "服务器文件长度无效。"); okay = false; }
+        if (okay && status == 404) {
+            close_connection();
+            error_text(error, cap, "此通道暂未发布在线更新。"); return FOLIO_ONLINE_NO_RELEASE;
         }
-        if ((size_t)n > sizeof(s_work.envelope) - used) { error_text(error, cap, "发布清单超过 4096 字节。"); okay = false; break; }
-        memcpy(s_work.envelope + used, buffer, (size_t)n); used += (size_t)n;
+        if (okay && status != 200) {
+            retryable = status >= 500 && status <= 599;
+            okay = response_ok(status, error, cap);
+        }
+        if (okay && (length == 0 || length > FOLIO_REMOTE_MANIFEST_MAX)) {
+            error_text(error, cap, "发布清单大小无效或超过 4096 字节。"); okay = false;
+        }
+        while (okay) {
+            if (!within_budget(deadline, error, cap)) { okay = false; break; }
+            int n = s_transport.read(s_transport.context, buffer, sizeof(buffer));
+            if (n < 0 || (size_t)n > sizeof(buffer)) {
+                error_text(error, cap, "发布清单下载中断。"); okay = false; retryable = true; break;
+            }
+            if (!n) {
+                okay = s_transport.complete(s_transport.context) && (length < 0 || (uint64_t)length == used);
+                if (!okay) { error_text(error, cap, "发布清单长度不符或连接中断。"); retryable = true; }
+                break;
+            }
+            if ((size_t)n > sizeof(s_work.envelope) - used) {
+                error_text(error, cap, "发布清单超过 4096 字节。"); okay = false; break;
+            }
+            memcpy(s_work.envelope + used, buffer, (size_t)n); used += (size_t)n;
+        }
+        if (okay) break;
+        // One exact CDN retry shares the operation's original total deadline.
+        if (!retryable || use_mirror || !can_mirror || cancelled(NULL)) break;
+        close_connection();
+        if (cancelled(NULL)) break;
+        use_mirror = true;
+        if (error && cap) *error = 0;
     }
     close_connection();
     if (okay && !within_budget(deadline, error, cap)) okay = false;
     s_work.envelope_size = okay ? used : 0;
+    // Signature/JSON validation is deliberately outside the retry loop.
     if (okay) okay = verify_manifest(&s_work.manifest, error, cap);
     if (!okay) return FOLIO_ONLINE_FAILED;
     portENTER_CRITICAL(&s_mux);
@@ -334,6 +348,20 @@ static bool create_stage(char* error, size_t cap) {
     if (!opened && error && cap && !*error) error_text(error, cap, "无法创建独立更新暂存目录，旧文件保持不变。");
     unlock_card(); return opened;
 }
+// A transport retry reuses only this attempt's file. Truncate it under the
+// same short card lock so no primary-response prefix can survive the retry.
+static bool reset_stage(char* error, size_t cap) {
+    if (!lock_card(error, cap)) return false;
+    bool okay = folio_storage_validate_parent(s_work.path, error, cap);
+    int fd = okay ? open(s_work.path, O_WRONLY | O_TRUNC) : -1;
+    struct stat status;
+    if (fd < 0) okay = false;
+    if (okay) okay = fstat(fd, &status) == 0 && S_ISREG(status.st_mode) && status.st_size == 0;
+    if (fd >= 0 && close(fd) != 0) okay = false;
+    unlock_card();
+    if (!okay && error && cap && !*error) error_text(error, cap, "无法从头重置固件暂存文件，更新已停止。");
+    return okay;
+}
 // No descriptor escapes this short lock. Cancellation/lock-timeout cleanup
 // therefore never waits forever or accesses an unmounted volume to close it.
 static bool stage_write(const uint8_t* bytes, size_t count, uint32_t offset,
@@ -353,37 +381,70 @@ static bool stage_write(const uint8_t* bytes, size_t count, uint32_t offset,
 }
 static folio_online_state_t download_image(char* error, size_t cap) {
     if (!verify_manifest(&s_work.manifest, error, cap) || !connection_ready(error, cap)) return FOLIO_ONLINE_FAILED;
+    const char* primary = s_work.manifest.url;
+    char mirror[192];
+    bool can_mirror = folio_remote_cdn_url(primary, s_work.manifest.image.version, mirror, sizeof(mirror));
     int status; int64_t length;
     int64_t deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
-    bool okay = http_begin(s_work.manifest.url, s_work.manifest.image.version, &status, &length, deadline, error, cap);
-    if (okay) okay = response_ok(status, error, cap);
-    if (okay && length >= 0 && (uint64_t)length != s_work.manifest.image.size) {
-        error_text(error, cap, "服务器固件长度与已签名清单不一致。"); okay = false;
+    uint8_t* buffer = malloc(ONLINE_CHUNK);
+    if (!buffer) {
+        error_text(error, cap, "下载缓冲内存不足。"); memset(&s_work.preview, 0, sizeof(s_work.preview));
+        return FOLIO_ONLINE_FAILED;
     }
-    // Resolve/connect/headers finish before creating even an empty attempt.
-    if (okay) okay = within_budget(deadline, error, cap) && create_stage(error, cap);
-    uint8_t* buffer = malloc(ONLINE_CHUNK); uint32_t received = 0;
-    if (!buffer) { error_text(error, cap, "下载缓冲内存不足。"); okay = false; }
-    while (okay) {
-        if (!within_budget(deadline, error, cap)) { okay = false; break; }
-        int n = s_transport.read(s_transport.context, buffer, ONLINE_CHUNK);
-        if (n < 0 || n > (int)ONLINE_CHUNK) { error_text(error, cap, "固件下载中断，当前固件保留。"); okay = false; break; }
-        if (!n) {
-            okay = s_transport.complete(s_transport.context) && received == s_work.manifest.image.size;
-            if (!okay) error_text(error, cap, "固件下载不完整，当前固件保留。");
-            break;
+    bool okay = false, retryable = false, use_mirror = false, stage_exists = false;
+    uint32_t received = 0;
+    for (;;) {
+        if (use_mirror && !within_budget(deadline, error, cap)) { okay = false; break; }
+        received = 0; retryable = false;
+        okay = http_begin(primary, mirror, use_mirror, &status, &length, deadline, error, cap);
+        if (!okay) retryable = true;
+        if (okay && length < -1) { error_text(error, cap, "服务器文件长度无效。"); okay = false; }
+        if (okay && status != 200) {
+            retryable = status >= 500 && status <= 599;
+            okay = response_ok(status, error, cap);
         }
-        if ((uint32_t)n > s_work.manifest.image.size - received) {
-            error_text(error, cap, "下载数据超过已签名的固件大小。"); okay = false; break;
+        if (okay && length >= 0 && (uint64_t)length != s_work.manifest.image.size) {
+            error_text(error, cap, "服务器固件长度与已签名清单不一致。"); okay = false;
         }
-        if (!stage_write(buffer, (size_t)n, received, false, error, cap)) { okay = false; break; }
-        received += (uint32_t)n; progress(received, s_work.manifest.image.size);
-        vTaskDelay(1);
+        // Resolve/connect/headers finish before creating even an empty attempt.
+        if (okay && !within_budget(deadline, error, cap)) okay = false;
+        if (okay && !stage_exists) {
+            okay = create_stage(error, cap);
+            stage_exists = okay;
+        }
+        while (okay) {
+            if (!within_budget(deadline, error, cap)) { okay = false; break; }
+            int n = s_transport.read(s_transport.context, buffer, ONLINE_CHUNK);
+            if (n < 0 || n > (int)ONLINE_CHUNK) {
+                error_text(error, cap, "固件下载中断，当前固件保留。"); okay = false; retryable = true; break;
+            }
+            if (!n) {
+                okay = s_transport.complete(s_transport.context) && received == s_work.manifest.image.size;
+                if (!okay) { error_text(error, cap, "固件下载不完整，当前固件保留。"); retryable = true; }
+                break;
+            }
+            if ((uint32_t)n > s_work.manifest.image.size - received) {
+                error_text(error, cap, "下载数据超过已签名的固件大小。"); okay = false; break;
+            }
+            if (!stage_write(buffer, (size_t)n, received, false, error, cap)) { okay = false; break; }
+            received += (uint32_t)n; progress(received, s_work.manifest.image.size);
+            vTaskDelay(1);
+        }
+        if (okay) break;
+        // The signed URL is never rewritten; only this attempt can use the CDN.
+        if (!retryable || use_mirror || !can_mirror || cancelled(NULL)) break;
+        close_connection();
+        if (cancelled(NULL)) break;
+        if (stage_exists && !reset_stage(error, cap)) break;
+        received = 0; progress(0, s_work.manifest.image.size);
+        use_mirror = true;
+        if (error && cap) *error = 0;
     }
     // The complete TLS session is destroyed BEFORE validation or installation.
     close_connection(); free(buffer);
     if (okay && !stage_write(NULL, 0, received, true, error, cap)) okay = false;
     if (okay && !within_budget(deadline, error, cap)) okay = false;
+    // SHA256 and ESP image validation never trigger another network attempt.
     if (okay && lock_card(error, cap)) {
         const folio_update_control_t control = {.cancelled = cancelled};
         okay = folio_update_inspect_file(s_work.path, &s_work.manifest.image, &s_work.preview, &control, error, cap);
