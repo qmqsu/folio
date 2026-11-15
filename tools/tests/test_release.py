@@ -338,6 +338,7 @@ class ReleaseTests(unittest.TestCase):
             calls = []
             blobs = iter(["b" * 40, "c" * 40])
             def fake_gh(*args, input_text=None):
+                assert not args or args[0] != "api", "gh api must not be duplicated"
                 calls.append((args, input_text))
                 endpoint = next(arg for arg in args if arg.startswith("repos/"))
                 if endpoint.endswith("/heads/folio-release-assets") and "--method" not in args:

@@ -57,23 +57,23 @@ def publish(root, branch=BRANCH, downloader=download, retries=12):
     files = mirror_files(root)
     ref = f"refs/heads/{branch}"
     try:
-        head = gh("api", f"repos/{REPO}/git/ref/heads/{branch}")["object"]["sha"]
+        head = gh(f"repos/{REPO}/git/ref/heads/{branch}")["object"]["sha"]
     except subprocess.CalledProcessError:
-        main = gh("api", f"repos/{REPO}/git/ref/heads/main")["object"]["sha"]
-        gh("api", "--method", "POST", f"repos/{REPO}/git/refs", "--input", "-",
+        main = gh(f"repos/{REPO}/git/ref/heads/main")["object"]["sha"]
+        gh("--method", "POST", f"repos/{REPO}/git/refs", "--input", "-",
            input_text=json.dumps({"ref": ref, "sha": main}))
         head = main
     tree = []
     for name, raw in sorted(files.items()):
-        blob = gh("api", "--method", "POST", f"repos/{REPO}/git/blobs", "--input", "-",
+        blob = gh("--method", "POST", f"repos/{REPO}/git/blobs", "--input", "-",
                   input_text=json.dumps({"encoding": "base64", "content": base64.b64encode(raw).decode()}))
         tree.append({"path": name, "mode": "100644", "type": "blob", "sha": blob["sha"]})
-    tree_sha = gh("api", "--method", "POST", f"repos/{REPO}/git/trees", "--input", "-",
+    tree_sha = gh("--method", "POST", f"repos/{REPO}/git/trees", "--input", "-",
                   input_text=json.dumps({"base_tree": head, "tree": tree}))["sha"]
-    commit = gh("api", "--method", "POST", f"repos/{REPO}/git/commits", "--input", "-",
+    commit = gh("--method", "POST", f"repos/{REPO}/git/commits", "--input", "-",
                 input_text=json.dumps({"message": "Mirror verified Folio release assets", "tree": tree_sha,
                                        "parents": [head]}))["sha"]
-    gh("api", "--method", "PATCH", f"repos/{REPO}/git/refs/heads/{branch}", "--input", "-",
+    gh("--method", "PATCH", f"repos/{REPO}/git/refs/heads/{branch}", "--input", "-",
        input_text=json.dumps({"sha": commit, "force": False}))
     for name, expected in files.items():
         url = PREFIX + name
