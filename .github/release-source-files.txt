@@ -338,6 +338,8 @@ site/scripts/collect-licenses.mjs
 site/src/installer/controller.ts
 site/src/installer/manifest.ts
 site/src/installer/partition.ts
+site/src/installer/quick-ui.ts
+site/src/installer/quick.ts
 site/src/installer/serial.ts
 site/src/installer/ui.ts
 site/src/pages/index.astro
@@ -347,6 +349,7 @@ site/tests/browser.mjs
 site/tests/controller.test.ts
 site/tests/fixtures.ts
 site/tests/manifest.test.ts
+site/tests/quick.test.ts
 site/tests/serial.test.ts
 site/tsconfig.json
 tools/build_builtin_font.py

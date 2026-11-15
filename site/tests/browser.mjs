@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFile, mkdir, access, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, access, writeFile, stat } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { chromium } from 'playwright-core';
 
@@ -10,6 +10,7 @@ const evidence = resolve(site, '../artifacts/firmware-0832/site');
 await mkdir(evidence, { recursive: true });
 const browserPath = process.env.FOLIO_TEST_BROWSER || '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge';
 await access(browserPath);
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (!url.pathname.startsWith('/folio/')) { res.writeHead(404).end(); return; }
@@ -18,14 +19,25 @@ const server = createServer(async (req, res) => {
   if (!path.startsWith(dist + sep)) { res.writeHead(403).end(); return; }
   try {
     const bytes = await readFile(path);
-    const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
+    const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml', '.webp': 'image/webp', '.png': 'image/png' };
     res.writeHead(200, { 'content-type': types[extname(path)] || 'application/octet-stream' }); res.end(bytes);
   } catch { res.writeHead(404).end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const url = `http://127.0.0.1:${server.address().port}/folio/`;
+const origin = url.replace(/\/$/, '');
+
+const report = {
+  kind: 'real-headless-browser-visual-test',
+  browser: browserPath,
+  url,
+  hardware: 'NO SERIAL ACCESS. Release fetches mocked; requestPort is a throwing sentinel, so no device is touched.',
+  viewports: [],
+  checks: [],
+  errors: []
+};
+
 let context;
-const report = { kind: 'real-headless-browser-visual-test', browser: browserPath, url, hardware: 'NO SERIAL ACCESS. Public release fetches mocked; no signing key or USB device used.', viewports: [], checks: [], errors: [] };
 try {
   context = await chromium.launchPersistentContext(resolve(site, '.browser-test-profile'), {
     executablePath: browserPath, headless: true, viewport: { width: 1440, height: 1000 },
@@ -34,65 +46,106 @@ try {
   await context.route('https://qmqsu.github.io/**', route => route.fulfill({ status: 404, body: 'Not released (browser test fixture)' }));
   await context.addInitScript(() => {
     window.__serialCalls = 0;
-    Object.defineProperty(navigator, 'serial', { value: { requestPort: () => { window.__serialCalls++; throw new Error('Serial forbidden in visual tests'); } }, configurable: true });
+    Object.defineProperty(navigator, 'serial', {
+      value: { requestPort: () => { window.__serialCalls++; throw new Error('Serial forbidden in visual tests'); } },
+      configurable: true
+    });
   });
+
   const page = await context.newPage();
   page.on('pageerror', error => report.errors.push(error.message));
   const consoleErrors = [];
+  const offsite = [];
   page.on('console', message => { if (message.type() === 'error' && !message.text().includes('404')) consoleErrors.push(message.text()); });
+  page.on('request', request => {
+    const target = request.url();
+    if (!target.startsWith(origin) && !target.startsWith('https://qmqsu.github.io/') && !target.startsWith('data:')) offsite.push(target);
+  });
+
   for (const [width, height] of [[1440, 1000], [1024, 768], [768, 1024], [375, 812], [320, 740], [844, 390]]) {
-    await page.setViewportSize({ width, height }); await page.goto(url, { waitUntil: 'networkidle' });
+    await page.setViewportSize({ width, height });
+    await page.goto(url, { waitUntil: 'networkidle' });
     const horizontal = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
     assert.ok(horizontal.scroll <= horizontal.client, `${width}px horizontal overflow ${JSON.stringify(horizontal)}`);
-    assert.equal(await page.locator('h1').count(), 1);
-    for (const id of ['physical-model', 'backup-saved', 'factory-confirm', 'migration-confirm']) assert.equal(await page.locator(`#${id}`).isChecked(), false, `${id} must never be pre-authorized`);
-    assert.equal(await page.locator('#connect-backup').isDisabled(), true); assert.equal(await page.locator('#install-button').isDisabled(), true);
-    assert.equal(await page.evaluate(() => window.__serialCalls), 0);
+    assert.equal(await page.locator('h1').count(), 1, 'exactly one h1');
+    assert.equal(await page.locator('main > section').count(), 5, 'hero + flash + interfaces + features + about');
+    for (const id of ['flash', 'interfaces', 'features', 'about']) assert.equal(await page.locator(`#${id}`).count(), 1, `#${id} exists`);
+    const broken = await page.evaluate(() => [...document.images].filter(i => !i.complete || i.naturalWidth === 0).map(i => i.currentSrc || i.src));
+    assert.deepEqual(broken, [], `${width}px broken images`);
+    // The flasher must never be armed without a verified release (mock returns 404 here).
+    await page.waitForFunction(() => !document.querySelector('#flash-button')?.disabled === false || document.querySelector('#flash-status')?.textContent?.length > 4);
+    assert.equal(await page.locator('#flash-button').isDisabled(), true, `${width}px: flasher disabled without release`);
+    assert.equal(await page.locator('#flash-backup').isChecked(), true, `${width}px: backup opt-in is checked by default`);
+    assert.equal(await page.locator('#flash-backup').isDisabled(), true, `${width}px: backup toggle follows the release state`);
+    assert.equal(await page.locator('#flash-progress').isHidden(), true);
+    // The retired full installer must not come back by accident.
+    const leftovers = await page.evaluate(() => ['connect-backup', 'check-release', 'install-button', 'browser-support', 'backup-panel', 'release-badge']
+      .filter(id => document.getElementById(id)));
+    assert.deepEqual(leftovers, [], 'old installer DOM must be gone');
     report.viewports.push({ width, height, overflow: false });
     if (width === 1440 || width === 375) {
       await page.screenshot({ path: resolve(evidence, `home-${width}-full.png`), fullPage: true });
       await page.screenshot({ path: resolve(evidence, `home-${width}-viewport.png`) });
     }
   }
-  await page.setViewportSize({ width: 1440, height: 1000 }); await page.goto(url, { waitUntil: 'networkidle' });
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(url, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(300);
+  assert.match(await page.locator('#flash-version').innerText(), /还没发布|暂时拿不到/);
+  assert.match(await page.locator('#flash-status').innerText(), /还没有发布|拿不到/);
+  assert.equal(await page.evaluate(() => window.__serialCalls), 0);
+  report.checks.push('Mock 404: flasher stays disabled, no serial picker');
+
   await page.keyboard.press('Tab');
   assert.equal(await page.locator('.skip-link').evaluate(el => el === document.activeElement), true);
-  const focus = await page.locator('.skip-link').evaluate(el => getComputedStyle(el).outlineStyle);
-  assert.notEqual(focus, 'none');
-  await page.keyboard.press('Enter'); assert.equal(new URL(page.url()).hash, '#main');
-  report.checks.push('Keyboard skip link and visible focus; native navigation/details/buttons');
-  await page.locator('#physical-model').check();
-  assert.equal(await page.locator('#connect-backup').isDisabled(), true);
-  await page.locator('#check-release').click();
-  await page.waitForFunction(() => document.querySelector('#release-badge').textContent === '未发布');
-  assert.match(await page.locator('#install-status').innerText(), /未发布/);
-  assert.equal(await page.locator('#connect-backup').isDisabled(), true); assert.equal(await page.locator('#install-button').isDisabled(), true);
-  assert.equal(await page.evaluate(() => window.__serialCalls), 0);
-  await page.locator('#install').screenshot({ path: resolve(evidence, 'installer-unpublished-desktop.png') });
-  report.checks.push('Mock 404: unpublished, no usable release, no serial picker, no writes');
+  assert.notEqual(await page.locator('.skip-link').evaluate(el => getComputedStyle(el).outlineStyle), 'none');
+  report.checks.push('Keyboard skip link and visible focus');
+
+  await page.locator('a.nav-cta').click();
+  await page.waitForTimeout(150);
+  assert.equal(new URL(page.url()).hash, '#flash');
+  report.checks.push('Hero and nav both land on the flasher');
+
   await context.unroute('https://qmqsu.github.io/**');
   await context.route('https://qmqsu.github.io/**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ key_id: 'attacker', payload: 'e30=', signature: 'AAAA' }) }));
-  await page.locator('#check-release').click(); await page.waitForFunction(() => document.querySelector('#release-badge').textContent === '不可用');
-  assert.match(await page.locator('#install-status').innerText(), /密钥/); assert.equal(await page.locator('#install-button').isDisabled(), true);
-  report.checks.push('Mock untrusted envelope rejected; no serial access');
-  await page.evaluate(() => { Object.defineProperty(navigator, 'userAgent', { configurable: true, value: 'Mozilla/5.0 iPhone Mobile Safari/605' }); });
-  await page.goto(url, { waitUntil: 'networkidle' }); // Browser-support test in separate fresh mocked context below.
-  const noSerial = await context.newPage();
-  await noSerial.addInitScript(() => Object.defineProperty(navigator, 'userAgent', { value: 'Mozilla/5.0 iPhone Mobile Safari/605', configurable: true }));
-  await noSerial.goto(url, { waitUntil: 'networkidle' });
-  assert.match(await noSerial.locator('#browser-support').innerText(), /需要桌面/);
-  assert.equal(await noSerial.locator('#connect-backup').isDisabled(), true);
-  report.checks.push('Mobile/Safari capability mock clearly disabled'); await noSerial.close();
-  const noJS = await context.browser().newContext({ javaScriptEnabled: false, viewport: { width: 375, height: 812 } });
-  const fallback = await noJS.newPage(); await fallback.goto(url);
-  assert.match(await fallback.locator('noscript').innerText(), /JavaScript 未启用/);
-  assert.equal(await fallback.locator('#install-button').isDisabled(), true); assert.equal(await fallback.locator('h1').count(), 1);
-  report.checks.push('No JavaScript: content and recovery readable, installer disabled'); await noJS.close();
+  await page.goto(url, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(400);
+  assert.match(await page.locator('#flash-status').innerText(), /密钥|签名/);
+  assert.equal(await page.locator('#flash-button').isDisabled(), true);
+  assert.equal(await page.evaluate(() => window.__serialCalls), 0);
+  report.checks.push('Mock untrusted envelope rejected; flasher disabled; no serial access');
+
+  const withoutJs = await context.browser().newContext({ javaScriptEnabled: false, viewport: { width: 375, height: 812 } });
+  const fallback = await withoutJs.newPage();
+  await fallback.goto(url, { waitUntil: 'networkidle' });
+  assert.equal(await fallback.locator('h1').count(), 1);
+  assert.match(await fallback.locator('.hero-subtitle').innerText(), /轻量化阅读固件/);
+  assert.equal(await fallback.locator('#features article').count(), 6);
+  assert.equal(await fallback.locator('#flash-button').isDisabled(), true);
+  report.checks.push('No JavaScript: content readable, flasher inert');
+  await withoutJs.close();
+
+  const resources = await page.evaluate(() => performance.getEntriesByType('resource').map(entry => entry.name));
+  const foreign = resources.filter(name => !name.startsWith(origin) && !name.startsWith('https://qmqsu.github.io/'));
+  assert.deepEqual(foreign, [], 'page must only reach its own origin and the manifest host');
+  assert.deepEqual(offsite, []);
+  report.checks.push('No CDN, no remote font: only self-hosted assets and the manifest host');
+
+  const scripts = await page.evaluate(() => [...document.querySelectorAll('script')].map(s => s.getAttribute('src')));
+  assert.equal(scripts.length, 1, 'exactly one bundled flasher script');
+  assert.ok(scripts[0]?.startsWith('/folio/_astro/'), 'script is self-hosted');
+  report.checks.push('One self-hosted module: the flasher UI');
+
   report.errors.push(...consoleErrors);
   assert.deepEqual(report.errors, []);
   report.completed = true;
-} catch (error) { report.completed = false; report.failure = error.stack; throw error; }
-finally {
+  report.indexBytes = (await stat(resolve(dist, 'index.html'))).size;
+} catch (error) {
+  report.completed = false;
+  report.failure = error.stack;
+  throw error;
+} finally {
   if (context) await context.close();
   await new Promise(resolve => server.close(resolve));
   await writeFile(resolve(evidence, 'browser-report.json'), JSON.stringify(report, null, 2) + '\n');

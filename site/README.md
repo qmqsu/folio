@@ -1,6 +1,12 @@
-# 页间 Folio 静态官网与 USB 安装器
+# 页间 Folio 静态介绍页
 
-自研站点 MIT；第三方依赖保留各自许可。Astro 5.18.2 + TypeScript 7.0.2，静态输出到 [dist](<dist/>)，发布基路径 `/folio/`。页面无需 CDN、远程字体、后端、账号或分析服务。esptool-js **0.7.1** 与 RAM stub 随构建打包，不在运行时下载第三方脚本。
+介绍页只讲 Folio 是什么、长什么样怎么装，并提供一键刷机。自研站点 MIT；第三方依赖保留各自许可。Astro 5.18.2 + TypeScript 7.0.2，静态输出到 [dist](<dist/>)，发布基路径 `/folio/`。
+
+页面只有一份自托管脚本（刷机 UI）和一份 CSS，没有 CDN、远程字体、后端、账号或分析服务；CSP 只放行本域脚本，`connect-src` 仅本站清单域与备用镜像。构建产出的 HTML 约 7 KB。
+
+**一键刷机**（[quick.ts](<src/installer/quick.ts>)）的顺序：校验签名清单 → 下载并校验四段镜像 → 核对芯片/料号/分区布局 →（可选）读整片 16 MiB 备份 → 写入四段并逐段回读。「顺手备份 16 MiB」默认勾选，勾上会在写入前自动下载备份并保留一个手动保存链接；取消勾选就是纯一键。它不改分区表、不写 NVS 与 storage；因此只接受已兼容布局，原厂四分区和未知布局一律拒绝。页面加载时静默检查清单，没有发布或校验失败时按钮与备份开关都保持禁用。
+
+旧的逐步安装向导（备份、证据下载、迁移授权、四步状态机）仍保留在 [src/installer](<src/installer/>) 里并有单测，但页面不再引用它。若以后恢复那条更重的路径，约束见下一节。
 
 ## 本机构建
 
@@ -35,7 +41,9 @@ export ASTRO_TELEMETRY_DISABLED=1
 
 浏览器完整依赖许可在 [公开 notice](<public/third-party-licenses.txt>)。RAM stub 不是笼统继承站点 MIT：[确切来源与哈希](<public/licenses/stub-provenance.txt>) 核实为 esp-flasher-stub v1.2.2 / commit `23959b780454adf885916d42f2274ec648e96a94`，子模块 `esp-stub-lib@d61983fa4d1f66b9c088608c1f702ad877121279`，选择其双许可中的 [MIT 选项全文](<public/licenses/esp-flasher-stub-MIT.txt>)；esptool-js 本身仍是 Apache-2.0。实际S3 stub运行字段已与上游发布文件逐一比较相同，构建脚本检查固定包哈希，升级依赖需重审。
 
-## 安装器支持范围
+## 逐步安装器源码（页面不再引用）
+
+以下是保留的安装器源码所实现的约束，供以后再上线时对照；当前页面不提供刷写入口。
 
 1. 桌面 Chrome/Edge + HTTPS + Web Serial + WebCrypto。无 JS、手机、Safari/Firefox 均不允许连接/烧录；普通页面仍可读。
 2. 用户根据实物或购买资料确认 **RDP-G01-W**，不能仅凭 S3 或 USB VID/PID。随后读取芯片、Flash RDID、容量和安全信息。
@@ -50,21 +58,24 @@ export ASTRO_TELEMETRY_DISABLED=1
 
 [浏览器脚本](<tests/browser.mjs>) 启动一个只服务构建产物的临时 loopback 服务器，用现有 Microsoft Edge headless 与**独立站点测试 profile**截图；不会使用个人浏览器 profile。可通过 `FOLIO_TEST_BROWSER` 指定现有 Chromium 类浏览器可执行文件。不安装浏览器，不保留测试服务器。
 
-- 真实布局/渲染：1440、1024、768、375、320px 与 844×390 横屏，无横向溢出。
-- 真实键盘：跳到正文、可见焦点；原生导航/表单/details。
-- **模拟**公共 404、恶意签名和移动浏览器能力，断言烧录禁用。
-- 串口方法替换为抛错哨兵，验证没有自动选择设备或访问 USB。
-- 无 JavaScript：内容与恢复指南可读，安装器禁用。
+- 真实布局/渲染：1440、1024、768、375、320px 与 844×390 横屏，无横向溢出；全页只有一个 `h1`，五个区块都在。
+- 图片真的解码：逐张检查 `naturalWidth`，不留空白框。
+- 真实键盘：跳到正文、可见焦点；首屏与导航的「一键刷机」都落到 `#flash`。
+- 刷机入口受控：清单 404 时按钮与备份开关都禁用、不弹串口；伪造签名信封被拒后仍禁用；备份开关默认勾选。
+- 旧逐步向导的节点（`#connect-backup`、`#install-button` 等）必须查不到。
+- 只发本域与清单域的请求；页面恰好一份自托管模块脚本。
+- 无 JavaScript：标题、说明、六张功能卡照常可读，刷机按钮保持禁用。
 - 证据写入 [浏览器报告](<../artifacts/firmware-0832/site/browser-report.json>) 与同目录 PNG。
 
 ## 代码边界
 
-- [页面](<src/pages/index.astro>)、[样式](<src/styles/global.css>)：深色阅读控制台与浅色安装工作区；使用真实固件 UI 代码渲染的合成示例，不使用私人书籍、照片或阅读记录；[设计说明](<docs/DESIGN.md>)。
+- [页面](<src/pages/index.astro>)、[样式](<src/styles/global.css>)：纸色 + 墨色 + 单一朱红强调色；首屏、三屏界面、六张功能卡、三条安装路线、关于与页脚；截图来自固件 UI 代码渲染的合成示例，不使用私人书籍、照片或阅读记录。
 - [签名与镜像](<src/installer/manifest.ts>)：固定信任锚、严格 payload/四段地址与长度、URL、SHA、应用身份。
 - [分区](<src/installer/partition.ts>)：Folio/固定官方布局识别、MD5 与擦除尾部。
 - [状态机](<src/installer/controller.ts>)：下载、备份、确认、写入、回读、取消和关闭。
 - [串口适配](<src/installer/serial.ts>)：固定 esptool-js，READ_FLASH 帧/ACK/尾 MD5 校验，不打印 MAC/原始 Flash。
-- [交互层](<src/installer/ui.ts>)：能力检测、用户手势选择串口、进度、下载、导航/刷新中断提示。
+- [一键刷机](<src/installer/quick.ts>)、[页面接线](<src/installer/quick-ui.ts>)：签名校验、四段写入与回读、芯片/料号/布局门禁；不含备份。**当前页面只用这一层**。
+- [交互层](<src/installer/ui.ts>)：旧向导的能力检测、串口手势、进度与中断提示。页面不再导入。
 - [单元测试](<tests/>)：仅临时测试密钥、人工构造镜像/内存 Flash 和协议替身，不接触生产私钥或硬件。
 
 首次 pnpm 依赖安装因 pnpm 11 忽略旧 `.npmrc`，曾意外使用机器默认 package store；已报告 lead，并改用站点配置与显式 `--store-dir`。未读取/清理外部缓存，不影响源码与发布产物；后续 frozen install 已在站点 store 验证通过。
