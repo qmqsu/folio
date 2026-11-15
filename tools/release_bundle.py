@@ -20,7 +20,7 @@ ROOT_FILES = {"CMakeLists.txt", "sdkconfig.defaults", "partitions_16M.csv", "dep
 ROOT_DIRS = {"main", "components", "tools", "licenses", "docs", "site", "keys", ".github"}
 DENIED_PARTS = {".local-secrets", ".dsh-meow", ".git", "artifacts", "dist", "node_modules", "__pycache__", ".astro", ".pnpm-store", "backup", "backups", "photos", "screenshots", "证据", "备份", "照片"}
 DENIED_SUFFIXES = {".pyc", ".pyo", ".bak", ".old", ".orig", ".log", ".pem", ".key", ".p12", ".pfx", ".zstd", ".elf", ".map"}
-PRIVATE = re.compile(rb"-----BEGIN (?:EC |RSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}")
+PRIVATE = re.compile(rb"-----BEGIN (?:EC |RSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----\r?\n[A-Za-z0-9+/]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}")
 CHECKS = {"device_identity", "flash_identity", "usb_four_parts", "ota_signed_upgrade", "ota_reject_invalid", "boot_rollback", "nvs_storage_preserved", "reading_smoke", "physical_display", "thermal_stability", "font_fallback"}
 REQUIRED_SOURCE = (ROOT_FILES - {".gitignore", "AGENTS.md"}) | {
     "keys/firmware-release-public.pem", "main/assets/fonts/NOTICE.txt", "main/assets/fonts/source-manifest.json",
