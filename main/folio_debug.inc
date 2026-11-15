@@ -18,6 +18,7 @@ static void debug_release(void){free(s_debug_frame);s_debug_frame=NULL;}
 static void debug_status(unsigned id) {
     folio_network_status_t net;folio_network_get_status(&net);
     folio_weread_status_t wr;folio_weread_get_status(&wr);
+    folio_online_snapshot_t online;folio_online_update_get_snapshot(&online);
     const char* message=s_view==VIEW_ERROR?s_error:s_view==VIEW_WEREAD?wr.message:"";
     char escaped[800];size_t n=0;
     for(const unsigned char* p=(const unsigned char*)message;*p && n+7<sizeof(escaped);++p){
@@ -43,8 +44,15 @@ static void debug_status(unsigned id) {
         if(s_font && !strcmp(s_active_font,folio_font_builtin_path(i)))active=font_ids[i];
         if(!strcmp(s_settings.font_path,folio_font_builtin_path(i)))desired=font_ids[i];
     }
+    char online_text[256];size_t on=0;
+    for(const unsigned char* p=(const unsigned char*)s_online_message;*p && on+7<sizeof(online_text);++p){
+        if(*p=='"' || *p=='\\'){online_text[on++]='\\';online_text[on++]=(char)*p;}
+        else if(*p<32){on+=(size_t)snprintf(online_text+on,sizeof(online_text)-on,"\\u%04x",*p);}
+        else online_text[on++]=(char)*p;
+    }
+    online_text[on]=0;
     uint32_t caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;
-    printf("@FOLIO %u STATUS {\"view\":%d,\"width\":%d,\"height\":%d,\"card\":%d,\"books\":%u,\"wifi\":%d,\"connecting\":%d,\"weread\":%d,\"busy\":%d,\"completed\":%u,\"total\":%u,\"rst\":%d,\"battery\":\"%s\",\"idle_minutes\":%u,\"auto_shutdown_enabled\":%u,\"auto_shutdown_minutes\":%u,\"utc\":%lu,\"rtc_utc\":%lu,\"rtc_read_ok\":%d,\"monotonic_us\":%lld,\"rtc_read_us\":%lld,\"system_utc\":%lld,\"timezone_minutes\":%d,\"clock12h\":%d,\"font_active_id\":\"%s\",\"font_requested_id\":\"%s\",\"psram_free\":%u,\"psram_largest\":%u,\"psram_min_free\":%u,\"internal_free\":%u,\"message\":\"%s\",\"power_initialized\":%d,\"power_safe\":%d,\"power_gate\":%d,\"online_flags\":%u}\n",
+    printf("@FOLIO %u STATUS {\"view\":%d,\"width\":%d,\"height\":%d,\"card\":%d,\"books\":%u,\"wifi\":%d,\"connecting\":%d,\"weread\":%d,\"busy\":%d,\"completed\":%u,\"total\":%u,\"rst\":%d,\"battery\":\"%s\",\"idle_minutes\":%u,\"auto_shutdown_enabled\":%u,\"auto_shutdown_minutes\":%u,\"utc\":%lu,\"rtc_utc\":%lu,\"rtc_read_ok\":%d,\"monotonic_us\":%lld,\"rtc_read_us\":%lld,\"system_utc\":%lld,\"timezone_minutes\":%d,\"clock12h\":%d,\"font_active_id\":\"%s\",\"font_requested_id\":\"%s\",\"psram_free\":%u,\"psram_largest\":%u,\"psram_min_free\":%u,\"internal_free\":%u,\"message\":\"%s\",\"power_initialized\":%d,\"power_safe\":%d,\"power_gate\":%d,\"online_flags\":%u,\"online_state\":%d,\"online_busy\":%d,\"online_received\":%u,\"online_total\":%u,\"online_message\":\"%s\"}\n",
         id,(int)s_view,width(),height(),s_card_ready,(unsigned)s_book_count,net.connected,net.connecting,
         (int)wr.state,wr.busy,(unsigned)wr.completed,(unsigned)wr.total,(int)esp_reset_reason(),battery,
         (unsigned)s_settings.idle_minutes,(unsigned)s_settings.auto_shutdown_enabled,
@@ -55,7 +63,8 @@ static void debug_status(unsigned id) {
         (unsigned)heap_caps_get_minimum_free_size(caps),
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),escaped,
         (int)s_power_initialized,(int)folio_power_update_safe(),(int)folio_power_update_gate(),
-        (unsigned)atomic_load(&s_online_safety));
+        (unsigned)atomic_load(&s_online_safety),
+        (int)online.state,(int)online.busy,(unsigned)online.received,(unsigned)online.total,online_text);
 }
 static void debug_execute(const folio_debug_command_t* c) {
     // Observation is not user activity: STATUS/SCREEN must not prevent idle lock.

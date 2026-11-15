@@ -27,9 +27,13 @@ static bool online_storage_lock(void* context,uint32_t timeout) {
 static void online_storage_unlock(void* context) {(void)context;folio_storage_unlock();}
 static bool online_install_allowed(void* context,char* error,size_t cap) {
     (void)context;unsigned flags=atomic_load(&s_online_safety);
-    if((flags&(ONLINE_CARD|ONLINE_POWER|ONLINE_AUTH|ONLINE_CANCEL))==(ONLINE_CARD|ONLINE_POWER|ONLINE_AUTH))return true;
+    // Starting needs a current safe reading. Once the install owns the slot an
+    // unreadable PMU is expected during flash erase, so only a reading that
+    // actually reports an unsafe battery may stop it.
+    bool power_ok=(flags&ONLINE_POWER)||(s_online_install_owned&&!folio_power_unsafe_confirmed());
+    if((flags&(ONLINE_CARD|ONLINE_AUTH|ONLINE_CANCEL))==(ONLINE_CARD|ONLINE_AUTH)&&power_ok)return true;
     if(error && cap)snprintf(error,cap,"%s",!(flags&ONLINE_CARD)?"TF 卡不可用，安装已停止。":
-        !(flags&ONLINE_POWER)?"电量状态不安全：需要有效电量至少 20%，且无低电量警告。":"安装授权已取消，请重新确认。");
+        !power_ok?"电量状态不安全：需要有效电量至少 20%，且无低电量警告。":"安装授权已取消，请重新确认。");
     return false;
 }
 static bool online_cancelled(void* context) {
@@ -237,7 +241,7 @@ static void online_tap(int x,int y) {
 static void refresh_online(void) {
     if(!online_active())return;
     online_publish_safety();
-    if(s_online_install_owned && !(atomic_load(&s_online_safety)&ONLINE_POWER)) {
+    if(s_online_install_owned && folio_power_unsafe_confirmed()) {
         online_error("电量状态不安全，正在停止安装；不会继续写入启动目标。");online_cancel();
     }
     if(s_online_wait) {

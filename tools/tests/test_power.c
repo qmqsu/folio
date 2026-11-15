@@ -783,6 +783,25 @@ static void test_update_power_gate(void) {
     assert(!folio_power_update_gate());                       // No bridge after an unsafe reading.
     fail_poll=false;(void)folio_power_poll();state.soc_permille=1000;
     assert(folio_power_update_gate());
+    // Mid-install decisions: only a readable unsafe report may stop the write.
+    init_running();
+    assert(!folio_power_unsafe_confirmed());
+    fail_poll=true;(void)folio_power_poll();
+    assert(!folio_power_unsafe_confirmed());          // Unreadable is not unsafe.
+    now+=INT64_C(30000000);(void)folio_power_poll();
+    assert(!folio_power_unsafe_confirmed());          // Still unreadable, still not unsafe.
+    fail_poll=false;(void)folio_power_poll();
+    assert(!folio_power_unsafe_confirmed());
+    state.flags=PMU_STATUS_BATTERY_VALID|PMU_STATUS_BATTERY_LOW;
+    assert(folio_power_unsafe_confirmed());           // A readable low battery is.
+    state.flags=PMU_STATUS_BATTERY_VALID;state.soc_permille=150;
+    assert(folio_power_unsafe_confirmed());
+    state.soc_permille=1000;assert(!folio_power_unsafe_confirmed());
+    state.flags=PMU_STATUS_BATTERY_VALID|PMU_STATUS_BATTERY_CRITICAL;
+    assert(folio_power_unsafe_confirmed());
+    state.flags=PMU_STATUS_BATTERY_VALID;state.power_state=PMU_PWR_SHUTDOWN_PENDING;
+    assert(folio_power_unsafe_confirmed());
+    state.power_state=0;(void)folio_power_poll();state.power_state=0;
     reset();available=false;folio_power_init();assert(!folio_power_update_gate());
     puts("Cached update power gate: valid >=20%, low/critical/unknown/failed-poll/pending refusal, 3 s unreadable bridge, readable-refusal precedence and no I/O passed");
 }

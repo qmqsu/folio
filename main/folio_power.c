@@ -222,6 +222,15 @@ bool folio_power_update_safe(void) {
         state->soc_permille >= 200 && state->soc_permille <= 1000;
 }
 
+bool folio_power_unsafe_confirmed(void) {
+    if (s_shutdown_pending) return true;
+    const pmu_snapshot_t* state = s_available ? read_pico_pmu_get() : NULL;
+    if (!s_status_valid || !state || !state->status_ok) return false;
+    return state->power_state == PMU_PWR_SHUTDOWN_PENDING ||
+        !(state->flags & PMU_STATUS_BATTERY_VALID) ||
+        (state->flags & (PMU_STATUS_BATTERY_LOW | PMU_STATUS_BATTERY_CRITICAL)) ||
+        state->soc_permille < 200 || state->soc_permille > 1000;
+}
 bool folio_power_update_gate(void) {
     if (folio_power_update_safe()) {
         s_update_safe_us = esp_timer_get_time();
