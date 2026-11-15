@@ -14,7 +14,7 @@ static bool online_active(void) {
 static void online_publish_safety(void) {
     unsigned flags=atomic_load(&s_online_safety)&(ONLINE_AUTH|ONLINE_CANCEL);
     if(s_card_ready && !s_online_card_lost)flags|=ONLINE_CARD;
-    if(s_power_initialized && folio_power_update_safe())flags|=ONLINE_POWER;
+    if(s_power_initialized && folio_power_update_gate())flags|=ONLINE_POWER;
     if(folio_power_shutdown_pending())flags|=ONLINE_CANCEL;
     atomic_store(&s_online_safety,flags);
 }

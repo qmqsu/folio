@@ -33,6 +33,11 @@ bool folio_power_shutdown_pending(void);
 // UI thread only, cached PMU status; no I2C, event polling or acknowledgement.
 // Unknown/failed status, <20%, low/critical battery and pending shutdown refuse.
 bool folio_power_update_safe(void);
+// Online-update gate. Same verdict as folio_power_update_safe(), except that a
+// status that cannot be read for a few seconds does not revoke an install that
+// was already confirmed safe: no I2C on this path, so a worker holding flash or
+// the bus can make one poll fail. A readable UNSAFE status still refuses at once.
+bool folio_power_update_gate(void);
 // Best-effort peripheral sleep, then SHUTDOWN_READY with the retained event ID.
 // Call only after closing files/syncing the card; failed saves must not block this.
 // A return means the host has not yet lost power; retry without resuming card I/O.

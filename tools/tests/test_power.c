@@ -22,6 +22,8 @@ static uint32_t last_clock_write;
 static int clock_readback_delta;
 static uint16_t ready_id;
 static int64_t now, awake_us;
+// Just past the production 3 s unreadable bridge; keep in step with folio_power.c.
+#define UPDATE_GATE_TEST_GRACE_US INT64_C(3000001)
 static int rtc_rate_ppm;
 static bool shutdown_during_clock_read;
 static uint16_t clock_response_status;
@@ -766,7 +768,23 @@ static void test_update_power_gate(void) {
     state.power_state=PMU_PWR_SHUTDOWN_PENDING;assert(!folio_power_update_safe());
     (void)folio_power_poll();state.power_state=0;assert(!folio_power_update_safe());
     reset();available=false;folio_power_init();assert(!folio_power_update_safe());
-    puts("Cached update power gate: valid >=20%, low/critical/unknown/failed-poll/pending refusal and no I/O passed");
+
+    // The online gate bridges an unreadable poll but never a readable refusal.
+    init_running();
+    assert(folio_power_update_gate());
+    fail_poll=true;(void)folio_power_poll();
+    assert(!folio_power_update_safe());assert(folio_power_update_gate());
+    now+=UPDATE_GATE_TEST_GRACE_US;(void)folio_power_poll();
+    assert(!folio_power_update_gate());                       // Bridge expired, still unreadable.
+    fail_poll=false;(void)folio_power_poll();
+    assert(folio_power_update_gate());                        // Next good poll restores it.
+    state.soc_permille=150;assert(!folio_power_update_gate()); // Readable unsafe refuses.
+    fail_poll=true;(void)folio_power_poll();
+    assert(!folio_power_update_gate());                       // No bridge after an unsafe reading.
+    fail_poll=false;(void)folio_power_poll();state.soc_permille=1000;
+    assert(folio_power_update_gate());
+    reset();available=false;folio_power_init();assert(!folio_power_update_gate());
+    puts("Cached update power gate: valid >=20%, low/critical/unknown/failed-poll/pending refusal, 3 s unreadable bridge, readable-refusal precedence and no I/O passed");
 }
 int main(void) {
     const char* clock_case=getenv("FOLIO_POWER_CLOCK_CASE");

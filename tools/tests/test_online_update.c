@@ -205,7 +205,7 @@ static const folio_online_transport_t transport = {NULL, transport_open, transpo
 int esp_crt_bundle_attach(void* ctx) { (void)ctx; return 0; }
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t* config) {
     assert(config->crt_bundle_attach == esp_crt_bundle_attach && !config->skip_cert_common_name_check &&
-        config->disable_auto_redirect && config->max_redirection_count == 0 && config->timeout_ms == 5000 &&
+        config->disable_auto_redirect && config->max_redirection_count == 0 && config->timeout_ms == 20000 &&
         config->transport_type == HTTP_TRANSPORT_OVER_SSL && !config->keep_alive_enable && config->is_async && config->addr_type==HTTP_ADDR_TYPE_INET);
     http_config=*config; assert(socketpair(AF_UNIX,SOCK_STREAM,0,http_pair)==0);
     assert(fcntl(http_pair[0],F_SETFL,fcntl(http_pair[0],F_GETFL,0)|O_NONBLOCK)==0);
@@ -536,7 +536,7 @@ static void test_download_failures(void) {
         if (i==7) lose_card=true;
         if (i==8) { shorten_body=true; unknown_length=true; }
         if (i==9) complete_response=false;
-        if (i==10) read_time_delta=181000000;
+        if (i==10) read_time_delta=301000000;
         if (i==11) response_status=302;
         if (i==12) fail_open=true;
         if (i==13) image_bytes[500]^=1;

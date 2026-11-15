@@ -27,6 +27,11 @@ static bool s_shutdown_pending;
 static bool s_shutdown_prepared;
 static bool s_shutdown_ready_sent;
 static uint16_t s_shutdown_event_id;
+// Last monotonic time the update gate saw a readable, safe battery. Only the
+// gate uses it, and only to bridge an unreadable snapshot; see the header.
+static int64_t s_update_safe_us;
+
+#define UPDATE_GATE_GRACE_US INT64_C(3000000)
 
 #define CLOCK_RETRY_US (60 * 1000000LL)
 #define CLOCK_UTC_MIN UINT32_C(1704067200)
@@ -74,6 +79,7 @@ void folio_power_init(void) {
     s_status_valid = false;
     s_shutdown_pending = s_shutdown_prepared = s_shutdown_ready_sent = s_key_down_wakes = false;
     s_shutdown_event_id = 0;
+    s_update_safe_us = 0;
     s_available = read_pico_pmu_ready();
     s_start_time = esp_timer_get_time();
     if (!s_available) return;
@@ -214,6 +220,21 @@ bool folio_power_update_safe(void) {
         (state->flags & PMU_STATUS_BATTERY_VALID) &&
         !(state->flags & (PMU_STATUS_BATTERY_LOW | PMU_STATUS_BATTERY_CRITICAL)) &&
         state->soc_permille >= 200 && state->soc_permille <= 1000;
+}
+
+bool folio_power_update_gate(void) {
+    if (folio_power_update_safe()) {
+        s_update_safe_us = esp_timer_get_time();
+        return true;
+    }
+    // A readable status that is unsafe must refuse immediately and must also
+    // cancel any bridge. Only an unreadable snapshot may ride out the next
+    // poll: an OTA worker erasing flash can make one I2C poll fail without the
+    // battery having changed.
+    if (s_status_valid || !s_available) { s_update_safe_us = 0; return false; }
+    int64_t now = esp_timer_get_time();
+    return s_update_safe_us > 0 && now >= s_update_safe_us &&
+        now - s_update_safe_us <= UPDATE_GATE_GRACE_US;
 }
 
 esp_err_t folio_power_finish_shutdown(read_pico_handle_t* hardware) {

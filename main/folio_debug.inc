@@ -44,7 +44,7 @@ static void debug_status(unsigned id) {
         if(!strcmp(s_settings.font_path,folio_font_builtin_path(i)))desired=font_ids[i];
     }
     uint32_t caps=MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT;
-    printf("@FOLIO %u STATUS {\"view\":%d,\"width\":%d,\"height\":%d,\"card\":%d,\"books\":%u,\"wifi\":%d,\"connecting\":%d,\"weread\":%d,\"busy\":%d,\"completed\":%u,\"total\":%u,\"rst\":%d,\"battery\":\"%s\",\"idle_minutes\":%u,\"auto_shutdown_enabled\":%u,\"auto_shutdown_minutes\":%u,\"utc\":%lu,\"rtc_utc\":%lu,\"rtc_read_ok\":%d,\"monotonic_us\":%lld,\"rtc_read_us\":%lld,\"system_utc\":%lld,\"timezone_minutes\":%d,\"clock12h\":%d,\"font_active_id\":\"%s\",\"font_requested_id\":\"%s\",\"psram_free\":%u,\"psram_largest\":%u,\"psram_min_free\":%u,\"internal_free\":%u,\"message\":\"%s\"}\n",
+    printf("@FOLIO %u STATUS {\"view\":%d,\"width\":%d,\"height\":%d,\"card\":%d,\"books\":%u,\"wifi\":%d,\"connecting\":%d,\"weread\":%d,\"busy\":%d,\"completed\":%u,\"total\":%u,\"rst\":%d,\"battery\":\"%s\",\"idle_minutes\":%u,\"auto_shutdown_enabled\":%u,\"auto_shutdown_minutes\":%u,\"utc\":%lu,\"rtc_utc\":%lu,\"rtc_read_ok\":%d,\"monotonic_us\":%lld,\"rtc_read_us\":%lld,\"system_utc\":%lld,\"timezone_minutes\":%d,\"clock12h\":%d,\"font_active_id\":\"%s\",\"font_requested_id\":\"%s\",\"psram_free\":%u,\"psram_largest\":%u,\"psram_min_free\":%u,\"internal_free\":%u,\"message\":\"%s\",\"power_initialized\":%d,\"power_safe\":%d,\"power_gate\":%d,\"online_flags\":%u}\n",
         id,(int)s_view,width(),height(),s_card_ready,(unsigned)s_book_count,net.connected,net.connecting,
         (int)wr.state,wr.busy,(unsigned)wr.completed,(unsigned)wr.total,(int)esp_reset_reason(),battery,
         (unsigned)s_settings.idle_minutes,(unsigned)s_settings.auto_shutdown_enabled,
@@ -53,7 +53,9 @@ static void debug_status(unsigned id) {
         (int)s_settings.timezone_minutes,FOLIO_CLOCK_12H(&s_settings)?1:0,active,desired,
         (unsigned)heap_caps_get_free_size(caps),(unsigned)heap_caps_get_largest_free_block(caps),
         (unsigned)heap_caps_get_minimum_free_size(caps),
-        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),escaped);
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),escaped,
+        (int)s_power_initialized,(int)folio_power_update_safe(),(int)folio_power_update_gate(),
+        (unsigned)atomic_load(&s_online_safety));
 }
 static void debug_execute(const folio_debug_command_t* c) {
     // Observation is not user activity: STATUS/SCREEN must not prevent idle lock.

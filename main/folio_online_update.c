@@ -20,9 +20,13 @@
 #include "freertos/task.h"
 
 #define ONLINE_CHUNK 4096u
-#define ONLINE_HTTP_TIMEOUT_MS 5000
+// A 5 s socket timeout aborted whole firmware downloads on slow links: a 3 MiB
+// image needs ~55 s at 55 kB/s, so one stalled TCP window ended the transfer.
+// The total budget below still bounds the operation, and cancel stays instant.
+#define ONLINE_HTTP_TIMEOUT_MS 20000
 #define ONLINE_MANIFEST_BUDGET_US INT64_C(30000000)
-#define ONLINE_IMAGE_BUDGET_US INT64_C(180000000)
+// Room for a slow primary attempt plus one CDN retry at that same rate.
+#define ONLINE_IMAGE_BUDGET_US INT64_C(300000000)
 #define ONLINE_STAGE_ROOT FOLIO_SD_ROOT "/.folio/online-update"
 
 typedef enum { JOB_CHECK, JOB_DOWNLOAD, JOB_INSTALL } job_t;

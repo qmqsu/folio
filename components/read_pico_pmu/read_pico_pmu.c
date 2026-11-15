@@ -585,8 +585,17 @@ static esp_err_t refresh_core(bool full) {
     uint8_t ev[PMU_EVENT_SIZE];
     uint8_t count = 0;
 
-    esp_err_t err = pmu_read_reg(PMU_REG_IDENTITY, ident, sizeof(ident));
-    if (err != ESP_OK) {
+    // One failed identity read used to fail the whole poll. The update gate
+    // reads this snapshot, so a single bus timeout during a flash erase could
+    // revoke a confirmed-safe install; retry like the status read does.
+    esp_err_t err = ESP_FAIL;
+    bool ident_read = false;
+    for (int i = 0; i < 3 && !ident_read; i++) {
+        if (i) vTaskDelay(pdMS_TO_TICKS(20));
+        err = pmu_read_reg(PMU_REG_IDENTITY, ident, sizeof(ident));
+        ident_read = err == ESP_OK;
+    }
+    if (!ident_read) {
         s_snap.present = false;
         s_snap.last_err = err;
         return err;

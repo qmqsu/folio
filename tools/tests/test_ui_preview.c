@@ -356,6 +356,8 @@ folio_power_event_t folio_power_poll(void) {
     return power_polls==mock_power_event_at?mock_power_event:FOLIO_POWER_NONE;
 }
 bool folio_power_update_safe(void){return mock_update_power_safe && !mock_shutdown_pending;}
+// The preview has no polling history, so the gate has no grace window here.
+bool folio_power_update_gate(void){return mock_update_power_safe && !mock_shutdown_pending;}
 bool folio_power_shutdown_pending(void) {
     // The 12th check is inside the real cache payload loop, after earlier reads.
     if (inside_wallpaper_cache && shutdown_cache_checks && !--shutdown_cache_checks)
