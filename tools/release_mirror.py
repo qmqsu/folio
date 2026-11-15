@@ -86,18 +86,32 @@ def publish(root, branch=BRANCH, downloader=download, retries=12):
     for name in files:
         if name.startswith("channels/"):
             purge_channel(name, branch)
-    for name, expected in files.items():
+    # The branch commit above is the authoritative mirror content. jsDelivr edges
+    # serve a cached copy of @branch and can lag for hours after a purge, so a
+    # slow edge must not fail the release: Pages stays the primary origin and
+    # every downloaded byte is still verified against the signed manifest.
+    stale = []
+    for name, expected in sorted(files.items()):
         url = PREFIX + name
-        for attempt in range(retries):
+        attempts = retries * 5 if name.startswith("channels/") else retries
+        for attempt in range(attempts):
             try:
                 if downloader(url) == expected:
                     break
             except OSError:
                 pass
-            if attempt + 1 == retries:
-                raise ValueError("Mirror content not visible after publication: " + name)
+            else:
+                pass
+            if attempt + 1 == attempts:
+                stale.append(name)
+                break
             time.sleep(5)
-    return {"branch": branch, "files": len(files), "verified": True}
+    result = {"branch": branch, "files": len(files), "verified": not stale}
+    if stale:
+        result["edge_stale"] = stale
+        print("CDN edge still serves a cached copy of: " + ", ".join(stale) +
+              " (fallback only; Pages remains authoritative and the branch is already updated)")
+    return result
 
 
 def main():

@@ -336,7 +336,8 @@ class ReleaseTests(unittest.TestCase):
                 mirror.mirror_files(root)
             (root / "firmware/0.8.32/bad.bin").unlink()
             calls = []
-            blobs = iter(["b" * 40, "c" * 40])
+            blobs = ["b" * 40, "c" * 40]
+            blob_calls = [0]
             def fake_gh(*args, input_text=None):
                 assert not args or args[0] != "api", "gh api must not be duplicated"
                 calls.append((args, input_text))
@@ -346,7 +347,9 @@ class ReleaseTests(unittest.TestCase):
                 if endpoint.endswith("/heads/main"):
                     return {"object": {"sha": "a" * 40}}
                 if endpoint.endswith("/git/blobs"):
-                    return {"sha": next(blobs)}
+                    sha = blobs[blob_calls[0] % len(blobs)]
+                    blob_calls[0] += 1
+                    return {"sha": sha}
                 if endpoint.endswith("/git/trees"):
                     return {"sha": "t" * 40}
                 if endpoint.endswith("/git/commits"):
@@ -363,6 +366,13 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(purges, ["channels/stable.json"])
             self.assertEqual(result, {"branch": "folio-release-assets", "files": 2, "verified": True})
             self.assertEqual(sorted(downloads), sorted(mirror.PREFIX + name for name in expected))
+            # A lagging CDN edge is reported, never fatal: the branch commit and
+            # Pages stay authoritative, and the device verifies signed bytes.
+            stale_download = lambda url: b"stale edge copy"  # noqa: E731
+            with patch.object(mirror, "gh", fake_gh), patch.object(mirror, "purge_channel", side_effect=lambda name, branch: None), patch.object(mirror.time, "sleep", lambda seconds: None):
+                lagging = mirror.publish(root, downloader=stale_download, retries=1)
+            self.assertEqual(lagging["verified"], False)
+            self.assertEqual(lagging["edge_stale"], sorted(expected))
             patch_calls = [json.loads(body) for args, body in calls if "--method" in args and args[args.index("--method") + 1] == "PATCH"]
             self.assertEqual(patch_calls[0]["force"], False)
 
