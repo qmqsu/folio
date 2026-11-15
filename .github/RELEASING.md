@@ -8,7 +8,7 @@
 
 发行中的 `relink.tar.gz` 只是辅助 archive、linker 片段、ELF 和参考 JSON 配置，**not a standalone complete relink kit**。它不独立包含全部外部 SDK 库、工具链 runtime、链接脚本及顶层链接输入；保留符号和重定位不等于材料自足。JSON 配置是核对用的生成结果，不能当 native `sdkconfig` 输入。以下步骤不需要这些辅助对象，也不需要项目源码包带 `.git`；版本与序号由公开构建脚本派生。
 
-工程上的重建/替换成功，**不会自动满足全部 LGPL 或其他许可证义务**。SDK notice、二进制库授权及完整第三方归属必须另外审阅；Wi-Fi net80211 的精确完整第三方归属仍未核实。[法律门禁](<release-legal.json>)不能因 CI 或重链接成功而自动改为通过。私有设备证据、旧交付包、本机配置及密钥不进入公开源包。
+工程上的重建/替换成功，**不会自动满足全部 LGPL 或其他许可证义务**。SDK notice、二进制库授权及完整第三方归属必须另外审阅。固定 WiFi/PHY 子模块的 Espressif 版权、Object-form Apache-2.0 授权与完整 LICENSE/README 已收集；lwIP 无文件级版权行的文件保留其现有 BSD 许可与已有作者/修改/再许可说明，不凭 Git 作者补造版权，也不要求等待上游答复。[法律门禁](<release-legal.json>)仍须由维护者审阅证据后决定，不能因 CI 或重链接成功而自动通过。私有设备证据、旧交付包、本机配置及密钥不进入公开源包。
 
 ## 2. 从公开源包构建 debugOFF
 

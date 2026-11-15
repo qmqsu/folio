@@ -188,7 +188,8 @@ class LicenseCollectionTests(unittest.TestCase):
         self.assertEqual(inventory["idf_commit"], protocol.IDF_COMMIT)
         self.assertEqual(inventory["selected_libc"], "picolibc")
         self.assertEqual(inventory["build_config_sha256"], protocol.digest(config.read_bytes()))
-        self.assertIn("unverified", inventory["unresolved_reviews"][0])
+        self.assertEqual(inventory["unresolved_reviews"], [])
+        self.assertIn("not a release prerequisite", inventory["review_notes"][2])
         with patch.object(licenses, "load_rules", return_value=rules), patch.object(licenses.subprocess, "check_output", return_value="0" * 40):
             with self.assertRaisesRegex(ValueError, "SDK HEAD differs"):
                 licenses.collect(self.root, description)

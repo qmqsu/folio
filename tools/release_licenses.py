@@ -159,10 +159,11 @@ def collect(root, description):
                  "idf_commit": actual_commit, "idf_dirty": dirty, "compiler": version, "submodules": submodules,
                  "selected_libc": libc, "build_config_sha256": config_digest,
                  "notice_mapping_sha256": protocol.digest(RULES.read_bytes()), "fixed_notice_sources": source_evidence,
-                 "unresolved_reviews": [
-                     "WiFi net80211 exact full BSD attribution and independent PHY third-party notices remain unverified; upstream request esp32-wifi-lib#48 is pending.",
-                     "Six lwIP files lack file-level copyright notices and still require upstream provenance review: netdb.c, netifapi.c, netbiosns.c, pppapi.c, pppol2tp.c, pppos.c.",
-                     "Firmware legal gates must remain separate; collector success is not legal approval."
+                 "unresolved_reviews": [],
+                 "review_notes": [
+                     "WiFi/PHY fixed submodules provide Espressif copyright and Object-form Apache-2.0 authorization; exact LICENSE/README texts are retained.",
+                     "Six lwIP files have no file-level copyright line; their existing BSD license text and author/modification/relicensing statements are retained without inventing holders from Git authorship.",
+                     "Upstream replies are not a release prerequisite; candidate review and hardware acceptance remain separate.",
                  ],
                  "components": component_rows, "files": {name: protocol.digest(raw) for name, raw in sorted(files.items())}}
     files["license-inventory.json"] = protocol.canonical(inventory)

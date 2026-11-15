@@ -3,9 +3,6 @@
   "publisher": "qmqsu",
   "repository": "https://github.com/qmqsu/folio",
   "project_license": "MIT",
-  "pending": [
-    "WiFi net80211/PHY upstream notice (espressif/esp32-wifi-lib#48)",
-    "lwIP/esp_netif directed notice coverage and six no-file-copyright provenance items"
-  ],
-  "review_note": "Simplified review: prepare may generate local candidates with pending items, but signing is forbidden until pending is empty. d2f1c4d corresponding-source evidence is reviewed: 544-file source/Git-tree match, clean pinned-IDF debugOFF, actual EPDiy replacement/relink with only epdiy.c/libepdiy.a changed. Full-source rebuild is the supported path; relink.tar.gz is auxiliary, not standalone. Font licenses/current UI coverage and browser/stub notices are verified. FreeRTOS, esp_rom_longjmp, WiFi regulatory and Mozilla CA evidence has been added. 9d6f182 prepare and candidate material review completed; remaining WiFi and six lwIP provenance items. No release."
+  "pending": [],
+  "review_note": "Simplified evidence-based review complete. WiFi/PHY fixed submodules provide Espressif copyright, Object-form Apache-2.0 authorization and full LICENSE/README texts. The six lwIP files retain their exact existing BSD license text and any existing author/modification/relicensing statements; no file-level copyright line is invented from Git authorship. Source, corresponding-source/relink proof, browser/stub/font notices, build and hashes remain bound to the signed candidate. Upstream replies are not a release prerequisite. No hardware acceptance yet; preview must be verified before stable promotion."
 }
