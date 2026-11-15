@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.request import urlopen
 
 import release_manifest as protocol
+from release_bundle import PRIVATE
 
 REPO = "qmqsu/folio"
 BRANCH = "folio-release-assets"
@@ -38,7 +39,7 @@ def mirror_files(root):
         protocol.require(not path.is_symlink(), "Mirror symlink prohibited")
         raw = path.read_bytes()
         protocol.require(len(raw) <= 50 * 1024 * 1024, "Mirror file exceeds bound")
-        protocol.require(b"-----BEGIN PRIVATE KEY-----" not in raw and b"/Users/" not in raw,
+        protocol.require(not PRIVATE.search(raw) and b"/Users/" not in raw,
                          "Private content prohibited in mirror")
         files[relative] = raw
     protocol.require(files, "No public release assets to mirror")

@@ -324,13 +324,17 @@ class ReleaseTests(unittest.TestCase):
     def test_mirror_publishes_only_public_assets_and_verifies_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            expected = {"channels/stable.json": b"signed stable", "firmware/0.8.32/folio.bin": b"app bytes"}
+            expected = {"channels/stable.json": b"signed stable", "firmware/0.8.32/folio.bin": b"app bytes\n-----BEGIN PRIVATE KEY-----\n"}
             for name, raw in expected.items():
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(raw)
             (root / "index.html").write_text("ordinary site content is ignored")
             self.assertEqual(set(mirror.mirror_files(root)), set(expected))
+            (root / "firmware/0.8.32/bad.bin").write_bytes(b"-----BEGIN PRIVATE KEY-----\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+            with self.assertRaisesRegex(ValueError, "Private content"):
+                mirror.mirror_files(root)
+            (root / "firmware/0.8.32/bad.bin").unlink()
             calls = []
             blobs = iter(["b" * 40, "c" * 40])
             def fake_gh(*args, input_text=None):
