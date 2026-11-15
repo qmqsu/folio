@@ -1,2 +1,4 @@
 # This file is only an explicit release override, not a local sdkconfig copy.
 CONFIG_FOLIO_USB_DEBUG=n
+# Keep upstream self-test private keys and test-only code out of release artifacts.
+CONFIG_MBEDTLS_SELF_TEST=n
