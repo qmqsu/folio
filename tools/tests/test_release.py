@@ -174,8 +174,14 @@ class ReleaseTests(unittest.TestCase):
             (root / "main/omitted.c").write_text("unreviewed source")
             with self.assertRaisesRegex(ValueError, "not reviewed"): bundle.source_snapshot(root, allowlist)
             names.add("main/omitted.c"); allowlist.write_text("\n".join(sorted(names)))
-            (root / "main/omitted.c").write_bytes(b"-----BEGIN " + b"PRIVATE KEY-----")
+            (root / "main/omitted.c").write_bytes(b"-----BEGIN PRIVATE KEY-----\nQUJDQUJDQUJDQUJD")
             with self.assertRaisesRegex(ValueError, "Private key/token"): bundle.source_snapshot(root, allowlist)
+
+    def test_private_key_detection_requires_actual_pem_body(self):
+        self.assertIsNone(bundle.PRIVATE.search(b'#define PEM_BEGIN_PRIVATE_KEY_RSA "-----BEGIN RSA PRIVATE KEY-----"'))
+        self.assertIsNone(bundle.PRIVATE.search(b'static const char *name = "-----BEGIN RSA PRIVATE KEY-----\\n";'))
+        self.assertIsNotNone(bundle.PRIVATE.search(b"-----BEGIN PRIVATE KEY-----\nQUJDQUJDQUJDQUJD"))
+        self.assertIsNotNone(bundle.PRIVATE.search(b"-----BEGIN RSA PRIVATE KEY-----\r\nQUJDQUJDQUJDQUJD"))
 
     def test_relink_instructions_are_auxiliary_not_standalone(self):
         for text in (bundle.RELINK_SCOPE, bundle.RELINK_INSTRUCTIONS.decode()):
@@ -285,7 +291,7 @@ class ReleaseTests(unittest.TestCase):
             self.assertEqual(bundle.source_path(root, "main/a.c").read_text(), "public")
             (root / "main/b.c").symlink_to(root / "main/a.c")
             with self.assertRaises(ValueError): bundle.source_path(root, "main/b.c")
-            private_marker = b"-----BEGIN " + b"PRIVATE KEY-----"
+            private_marker = b"-----BEGIN PRIVATE KEY-----\nQUJDQUJDQUJDQUJD"
             self.assertTrue(bundle.PRIVATE.search(private_marker))
 
     def test_immutable_and_stale_workflow_and_retention(self):
