@@ -52,6 +52,7 @@ static int response_status = 200, active_status = 200;
 static int64_t length_delta, free_bytes = 10000000;
 static int64_t read_time_delta;
 static size_t fail_read_once_at;   // one mid-body read failure at/after this offset
+static bool ignore_range;          // server answers a ranged request with 200 + full body
 static uint32_t resume_from;       // pending Range offset requested by seek
 static uint32_t open_offsets[64];
 static unsigned char* response;
@@ -154,7 +155,12 @@ static bool transport_open(void* ctx, const char* url, int* status, int64_t* len
     response = image ? image_bytes : manifest_bytes; response_size = image ? image_size : manifest_size;
     active_status = response_status;
     if (!mirror && server_error_primary_once) { active_status = 500; server_error_primary_once = false; }
-    if (response_offset) {
+    if (response_offset && ignore_range) {
+        // Server ignored Range: 200 with the whole body, from byte zero.
+        response_offset = 0;   // open_offsets keeps the offset that was requested
+        *status = 200;
+        *length = (int64_t)response_size;
+    } else if (response_offset) {
         // A ranged request is answered with exactly the missing bytes.
         *status = 206;
         *length = (int64_t)response_size - (int64_t)response_offset;
@@ -315,7 +321,8 @@ static void setup(bool defaults) {
     cancel_global = default_tls_checked = task_fail = drop_power_write = drop_power_end = false; test_utc=1800000000;
     response_status = active_status = 200; response_mirror = response_image = false; mirror_progress_checks = 0;
     length_delta = read_time_delta = 0; free_bytes = 10000000;
-    fail_read_once_at = 0; resume_from = 0; memset(open_offsets, 0, sizeof(open_offsets));
+    fail_read_once_at = 0; resume_from = 0; ignore_range = false;
+    memset(open_offsets, 0, sizeof(open_offsets));
     select_manifest("valid"); select_image("online.bin"); candidate[0] = 0;
     folio_online_hooks_t hooks = { .card_ready = card_ready, .storage_lock = storage_lock, .storage_unlock = storage_unlock,
         .install_allowed = install_allowed, .cancelled = shutdown_cancelled, .network_ready = net_ready, .transport = defaults ? NULL : &transport };
@@ -467,6 +474,16 @@ static void test_cdn_fallback(void) {
     expect_open(1, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
     expect_open(2, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
     assert(open_offsets[1] == 0 && open_offsets[2] > 0 && open_offsets[2] < image_size);
+    assert_candidate_image(ready.candidate_path);
+
+    // A server that ignores Range must never be appended to: the downloader drops
+    // the partial and takes a clean attempt, which the SHA still verifies.
+    setup(false); check_stable_good(); fail_read_once_at = (size_t)(image_size / 2);
+    ignore_range = true;
+    assert(folio_online_update_start_download(error,sizeof(error))); ready = wait_for(FOLIO_ONLINE_READY);
+    assert(opens == 4 && ready.received == image_size);
+    assert(open_offsets[2] > 0 && open_offsets[3] == 0);
+    expect_open(3, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
     assert_candidate_image(ready.candidate_path);
 
     // Resuming must not launder a corrupted prefix: the signed SHA still refuses.
