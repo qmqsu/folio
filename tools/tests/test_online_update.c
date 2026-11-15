@@ -25,7 +25,7 @@
 
 bool fail_crypto_init, fail_hash_setup, fail_hash_finish;
 static pthread_t thread, guard_thread;
-static bool guard_live, guard_task_fail, request_send_fail, missing_socket, guard_resource_fail;
+static bool guard_live, guard_task_fail, request_send_fail, request_send_fail_image_once, missing_socket, guard_resource_fail;
 static _Atomic unsigned guard_resources;
 static _Thread_local sys_sem_t guard_syssem;
 sys_sem_t* sys_thread_sem_get(void) { if(guard_resource_fail)return NULL;assert(!guard_syssem);guard_syssem=1;++guard_resources;return &guard_syssem; }
@@ -42,8 +42,8 @@ static _Atomic int64_t ticks;
 static unsigned random_value = 1;
 static unsigned storage_depth, locks, opens, closes, reads, begins, writes, aborts, boots, ends;
 static bool present_card = true, power_ok = true, connected = true, lock_fail, disk_full, sync_fail;
-static bool tls_live, complete_response = true, unknown_length, fail_open, fail_read, extra_byte;
-static bool cancel_read, cancel_write, cancel_end, lose_card, mutate_begin, shorten_body, close_cancel;
+static bool tls_live, complete_response = true, unknown_length, fail_open, fail_open_primary_once, fail_read, extra_byte;
+static bool cancel_open, cancel_read, cancel_write, cancel_end, lose_card, mutate_begin, shorten_body, close_cancel;
 static bool cancel_global, default_tls_checked, drop_power_write, drop_power_end;
 static time_t test_utc = 1800000000;
 static int response_status = 200;
@@ -51,6 +51,7 @@ static int64_t length_delta, free_bytes = 10000000;
 static int64_t read_time_delta;
 static unsigned char* response;
 static size_t response_size, response_offset;
+static char open_urls[16][192];
 static unsigned char* manifest_bytes;
 static size_t manifest_size;
 static unsigned char* image_bytes;
@@ -120,13 +121,23 @@ static void* read_file(const char* name, size_t* length) {
     assert(fread(data, 1, (size_t)n, f) == (size_t)n && fclose(f) == 0); *length = (size_t)n; return data;
 }
 static bool transport_open(void* ctx, const char* url, int* status, int64_t* length, char* error, size_t cap) {
-    (void)ctx; assert(!storage_depth && !tls_live); tls_live = true; ++opens; response_offset = 0;
-    assert(!strncmp(url, FOLIO_REMOTE_ORIGIN, strlen(FOLIO_REMOTE_ORIGIN)));
+    (void)ctx; assert(!storage_depth && !tls_live); tls_live = true; response_offset = 0;
+    bool mirror = !strncmp(url, FOLIO_REMOTE_CDN_ORIGIN, strlen(FOLIO_REMOTE_CDN_ORIGIN));
+    assert(mirror || !strncmp(url, FOLIO_REMOTE_ORIGIN, strlen(FOLIO_REMOTE_ORIGIN)));
+    if (mirror) assert(!strcmp(url, FOLIO_REMOTE_CDN_ORIGIN "channels/stable.json") ||
+        !strcmp(url, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin"));
+    assert(opens < sizeof(open_urls) / sizeof(open_urls[0]));
+    snprintf(open_urls[opens], sizeof(open_urls[opens]), "%s", url); ++opens;
     bool image = strstr(url, "/firmware/") != NULL;
     response = image ? image_bytes : manifest_bytes; response_size = image ? image_size : manifest_size;
     *status = response_status; *length = unknown_length ? -1 : (int64_t)response_size + length_delta;
     if (shorten_body && response_size > 10) response_size -= 10;
-    if (fail_open) { snprintf(error, cap, "TLS injected failure"); return false; }
+    bool fail = fail_open || (fail_open_primary_once && !mirror);
+    if (!mirror) fail_open_primary_once = false;
+    if (fail) {
+        if (cancel_open) folio_online_update_cancel();
+        snprintf(error, cap, "TLS injected failure"); return false;
+    }
     return true;
 }
 static int transport_read(void* ctx, uint8_t* bytes, size_t capacity) {
@@ -168,7 +179,10 @@ esp_err_t esp_http_client_open(esp_http_client_handle_t c, int length) {
     esp_http_client_event_t e={.event_id=HTTP_EVENT_ON_CONNECTED,.client=c,.user_data=http_config.user_data};
     assert(http_config.event_handler(&e)==ESP_OK);
     if(!missing_socket)assert(!(fcntl(http_pair[0],F_GETFL,0)&O_NONBLOCK));
-    if(request_send_fail){esp_http_client_close(c);return ESP_FAIL;}
+    bool fail_image = request_send_fail_image_once && strstr(http_config.url, "/firmware/") &&
+        !strncmp(http_config.url, FOLIO_REMOTE_ORIGIN, strlen(FOLIO_REMOTE_ORIGIN));
+    if(fail_image)request_send_fail_image_once=false;
+    if(request_send_fail||fail_image){esp_http_client_close(c);return ESP_FAIL;}
     return ESP_OK;
 }
 int esp_http_client_get_socket(esp_http_client_handle_t c) { assert(c); return missing_socket ? -1 : http_pair[0]; }
@@ -184,7 +198,12 @@ esp_err_t esp_http_client_close(esp_http_client_handle_t c) {
     assert(http_config.event_handler(&e)==ESP_OK);
     assert(close(http_pair[0])==0 && close(http_pair[1])==0); transport_close(NULL); return ESP_OK;
 }
-esp_err_t esp_http_client_cleanup(esp_http_client_handle_t c) { assert(c && !tls_live); return ESP_OK; }
+esp_err_t esp_http_client_cleanup(esp_http_client_handle_t c) {
+    assert(c && !tls_live);
+    // A primary->mirror retry destroys the first client within one worker job.
+    if(guard_live){assert(pthread_join(guard_thread,NULL)==0);guard_live=false;}
+    return ESP_OK;
+}
 bool folio_io_cancelled(void) { return cancel_global; }
 const esp_partition_t* esp_ota_get_running_partition(void) { return &running; }
 const esp_partition_t* esp_ota_get_next_update_partition(const esp_partition_t* p) { assert(!p); return &target; }
@@ -219,10 +238,10 @@ static void select_image(const char* name) { free(image_bytes); image_bytes = re
 static void setup(bool defaults) {
     assert(!thread_live && !tls_live && !ota_live && !storage_depth);
     opens = closes = reads = locks = begins = writes = aborts = boots = ends = 0; ticks = 0;
-    guard_task_fail=request_send_fail=missing_socket=guard_resource_fail=false;assert(!guard_resources);
+    guard_task_fail=request_send_fail=request_send_fail_image_once=missing_socket=guard_resource_fail=false;assert(!guard_resources);
     present_card = power_ok = connected = complete_response = true;
-    lock_fail = disk_full = sync_fail = unknown_length = fail_open = fail_read = extra_byte = false;
-    cancel_read = cancel_write = cancel_end = lose_card = mutate_begin = shorten_body = close_cancel = false;
+    lock_fail = disk_full = sync_fail = unknown_length = fail_open = fail_open_primary_once = fail_read = extra_byte = false;
+    cancel_open = cancel_read = cancel_write = cancel_end = lose_card = mutate_begin = shorten_body = close_cancel = false;
     cancel_global = default_tls_checked = task_fail = drop_power_write = drop_power_end = false; test_utc=1800000000;
     response_status = 200; length_delta = read_time_delta = 0; free_bytes = 10000000;
     select_manifest("valid"); select_image("online.bin"); candidate[0] = 0;
@@ -230,8 +249,16 @@ static void setup(bool defaults) {
         .install_allowed = install_allowed, .cancelled = shutdown_cancelled, .network_ready = net_ready, .transport = defaults ? NULL : &transport };
     assert(folio_online_update_init(&hooks));
 }
+static void expect_open(unsigned index, const char* url) {
+    assert(index < opens && !strcmp(open_urls[index], url));
+}
 static void check_good(void) {
     char error[192]; assert(folio_online_update_start_check("preview", error, sizeof(error)));
+    folio_online_snapshot_t s = wait_for(FOLIO_ONLINE_AVAILABLE); assert(s.sequence == 8032001 && !strcmp(s.version,"0.8.32-dev.1"));
+}
+static void check_stable_good(void) {
+    select_manifest("wrong-channel"); // Same valid signed release, with channel=stable.
+    char error[192]; assert(folio_online_update_start_check("stable", error, sizeof(error)));
     folio_online_snapshot_t s = wait_for(FOLIO_ONLINE_AVAILABLE); assert(s.sequence == 8032001 && !strcmp(s.version,"0.8.32-dev.1"));
 }
 static void download_good(void) {
@@ -239,6 +266,113 @@ static void download_good(void) {
     folio_online_snapshot_t s = wait_for(FOLIO_ONLINE_READY); assert(s.received == image_size && s.total == image_size && s.candidate_path[0]);
     snprintf(candidate,sizeof(candidate),"%s",s.candidate_path);
     assert(strstr(candidate,"/.folio/online-update/0.8.32-dev.1/"));
+}
+static void test_cdn_mapping(void) {
+    const char* version = "0.8.32-dev.1";
+    char output[192];
+    assert(folio_remote_cdn_url(FOLIO_REMOTE_ORIGIN "channels/stable.json", NULL, output, sizeof(output)));
+    assert(!strcmp(output, FOLIO_REMOTE_CDN_ORIGIN "channels/stable.json"));
+    assert(folio_remote_cdn_url(FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin", version, output, sizeof(output)));
+    assert(!strcmp(output, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin"));
+    const struct { const char* url; const char* version; } invalid[] = {
+        {FOLIO_REMOTE_ORIGIN "channels/preview.json", NULL},
+        {FOLIO_REMOTE_ORIGIN "channels/stable.json?x=1", NULL},
+        {FOLIO_REMOTE_ORIGIN "channels/stable.json#x", NULL},
+        {FOLIO_REMOTE_ORIGIN "channels/stable.json", "0.8.32-dev.1"},
+        {FOLIO_REMOTE_ORIGIN "other/stable.json", NULL},
+        {"https://evil.example/folio/channels/stable.json", NULL},
+        {"https://qmqsu.github.io.evil.example/folio/channels/stable.json", NULL},
+        {"https://qmqsu.github.io@evil.example/folio/channels/stable.json", NULL},
+        {"https://qmqsu.github.io:443/folio/channels/stable.json", NULL},
+        {"http://qmqsu.github.io/folio/channels/stable.json", NULL},
+        {FOLIO_REMOTE_CDN_ORIGIN "channels/stable.json", NULL},
+        {FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin", NULL},
+        {FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin?x=1", "0.8.32-dev.1"},
+        {FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin#x", "0.8.32-dev.1"},
+        {FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin", "0.8.32-dev.2"},
+        {FOLIO_REMOTE_ORIGIN "firmware/../evil/folio.bin", "../evil"},
+        {FOLIO_REMOTE_ORIGIN "firmware/%2e%2e/folio.bin", "%2e%2e"},
+        {FOLIO_REMOTE_ORIGIN "firmware/a/b/folio.bin", "a/b"},
+        {FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1?x=1/folio.bin", "0.8.32-dev.1?x=1"},
+        {FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1\\evil/folio.bin", "0.8.32-dev.1\\evil"},
+        {FOLIO_REMOTE_ORIGIN "firmware//folio.bin", ""},
+        {FOLIO_REMOTE_ORIGIN "firmware/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/folio.bin", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+        {"https://evil.example/folio/firmware/0.8.32-dev.1/folio.bin", "0.8.32-dev.1"},
+        {FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin", "0.8.32-dev.1"},
+    };
+    for (unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) {
+        output[0] = 'x'; assert(!folio_remote_cdn_url(invalid[i].url, invalid[i].version, output, sizeof(output)));
+        assert(output[0] == 'x');
+    }
+    assert(!folio_remote_cdn_url(NULL, NULL, output, sizeof(output)));
+    assert(!folio_remote_cdn_url(FOLIO_REMOTE_ORIGIN "channels/stable.json", NULL, NULL, sizeof(output)));
+    assert(!folio_remote_cdn_url(FOLIO_REMOTE_ORIGIN "channels/stable.json", NULL, output, 8));
+    puts("Online CDN mapping: exact stable/signed-image URLs only; host/path/query/fragment/traversal/version aliases rejected");
+}
+static void test_cdn_fallback(void) {
+    char error[192];
+    setup(false); fail_open_primary_once = true; check_stable_good();
+    assert(opens == 2 && closes == 2);
+    expect_open(0, FOLIO_REMOTE_ORIGIN "channels/stable.json");
+    expect_open(1, FOLIO_REMOTE_CDN_ORIGIN "channels/stable.json");
+
+    setup(false); select_manifest("wrong-channel"); response_status = 404;
+    assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_NO_RELEASE);
+    assert(opens == 1); expect_open(0, FOLIO_REMOTE_ORIGIN "channels/stable.json");
+
+    setup(false); select_manifest("wrong-channel"); assert(manifest_size > 90);
+    assert(manifest_bytes[manifest_size-2] == '"' && manifest_bytes[manifest_size-1] == '}');
+    uint8_t* signature = manifest_bytes + manifest_size - 90; assert(signature[-1] == '"');
+    *signature = *signature == 'A' ? 'B' : 'A';
+    assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 1 && !begins && !boots);
+
+    setup(false); select_manifest("wrong-channel");
+    length_delta = (int64_t)FOLIO_REMOTE_MANIFEST_MAX + 1 - (int64_t)manifest_size;
+    assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 1);
+
+    setup(false); select_manifest("wrong-channel"); fail_read = true;
+    assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 1);
+
+    setup(false); fail_open_primary_once = cancel_open = true; select_manifest("wrong-channel");
+    assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_CANCELLED);
+    assert(opens == 1); expect_open(0, FOLIO_REMOTE_ORIGIN "channels/stable.json");
+
+    setup(false); fail_open_primary_once = close_cancel = true; select_manifest("wrong-channel");
+    assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_CANCELLED);
+    assert(opens == 1); expect_open(0, FOLIO_REMOTE_ORIGIN "channels/stable.json");
+
+    setup(false); check_stable_good(); fail_open_primary_once = true;
+    assert(folio_online_update_start_download(error,sizeof(error))); folio_online_snapshot_t ready = wait_for(FOLIO_ONLINE_READY);
+    assert(ready.received == image_size && ready.total == image_size && opens == 3 && closes == 3);
+    expect_open(1, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+    expect_open(2, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+
+    setup(false); check_stable_good(); response_status = 404;
+    assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 2); expect_open(1, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+
+    setup(false); check_stable_good(); response_status = 302;
+    assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 2);
+
+    setup(false); check_stable_good(); fail_read = true;
+    assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 2);
+
+    setup(false); check_stable_good(); fail_open_primary_once = true; image_bytes[500] ^= 1;
+    assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 3 && !begins && !boots);
+    expect_open(2, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+
+    setup(false); check_stable_good(); fail_open = true;
+    assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
+    assert(opens == 3 && !begins && !boots);
+    expect_open(1, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+    expect_open(2, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+    puts("Online CDN fallback: open-only retry, old connection closed first; 404/redirect/read/signature/oversize/SHA/cancel never add attempts");
 }
 static void test_check_failures(void) {
     char error[192]; setup(false);
@@ -264,6 +398,7 @@ static void test_check_failures(void) {
         if (i==10) test_utc=0;
         if (i==11) test_utc=(time_t)4102444800;
         assert(folio_online_update_start_check("preview",error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED); assert(!begins && !boots);
+        if(i==2)assert(opens==1); // preview has no CDN mapping, even for an open failure.
     }
     setup(false); cancel_read=true; assert(folio_online_update_start_check("preview",error,sizeof(error))); wait_for(FOLIO_ONLINE_CANCELLED);
     setup(false); task_fail=true; assert(!folio_online_update_start_check("preview",error,sizeof(error)) && !folio_online_update_busy());
@@ -330,20 +465,25 @@ static void test_install_failures(void) {
         if(i==2||i==4||i==6)assert(aborts==1);
         if(i==7)assert(ends==1);
     }
-    setup(true); download_good(); assert(default_tls_checked);
+    setup(true); request_send_fail_image_once = true; download_good(); assert(default_tls_checked);
+    assert(opens == 3 && closes == 3);
+    expect_open(0, FOLIO_REMOTE_ORIGIN "channels/preview.json");
+    expect_open(1, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+    expect_open(2, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
     // Mutating unrelated legacy sidecars cannot influence signed installation.
     FILE* f=fopen(FOLIO_SD_ROOT "/update/folio.bin.sha256","wb"); assert(f); assert(fputs("attacker sidecar",f)>=0 && fclose(f)==0);
     assert(folio_online_update_start_install(error,sizeof(error))); wait_for(FOLIO_ONLINE_INSTALLED);
     assert(begins==1 && boots==1 && ends==1 && writes>1 && !aborts);
     assert(!folio_online_update_start_check("preview",error,sizeof(error)));
-    puts("Online install: actual file/OTA-write mutation, power refusal, mid-write/end cancellation retain boot; signature-bound default-TLS-config success installs inactive slot");
+    puts("Online install: mutation/power/cancel retain boot; default-TLS primary-open failure uses exact CDN then signature/SHA-bound install succeeds");
 }
 void test_remote_manifests(const char* root);
 int main(int argc,char** argv){
     assert(argc==2); fixtures=argv[1];
     assert(mkdir(FOLIO_SD_ROOT,0700)==0 && mkdir(FOLIO_SD_ROOT "/update",0700)==0);
     FILE* f=fopen(FOLIO_SD_ROOT "/update/folio.bin","wb"); assert(f && fputs("user-owned old update",f)>=0 && fclose(f)==0);
-    test_remote_manifests(fixtures); test_check_failures(); test_download_failures(); test_install_failures();
+    test_remote_manifests(fixtures); test_cdn_mapping(); test_cdn_fallback();
+    test_check_failures(); test_download_failures(); test_install_failures();
     char sentinel[64]={0}; f=fopen(FOLIO_SD_ROOT "/update/folio.bin","rb"); assert(f && fread(sentinel,1,63,f)==21 && fclose(f)==0 && !strcmp(sentinel,"user-owned old update"));
     free(manifest_bytes); free(image_bytes);
     puts("Online OTA tests passed under ASan/UBSan; real host crypto, no device, network, production private key or GitHub access");

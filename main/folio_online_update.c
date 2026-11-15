@@ -45,12 +45,42 @@ typedef struct {
     esp_http_client_handle_t client;
     folio_online_guard_t guard;
     int64_t deadline_us;
+    char mirror_url[192];
     bool bad_encoding, guard_failed;
 } https_t;
 static https_t s_https;
+static bool s_connection_open;
 
 static void error_text(char* out, size_t cap, const char* text) {
     if (out && cap) snprintf(out, cap, "%s", text);
+}
+static bool signed_version_token(const char* version) {
+    if (!version || !*version || *version == '.' || *version == '-' || *version == '_') return false;
+    size_t length = 0;
+    for (const char* p = version; *p; ++p) {
+        if (!((*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+            (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_')) return false;
+        if (++length >= sizeof(s_work.manifest.image.version)) return false;
+    }
+    return true;
+}
+bool folio_remote_cdn_url(const char* primary_url, const char* signed_version,
+    char* output, size_t output_cap) {
+    if (!primary_url || !output || !output_cap) return false;
+    char expected[192], mapped[192];
+    int n;
+    if (!signed_version) {
+        n = snprintf(expected, sizeof(expected), "%s", FOLIO_REMOTE_ORIGIN "channels/stable.json");
+    } else {
+        if (!signed_version_token(signed_version)) return false;
+        n = snprintf(expected, sizeof(expected), FOLIO_REMOTE_ORIGIN "firmware/%s/folio.bin", signed_version);
+    }
+    if (n <= 0 || (size_t)n >= sizeof(expected) || strcmp(primary_url, expected)) return false;
+    if (!signed_version) n = snprintf(mapped, sizeof(mapped), "%s", FOLIO_REMOTE_CDN_ORIGIN "channels/stable.json");
+    else n = snprintf(mapped, sizeof(mapped), FOLIO_REMOTE_CDN_ORIGIN "firmware/%s/folio.bin", signed_version);
+    if (n <= 0 || (size_t)n >= sizeof(mapped) || (size_t)n >= output_cap) return false;
+    memcpy(output, mapped, (size_t)n + 1);
+    return true;
 }
 static bool cancel_flag(void* ignored) {
     (void)ignored;
@@ -116,8 +146,10 @@ static esp_err_t https_event(esp_http_client_event_t* event) {
 }
 static bool https_open(void* context, const char* url, int* status, int64_t* length, char* error, size_t cap) {
     https_t* state = context; state->bad_encoding = state->guard_failed = false;
-    // URLs are exact constants or reconstructed from a verified version token.
-    if (strncmp(url, FOLIO_REMOTE_ORIGIN, strlen(FOLIO_REMOTE_ORIGIN))) {
+    // Primary URLs are exact constants or reconstructed from a verified version
+    // token. A CDN URL is accepted only after http_begin maps it exactly.
+    bool mapped_mirror = state->mirror_url[0] && !strcmp(url, state->mirror_url);
+    if (strncmp(url, FOLIO_REMOTE_ORIGIN, strlen(FOLIO_REMOTE_ORIGIN)) && !mapped_mirror) {
         error_text(error, cap, "更新地址不在受信任来源内。"); return false;
     }
     if (!folio_online_guard_begin(&state->guard, state->deadline_us, cancel_flag, NULL)) {
@@ -170,10 +202,35 @@ static void https_close(void* context) {
     folio_online_guard_stop(&state->guard);
     if (state->client) { (void)esp_http_client_close(state->client); (void)esp_http_client_cleanup(state->client); state->client = NULL; }
 }
-static bool http_begin(const char* url, int* status, int64_t* length, int64_t deadline, char* error, size_t cap) {
+static bool open_connection(const char* url, int* status, int64_t* length, char* error, size_t cap) {
+    // The transport contract requires close after every open, even on failure.
+    s_connection_open = true;
+    return s_transport.open(s_transport.context, url, status, length, error, cap);
+}
+static void close_connection(void) {
+    if (!s_connection_open) return;
+    s_connection_open = false;
+    s_transport.close(s_transport.context);
+}
+static bool http_begin(const char* url, const char* signed_version, int* status, int64_t* length,
+    int64_t deadline, char* error, size_t cap) {
     *status = 0; *length = -1;
-    if (s_transport.open == https_open) s_https.deadline_us = deadline;
-    if (!s_transport.open(s_transport.context, url, status, length, error, cap)) {
+    char mirror[192];
+    bool can_mirror = folio_remote_cdn_url(url, signed_version, mirror, sizeof(mirror));
+    bool default_https = s_transport.open == https_open;
+    if (default_https) { s_https.deadline_us = deadline; s_https.mirror_url[0] = 0; }
+    bool okay = open_connection(url, status, length, error, cap);
+    // Only an open failure can select the mirror. Keep the signed envelope,
+    // manifest URL and verification state bound to the primary URL.
+    if (!okay && can_mirror && !cancelled(NULL)) {
+        close_connection();
+        if (!cancelled(NULL)) {
+            if (default_https) snprintf(s_https.mirror_url, sizeof(s_https.mirror_url), "%s", mirror);
+            if (error && cap) *error = 0;
+            okay = open_connection(mirror, status, length, error, cap);
+        }
+    }
+    if (!okay) {
         if (error && cap && !*error) error_text(error, cap, "HTTPS 请求失败。");
         return false;
     }
@@ -198,9 +255,9 @@ static folio_online_state_t check_manifest(char* error, size_t cap) {
     if (!connection_ready(error, cap)) return FOLIO_ONLINE_FAILED;
     int status; int64_t length;
     int64_t deadline = esp_timer_get_time() + ONLINE_MANIFEST_BUDGET_US;
-    bool okay = http_begin(folio_remote_manifest_url(s_work.channel), &status, &length, deadline, error, cap);
+    bool okay = http_begin(folio_remote_manifest_url(s_work.channel), NULL, &status, &length, deadline, error, cap);
     if (okay && status == 404) {
-        s_transport.close(s_transport.context);
+        close_connection();
         error_text(error, cap, "此通道暂未发布在线更新。"); return FOLIO_ONLINE_NO_RELEASE;
     }
     if (okay) okay = response_ok(status, error, cap);
@@ -220,7 +277,7 @@ static folio_online_state_t check_manifest(char* error, size_t cap) {
         if ((size_t)n > sizeof(s_work.envelope) - used) { error_text(error, cap, "发布清单超过 4096 字节。"); okay = false; break; }
         memcpy(s_work.envelope + used, buffer, (size_t)n); used += (size_t)n;
     }
-    s_transport.close(s_transport.context);
+    close_connection();
     if (okay && !within_budget(deadline, error, cap)) okay = false;
     s_work.envelope_size = okay ? used : 0;
     if (okay) okay = verify_manifest(&s_work.manifest, error, cap);
@@ -298,7 +355,7 @@ static folio_online_state_t download_image(char* error, size_t cap) {
     if (!verify_manifest(&s_work.manifest, error, cap) || !connection_ready(error, cap)) return FOLIO_ONLINE_FAILED;
     int status; int64_t length;
     int64_t deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
-    bool okay = http_begin(s_work.manifest.url, &status, &length, deadline, error, cap);
+    bool okay = http_begin(s_work.manifest.url, s_work.manifest.image.version, &status, &length, deadline, error, cap);
     if (okay) okay = response_ok(status, error, cap);
     if (okay && length >= 0 && (uint64_t)length != s_work.manifest.image.size) {
         error_text(error, cap, "服务器固件长度与已签名清单不一致。"); okay = false;
@@ -324,7 +381,7 @@ static folio_online_state_t download_image(char* error, size_t cap) {
         vTaskDelay(1);
     }
     // The complete TLS session is destroyed BEFORE validation or installation.
-    s_transport.close(s_transport.context); free(buffer);
+    close_connection(); free(buffer);
     if (okay && !stage_write(NULL, 0, received, true, error, cap)) okay = false;
     if (okay && !within_budget(deadline, error, cap)) okay = false;
     if (okay && lock_card(error, cap)) {
@@ -393,7 +450,7 @@ bool folio_online_update_init(const folio_online_hooks_t* hooks) {
     if (hooks->transport) s_transport = *hooks->transport;
     else s_transport = (folio_online_transport_t){&s_https, https_open, https_read, https_complete, https_close};
     memset(&s_work, 0, sizeof(s_work)); memset(&s_snapshot, 0, sizeof(s_snapshot));
-    s_initialized = true; s_cancel = false;
+    s_connection_open = false; s_initialized = true; s_cancel = false;
     portEXIT_CRITICAL(&s_mux); return true;
 }
 static bool launch(job_t job, const char* channel, char* error, size_t cap) {

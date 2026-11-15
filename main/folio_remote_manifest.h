@@ -6,6 +6,7 @@
 
 #define FOLIO_REMOTE_MANIFEST_MAX 4096u
 #define FOLIO_REMOTE_ORIGIN "https://qmqsu.github.io/folio/"
+#define FOLIO_REMOTE_CDN_ORIGIN "https://gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/"
 #define FOLIO_REMOTE_LAYOUT "folio-16m-factory-storage-ota-v2"
 #define FOLIO_REMOTE_HARDWARE "RDP-G01-W"
 
@@ -23,3 +24,7 @@ bool folio_remote_manifest_verify(const uint8_t* envelope, size_t length,
     const char* channel, uint32_t current_sequence, folio_remote_manifest_t* out,
     char* error, size_t error_cap);
 const char* folio_remote_manifest_url(const char* channel);
+// Maps only channels/stable.json (signed_version=NULL) or the exact firmware
+// URL for signed_version. The signed manifest and its original URL stay unchanged.
+bool folio_remote_cdn_url(const char* primary_url, const char* signed_version,
+    char* output, size_t output_cap);
