@@ -94,7 +94,7 @@ static char s_update_message[192];
 // UI owns lifecycle; worker callbacks see only these atomic safety bits.
 enum { ONLINE_CARD = 1, ONLINE_POWER = 2, ONLINE_AUTH = 4, ONLINE_CANCEL = 8 };
 static atomic_uint s_online_safety;
-static bool s_update_local, s_online_beta, s_online_confirm, s_online_initialized;
+static bool s_update_local, s_online_confirm, s_online_initialized;
 static bool s_online_operation, s_online_install_owned, s_online_network;
 static bool s_online_leaving, s_online_card_lost, s_online_wifi_setup;
 static bool s_online_stopping;

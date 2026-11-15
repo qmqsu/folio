@@ -19,6 +19,7 @@ import release_manifest as protocol
 import release_bundle as bundle
 import release_pages as pages
 import release_ci as transport
+import release_mirror as mirror
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, utils
 
@@ -319,6 +320,46 @@ class ReleaseTests(unittest.TestCase):
         bad = fixture_candidate(self.fixture_key, "0.8.33-dev"); bad["folio.bin"] += b"corruption"
         with self.assertRaises(ValueError): pages.compose(first, self.public, candidate=bad)
         self.assertEqual(first, original)
+
+    def test_mirror_publishes_only_public_assets_and_verifies_bytes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = {"channels/stable.json": b"signed stable", "firmware/0.8.32/folio.bin": b"app bytes"}
+            for name, raw in expected.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(raw)
+            (root / "private.txt").write_text("not allowed")
+            with self.assertRaisesRegex(ValueError, "public release assets"):
+                mirror.mirror_files(root)
+            (root / "private.txt").unlink()
+            calls = []
+            blobs = iter(["b" * 40, "c" * 40])
+            def fake_gh(*args, input_text=None):
+                calls.append((args, input_text))
+                endpoint = next(arg for arg in args if arg.startswith("repos/"))
+                if endpoint.endswith("/heads/folio-release-assets") and "--method" not in args:
+                    raise subprocess.CalledProcessError(1, args)
+                if endpoint.endswith("/heads/main"):
+                    return {"object": {"sha": "a" * 40}}
+                if endpoint.endswith("/git/blobs"):
+                    return {"sha": next(blobs)}
+                if endpoint.endswith("/git/trees"):
+                    return {"sha": "t" * 40}
+                if endpoint.endswith("/git/commits"):
+                    return {"sha": "d" * 40}
+                return {}
+            downloads = []
+            def fake_download(url):
+                name = url.removeprefix(mirror.PREFIX)
+                downloads.append(url)
+                return expected[name]
+            with patch.object(mirror, "gh", fake_gh):
+                result = mirror.publish(root, downloader=fake_download, retries=1)
+            self.assertEqual(result, {"branch": "folio-release-assets", "files": 2, "verified": True})
+            self.assertEqual(sorted(downloads), sorted(mirror.PREFIX + name for name in expected))
+            patch_calls = [json.loads(body) for args, body in calls if "--method" in args and args[args.index("--method") + 1] == "PATCH"]
+            self.assertEqual(patch_calls[0]["force"], False)
 
     def test_stable_requires_exact_human_acceptance(self):
         candidate = fixture_candidate(self.fixture_key, "0.8.32")

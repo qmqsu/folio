@@ -326,6 +326,11 @@ site/package.json
 site/pnpm-lock.yaml
 site/pnpm-workspace.yaml
 site/public/favicon.svg
+site/public/images/README.md
+site/public/images/home.webp
+site/public/images/library.webp
+site/public/images/reading.webp
+site/public/images/settings.webp
 site/public/licenses/esp-flasher-stub-MIT.txt
 site/public/licenses/stub-provenance.txt
 site/public/third-party-licenses.txt
@@ -360,6 +365,7 @@ tools/release_bundle.py
 tools/release_ci.py
 tools/release_licenses.py
 tools/release_manifest.py
+tools/release_mirror.py
 tools/release_pages.py
 tools/release_sdk_notices.json
 tools/scenarios/reading.json

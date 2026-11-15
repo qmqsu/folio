@@ -49,8 +49,9 @@ static void test_online_install_faults_isolated(void) {
         if(pid==0) {
             unsigned installs=online_installs,syncs=card_sync_calls,restarts=restart_calls;
             if(mode==6) {
-                handle_tap(480,364);assert(s_online_beta && mock_online.state==FOLIO_ONLINE_IDLE);
-                assert(s_online_snapshot.state==FOLIO_ONLINE_IDLE && online_installs==installs);
+                folio_online_state_t before=mock_online.state;
+                handle_tap(480,364);assert(mock_online.state==before);
+                assert(online_installs==installs);
                 fflush(NULL);_exit(0);
             }
             if(mode==0)mock_online_start_fail=true;
@@ -76,29 +77,17 @@ static void test_online_install_faults_isolated(void) {
 static void test_online_update_ui(const char* directory,const char* font_path) {
     s_power_initialized=true;s_ui_task=xTaskGetCurrentTaskHandle();
     bool previous_credentials=mock_network.has_credentials;
-    enter_update();assert(!s_update_local && !s_online_beta && !online_active());
+    enter_update();assert(!s_update_local && !online_active());
     unsigned checks=online_checks,downloads=online_downloads,installs=online_installs;
     save_pgm(directory,"190-online-idle-ui-mock");
     for(unsigned i=0;i<5;++i){advance_clock(60);refresh_online();}
     assert(online_checks==checks && !mock_network.running); // No background polling.
-    handle_tap(480,364);assert(s_online_beta && s_online_snapshot.state==FOLIO_ONLINE_IDLE);
-    save_pgm(directory,"191-online-beta-ui-mock");
+    handle_tap(480,364);assert(mock_online.state==FOLIO_ONLINE_IDLE);
+    save_pgm(directory,"191-online-stable-ui-mock");
     char channel_error[80];
     assert(!folio_online_update_start_check("beta",channel_error,sizeof(channel_error)));
     assert(strstr(channel_error,"更新通道无效") && !mock_online.busy && online_checks==checks);
-    mock_network.has_credentials=true;
-    unsigned stations=mock_https_station_calls,connects=mock_native_connect_calls;
-    tap_rect(done_rect());assert(s_online_wait==1);refresh_online();
-    assert(mock_https_station_calls==stations+1 && mock_native_connect_calls==connects);
-    // Exercise the real channel selection -> check action, not just its label.
-    assert(!strcmp(mock_online_requested_channel,"preview"));
-    assert(mock_online.busy && !strcmp(mock_online.channel,"preview") &&
-        s_online_snapshot.state==FOLIO_ONLINE_CHECKING && online_checks==checks+1);
-    save_pgm(directory,"206-online-preview-checking-ui-mock");
-    online_mock_finish(FOLIO_ONLINE_NO_RELEASE,"测试通道尚无发布（HTTP 404）。");
-    assert(!online_active() && !mock_network.running);
     checks=online_checks;mock_network.has_credentials=previous_credentials;
-    handle_tap(180,364);assert(!s_online_beta);
     s_card_ready=false;tap_rect(done_rect());assert(online_checks==checks && strstr(s_online_message,"TF"));
     save_pgm(directory,"192-online-no-card-ui-mock");s_card_ready=true;
     mock_network.has_credentials=false;tap_rect(done_rect());
@@ -229,5 +218,5 @@ static void test_online_update_ui(const char* directory,const char* font_path) {
     s_suspend_pending=false; // Mock esp_restart returns; real hardware reboots.
     load_card(false,false);assert(s_font && s_card_ready);
     s_settings.font_path[0]=0;mock_network.has_credentials=previous_credentials;
-    puts("Online UI SIMULATION passed: manual stable/beta, local mode, STA wait, honest failures, separate download + double install confirmation, cached power revoke, cancellation/back/KEY2/error/root/card-loss, PMU priority, no premature unmount, font restore, idle guard and throttled progress. No real network/signature/OTA in this UI test.");
+    puts("Online UI SIMULATION passed: manual stable-only, local mode, STA wait, honest failures, separate download + double install confirmation, cached power revoke, cancellation/back/KEY2/error/root/card-loss, PMU priority, no premature unmount, font restore, idle guard and throttled progress. No real network/signature/OTA in this UI test.");
 }

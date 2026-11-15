@@ -5,7 +5,7 @@ import { browserSupport, BrowserSerialDevice } from './serial';
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const button = (id: string) => element<HTMLButtonElement>(id);
 const checkbox = (id: string) => element<HTMLInputElement>(id);
-const channel = element<HTMLSelectElement>('channel');
+const channel = 'stable' as const;
 const reset = element<HTMLSelectElement>('reset-mode');
 const status = element<HTMLParagraphElement>('install-status');
 const progress = element<HTMLProgressElement>('install-progress');
@@ -29,7 +29,7 @@ function guardActive(): boolean { return operation || pickerPending || installer
 function announce(message: string): void { status.textContent = message; }
 function updateWorkflowStage(): void {
   const stage = installer?.stage;
-  const current = installer && (installer.stage === 'awaiting-confirmation' || operation || ['success', 'failed', 'cancelled'].includes(stage ?? '')) ? 3 : (element('backup-panel').hidden ? 1 : 2);
+  const current = installer && (installer.stage === 'awaiting-confirmation' || operation || ['success', 'failed', 'cancelled'].includes(stage ?? '')) ? 2 : 1;
   for (const [index, item] of [...document.querySelectorAll('.workbench-steps li')].entries()) {
     item.classList.toggle('is-current', index + 1 === current);
     if (index + 1 === current) item.setAttribute('aria-current', 'step');
@@ -39,7 +39,6 @@ function updateWorkflowStage(): void {
 function updateControls(): void {
   updateWorkflowStage();
   const active = guardActive();
-  channel.disabled = active || checking;
   reset.disabled = active;
   checkbox('physical-model').disabled = active;
   button('check-release').disabled = active || checking || !isSecureContext || !crypto.subtle;
@@ -100,7 +99,7 @@ button('check-release').addEventListener('click', async () => {
   element('release-badge').textContent = '校验中';
   announce('获取通道清单并用固定公钥验证签名；不会连接设备。');
   try {
-    const selected = channel.value as 'stable' | 'preview';
+    const selected = channel;
     const verified = await fetchRelease(selected, checkAbort.signal);
     checkAbort.signal.throwIfAborted();
     // A local high-water mark prevents a previously observed channel rollback.
@@ -111,7 +110,7 @@ button('check-release').addEventListener('click', async () => {
     if (Number.isFinite(previous) && verified.sequence < previous) throw new Error('发布序列低于此浏览器已见版本，已阻止降级。');
     try { localStorage.setItem(key, String(verified.sequence)); } catch { /* no private data stored */ }
     release = verified;
-    element('release-badge').textContent = selected === 'preview' ? '预览版' : '签名有效';
+    element('release-badge').textContent = '签名有效';
     element('release-info').textContent = `${verified.version} · ${verified.channel} · 序列 ${verified.sequence} · 四段发布者签名已验证。签名不代表硬件验收。`;
     announce('清单签名有效。核对实物型号后，可选择设备并读取备份。');
   } catch (error) {
@@ -120,12 +119,6 @@ button('check-release').addEventListener('click', async () => {
     element('release-info').textContent = `${message} 连接与烧录保持禁用。`;
     announce(checkAbort.signal.aborted ? '已取消发布检查，未连接设备。' : `${message} 安装已禁用。`);
   } finally { checking = false; updateControls(); }
-});
-channel.addEventListener('change', () => {
-  release = undefined; clearDownloads(); installer = undefined;
-  element('release-badge').textContent = '未检查';
-  element('release-info').textContent = '请重新检查所选通道。不同通道不会沿用之前的签名状态。';
-  announce('未验证此通道，烧录已禁用。'); updateControls();
 });
 for (const id of ['physical-model', 'backup-saved', 'factory-confirm', 'migration-confirm']) checkbox(id).addEventListener('change', updateControls);
 button('connect-backup').addEventListener('click', async () => {

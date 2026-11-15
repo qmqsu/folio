@@ -23,6 +23,8 @@ WebCrypto ECDSA-P256 / SHA-256 对 **原始 payload 字节**验签，不重新�
 
 四个URL必须逐字等于固定HTTPS源 `https://qmqsu.github.io/folio/firmware/<签名version>/` 加对应地址的固定文件名：`bootloader.bin`、`partition-table.bin`、`folio.bin`、`ota_data_initial.bin`。不能跨版本、增加子目录、换文件名或混用地址；无 query/fragment/userinfo/路径转义/`..`，下载禁止重定向，禁带 credentials/referrer。下载流有硬长度限制，实际长度和 SHA-256 必须都匹配。序列高水位只保存在浏览器 localStorage 的非私密数值，不能宣称芯片防回滚：清浏览器数据、换电脑会重置它。
 
+**备用传输源**：为解决家庭宽带无法直接访问 GitHub 的情况，主源仅在发生网络 TypeError 时回退到 `https://gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/` 下的同路径文件。只允许映射主源 `/folio/` 下的路径；404、用户取消、地址变化、超长、签名或哈希错误均不重试。备用源只改变传输位置，不改变签名 payload、版本、镜像地址或校验值，收到字节仍需通过原有全部检查。镜像发布在 Pages 成功核验后执行，并逐文件回读比对。
+
 ## 四段白名单
 
 | 地址 | 最大字节数 | 内容检查 |

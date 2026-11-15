@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { assertVerified, validatePayload, verifyEnvelope, validateImage, firmwareUrl, fetchRelease, MAX_ENVELOPE_BYTES, PUBLIC_KEY_HEX, PUBLIC_KEY_SHA256, sha256 } from '../src/installer/manifest';
+import { assertVerified, validatePayload, verifyEnvelope, validateImage, firmwareUrl, fetchRelease, fetchWithMirror, mirrorUrl, MAX_ENVELOPE_BYTES, PUBLIC_KEY_HEX, PUBLIC_KEY_SHA256, sha256 } from '../src/installer/manifest';
 import { fixture, table } from './fixtures';
 import { assessInstalledLayout, validatePartitionTable } from '../src/installer/partition';
 
@@ -94,6 +94,37 @@ describe('ECDSA envelope and strict USB contract', () => {
     await expect(fetchRelease('preview')).rejects.toThrow('超过签名长度');
     vi.stubGlobal('fetch', async () => response(4097, true));
     await expect(fetchRelease('preview')).rejects.toThrow('下载长度超出限制');
+  });
+  it('uses the exact CDN mirror only after a primary transport failure', async () => {
+    const f = await fixture();
+    const envelope = await f.sign({ ...f.payload, channel: 'stable' });
+    const primary = 'https://qmqsu.github.io/folio/channels/stable-usb.json';
+    const mirror = mirrorUrl(primary)!;
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(url);
+      if (url === primary) throw new TypeError('fetch failed');
+      const response = new Response(JSON.stringify(envelope));
+      Object.defineProperty(response, 'url', { value: url });
+      return response;
+    });
+    const bytes = await fetchWithMirror(primary, 4096);
+    expect(new TextDecoder().decode(bytes)).toBe(JSON.stringify(envelope));
+    expect(calls).toEqual([primary, mirror]);
+    expect(mirror).toContain('gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/');
+  });
+  it('does not mirror an unpublished 404 or an arbitrary origin', async () => {
+    const primary = 'https://qmqsu.github.io/folio/channels/stable-usb.json';
+    const calls: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      calls.push(url);
+      const response = new Response(null, { status: 404 });
+      Object.defineProperty(response, 'url', { value: url });
+      return response;
+    });
+    await expect(fetchWithMirror(primary, 4096)).rejects.toThrow('未发布');
+    expect(calls).toEqual([primary]);
+    expect(mirrorUrl('https://example.com/firmware/folio.bin')).toBeUndefined();
   });
   it('rejects malformed/noncanonical envelope encoding and extra envelope keys', async () => {
     const f = await fixture();

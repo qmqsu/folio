@@ -1,6 +1,7 @@
 import { validatePartitionTable } from './partition';
 
 export const ORIGIN = 'https://qmqsu.github.io';
+export const MIRROR_ORIGIN = 'https://gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets';
 export const FLASH_SIZE = 0x1000000;
 export const MAX_ENVELOPE_BYTES = 4096;
 export const LAYOUT = 'folio-16m-factory-storage-ota-v2';
@@ -105,9 +106,22 @@ export async function fetchBounded(url: string, maximum: number, signal?: AbortS
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
   return output.slice(0, length);
 }
+export function mirrorUrl(url: string): string | undefined {
+  if (!url.startsWith(`${ORIGIN}/folio/`)) return undefined;
+  return `${MIRROR_ORIGIN}/${url.slice(`${ORIGIN}/folio/`.length)}`;
+}
+export async function fetchWithMirror(url: string, maximum: number, signal?: AbortSignal, progress?: (bytes: number) => void): Promise<Uint8Array> {
+  try {
+    return await fetchBounded(url, maximum, signal, progress);
+  } catch (error) {
+    const mirror = mirrorUrl(url);
+    if (!mirror || signal?.aborted || !(error instanceof TypeError) || (error instanceof Error && error.message.includes('未发布'))) throw error;
+    return fetchBounded(mirror, maximum, signal, progress);
+  }
+}
 export async function fetchRelease(channel: 'preview' | 'stable', signal?: AbortSignal): Promise<Release> {
   const url = `${ORIGIN}/folio/channels/${channel}-usb.json`;
-  const bytes = await fetchBounded(url, MAX_ENVELOPE_BYTES, signal);
+  const bytes = await fetchWithMirror(url, MAX_ENVELOPE_BYTES, signal);
   const release = await verifyEnvelope(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
   if (release.channel !== channel) throw new Error('签名通道与所选通道不符。');
   return release;

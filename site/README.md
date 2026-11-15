@@ -24,10 +24,10 @@ export ASTRO_TELEMETRY_DISABLED=1
 
 ## 发布接口
 
-- 稳定 USB 指针：`https://qmqsu.github.io/folio/channels/stable-usb.json`
-- 预览 USB 指针：`https://qmqsu.github.io/folio/channels/preview-usb.json`
+- 用户只使用稳定 USB 指针：`https://qmqsu.github.io/folio/channels/stable-usb.json`；preview 仅用于内部签名候选，不在网页或设备设置中提供选择。
 - 版本资源：`https://qmqsu.github.io/folio/firmware/<version>/*.bin`
-- **不放示例生产清单、不捏造版本、不内置测试密钥。** 用户点击“检查签名发布”才请求公共清单。404 为“未发布”，网络或签名错误为“不可用”，连接/写入均禁用。
+- **不放示例生产清单、不捏造版本、不内置测试密钥。** 用户点击检查后才请求公共清单。404 为“未发布”，网络或签名错误为“不可用”，连接/写入均禁用。
+- 国内主源不可达时，仅在网络传输失败（TypeError）后尝试备用 CDN `https://gcore.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/`。只映射相同路径，禁止重定向；404、地址变化、超长、签名或 SHA 错误不切换。发布器在 Pages 验证成功后，将相同固件/清单写入该分支并逐文件校验。
 - 发布流水线可将渠道指针和固件合并至 [静态产物](<dist/>) 后部署。本站不生成固件、生产密钥或签名。
 - 固定公钥 SEC1 SHA-256：`46d906373e6ad72238432ccacab0a0d56de0c41a99a651dfb50257a718c6f928`；key id：`folio-release-2026-3`。这是 lead 提供的生产**公钥**。
 
@@ -44,7 +44,7 @@ export ASTRO_TELEMETRY_DISABLED=1
 5. 下载校验四段镜像 → 完整读取 16MiB → 生成 SHA-256 证据 → 用户分别保存备份/证据并确认落盘 → 明确同意切 factory（迁移还需另行同意）→ 写入/逐段回读 SHA → 验证 NVS/PHY 保留区 → 关闭串口 → 才报告完成。
 6. 无 erase-all、merged、字体资源写入。原生 USB 复位不自动重试其他策略。成功后不自动重启设备，提示用户按硬件说明重启。
 
-**本轮没有访问任何真实串口、设备 Flash、私人备份、用户照片或书籍；安装硬件流程尚未验收。** 页面没有把静态构建、模拟测试或浏览器截图当作实机刷机成功。备份下载事件不能证明落盘，必须由用户在电脑中核对。温度、120MHz 稳定性、原生 USB 复位/重枚举与真实掉电恢复均需后续独立硬件验证。
+本轮已在私有调试设备上完成完整 Flash 备份和 app-only 安装／回读，**但网页四段安装流程尚未完成硬件验收**。页面没有把静态构建、模拟测试或浏览器截图当作实机刷机成功。备份下载事件不能证明落盘，必须由用户在电脑中核对。温度、120MHz 稳定性、原生 USB 复位/重枚举与真实掉电恢复仍需后续独立硬件验证。
 
 ## 浏览器验证
 
@@ -59,7 +59,7 @@ export ASTRO_TELEMETRY_DISABLED=1
 
 ## 代码边界
 
-- [页面](<src/pages/index.astro>)、[样式](<src/styles/global.css>)：原创书刊风示意，无真实设备/私人图片；[设计说明](<docs/DESIGN.md>)。
+- [页面](<src/pages/index.astro>)、[样式](<src/styles/global.css>)：深色阅读控制台与浅色安装工作区；使用真实固件 UI 代码渲染的合成示例，不使用私人书籍、照片或阅读记录；[设计说明](<docs/DESIGN.md>)。
 - [签名与镜像](<src/installer/manifest.ts>)：固定信任锚、严格 payload/四段地址与长度、URL、SHA、应用身份。
 - [分区](<src/installer/partition.ts>)：Folio/固定官方布局识别、MD5 与擦除尾部。
 - [状态机](<src/installer/controller.ts>)：下载、备份、确认、写入、回读、取消和关闭。

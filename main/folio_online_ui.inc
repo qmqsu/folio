@@ -88,7 +88,7 @@ static void online_start_worker(unsigned action) {
     char error[192]={0};s_online_wait=0;s_online_message[0]=0;
     atomic_fetch_and(&s_online_safety,~(unsigned)(ONLINE_CANCEL|ONLINE_AUTH));
     online_publish_safety();
-    bool okay=action==1?folio_online_update_start_check(s_online_beta?"preview":"stable",error,sizeof(error)):
+    bool okay=action==1?folio_online_update_start_check("stable",error,sizeof(error)):
         folio_online_update_start_download(error,sizeof(error));
     s_online_operation=okay;
     if(!okay){online_error(error);}
@@ -204,18 +204,6 @@ static void online_tap(int x,int y) {
         s_update_local=true;inspect_local_update();return;
     }
     if(s_update_local){if(hit(done_rect(),x,y))install_update();return;}
-    if(hit((EpdRect){48,328,282,72},x,y) || hit((EpdRect){354,328,282,72},x,y)) {
-        bool beta=x>=354;
-        if(s_online_beta!=beta) {
-            s_online_beta=beta;s_online_message[0]=0;
-            // Invalidate a candidate from the other channel; never install it.
-            if(online_init())(void)folio_online_update_init(&(folio_online_hooks_t){
-                .card_ready=online_card_ready,.storage_lock=online_storage_lock,.storage_unlock=online_storage_unlock,
-                .install_allowed=online_install_allowed,.cancelled=online_cancelled});
-            memset(&s_online_snapshot,0,sizeof(s_online_snapshot));show_view(VIEW_UPDATE,true);
-        }
-        return;
-    }
     if(hit((EpdRect){48,984,282,96},x,y)) {
         s_online_wifi_setup=true;enter_wifi_for(VIEW_UPDATE);return;
     }
@@ -287,7 +275,7 @@ static void draw_online_update(void) {
         panel((EpdRect){48,256,588,656});
         label(72,328,612,28,MUTED,"已完成签名与文件完整校验");
         label(72,404,612,42,INK,s_online_snapshot.version);
-        label(72,468,612,26,INK,s_online_beta?"测试通道 · 尚未全面验收":"稳定通道");
+        label(72,468,612,26,INK,"正式版");
         paragraph(72,552,612,30,46,4,INK,"确认后开始安装并重新启动。请保持供电，不要拔出 TF 卡。");
         paragraph(72,780,612,24,36,3,MUTED,"需要有效电量至少 20%，且无低电量警告。书籍、字体资源和分区不会被更新。");
         text_action((EpdRect){48,984,588,96},"暂不安装");action(done_rect(),"确认安装并重启",true);return;
@@ -295,9 +283,7 @@ static void draw_online_update(void) {
     bool busy=online_active();
     action_state((EpdRect){48,232,282,72},"在线更新",true,!busy);
     action_state((EpdRect){354,232,282,72},"本地 TF 卡",false,!busy);
-    action_state((EpdRect){48,328,282,72},"稳定通道",!s_online_beta,!busy);
-    action_state((EpdRect){354,328,282,72},"测试通道",s_online_beta,!busy);
-    label(48,440,636,24,MUTED,s_online_beta?"测试版本尚未全面验收，请谨慎选择":"仅手动检查，结束后关闭 Wi-Fi");
+    label(48,360,636,26,MUTED,"正式版 · 仅手动检查，结束后关闭 Wi-Fi");
     panel((EpdRect){48,480,588,448});
     const char* title="手动检查更新";
     switch(s_online_snapshot.state) {

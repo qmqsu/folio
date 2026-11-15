@@ -1,4 +1,4 @@
-import { assertVerified, FLASH_SIZE, sha256, validateImage, fetchBounded, type Release, type Part } from './manifest';
+import { assertVerified, FLASH_SIZE, sha256, validateImage, fetchWithMirror, type Release, type Part } from './manifest';
 import { assessInstalledLayout, type LayoutAssessment } from './partition';
 
 export interface DeviceInfo { chip: string; flashSize: number; flashId: number; securitySafe: boolean }
@@ -30,7 +30,7 @@ export class Installer {
   #cancelPromise?: Promise<void>;
   #closePromise?: Promise<void>;
   constructor(private release: Release, private device: SerialDevice, private emit: (update: Update) => void,
-    private download = fetchBounded) { assertVerified(release); }
+    private download = fetchWithMirror) { assertVerified(release); }
   get stage(): Stage { return this.#stage; }
   get connected(): boolean { return this.#open; }
   get compatible(): boolean { return this.#layout?.compatible === true && this.#supportedFlash; }
