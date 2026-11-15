@@ -33,7 +33,8 @@ def mirror_files(root):
         if not path.is_file():
             continue
         relative = path.relative_to(root).as_posix()
-        protocol.require(relative.startswith(ALLOWED), "Mirror only contains public release assets")
+        if not relative.startswith(ALLOWED):
+            continue
         protocol.require(not path.is_symlink(), "Mirror symlink prohibited")
         raw = path.read_bytes()
         protocol.require(len(raw) <= 50 * 1024 * 1024, "Mirror file exceeds bound")

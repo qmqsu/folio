@@ -329,10 +329,8 @@ class ReleaseTests(unittest.TestCase):
                 path = root / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_bytes(raw)
-            (root / "private.txt").write_text("not allowed")
-            with self.assertRaisesRegex(ValueError, "public release assets"):
-                mirror.mirror_files(root)
-            (root / "private.txt").unlink()
+            (root / "index.html").write_text("ordinary site content is ignored")
+            self.assertEqual(set(mirror.mirror_files(root)), set(expected))
             calls = []
             blobs = iter(["b" * 40, "c" * 40])
             def fake_gh(*args, input_text=None):
