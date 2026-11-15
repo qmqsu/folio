@@ -93,7 +93,8 @@ def publish(root, branch=BRANCH, downloader=download, retries=12):
     stale = []
     for name, expected in sorted(files.items()):
         url = PREFIX + name
-        attempts = retries * 5 if name.startswith("channels/") else retries
+        # Give a purged channel pointer a short read-through window, then report it.
+        attempts = 18 if name.startswith("channels/") else retries
         for attempt in range(attempts):
             try:
                 if downloader(url) == expected:
