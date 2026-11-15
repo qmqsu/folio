@@ -20,6 +20,11 @@
 #include "freertos/task.h"
 
 #define ONLINE_CHUNK 4096u
+// One card transaction per 64 KiB instead of one per network chunk: slow SD
+// cards spend most of their time in open/close/FAT metadata, not in the write.
+#define ONLINE_WRITE_BATCH (64u * 1024u)
+// Resumes are progress-driven; this only bounds a pathological flapping link.
+#define ONLINE_MAX_RESUMES 8u
 // A 5 s socket timeout aborted whole firmware downloads on slow links: a 3 MiB
 // image needs ~55 s at 55 kB/s, so one stalled TCP window ended the transfer.
 // The total budget below still bounds the operation, and cancel stays instant.
@@ -50,6 +55,7 @@ typedef struct {
     folio_online_guard_t guard;
     int64_t deadline_us;
     char mirror_url[192];
+    uint32_t range_start;
     bool bad_encoding, guard_failed;
 } https_t;
 static https_t s_https;
@@ -148,6 +154,11 @@ static esp_err_t https_event(esp_http_client_event_t* event) {
         !strcasecmp(event->header_key, "Content-Encoding") && strcasecmp(event->header_value, "identity")) state->bad_encoding = true;
     return ESP_OK;
 }
+static bool https_seek(void* context, uint32_t offset) {
+    https_t* state = context;
+    state->range_start = offset;
+    return true;
+}
 static bool https_open(void* context, const char* url, int* status, int64_t* length, char* error, size_t cap) {
     https_t* state = context; state->bad_encoding = state->guard_failed = false;
     // Primary URLs are exact constants or reconstructed from a verified version
@@ -171,6 +182,17 @@ static bool https_open(void* context, const char* url, int* status, int64_t* len
     state->client = esp_http_client_init(&config);
     if (!state->client || esp_http_client_set_header(state->client, "Accept-Encoding", "identity") != ESP_OK) {
         error_text(error, cap, "HTTPS 初始化失败。"); return false;
+    }
+    // Resuming asks only for the bytes that are missing. The request body is
+    // appended to the same staged file, and the complete file still has to pass
+    // the signed SHA-256 and ESP image checks before it can be installed.
+    if (state->range_start) {
+        char range[32];
+        int n = snprintf(range, sizeof(range), "bytes=%lu-", (unsigned long)state->range_start);
+        if (n <= 0 || (size_t)n >= sizeof(range) ||
+            esp_http_client_set_header(state->client, "Range", range) != ESP_OK) {
+            error_text(error, cap, "HTTPS 初始化失败。"); return false;
+        }
     }
     // Async TLS returns between handshake steps; the guard handles HTTP's
     // internal header/body loops after CONNECTED. DNS is still lwIP's bounded
@@ -216,10 +238,15 @@ static void close_connection(void) {
     s_connection_open = false;
     s_transport.close(s_transport.context);
 }
-static bool http_begin(const char* primary, const char* mirror, bool use_mirror,
+static bool http_begin(const char* primary, const char* mirror, bool use_mirror, uint32_t range,
     int* status, int64_t* length, int64_t deadline, char* error, size_t cap) {
     *status = 0; *length = -1;
     const char* url = use_mirror ? mirror : primary;
+    if (range && (!s_transport.seek || !s_transport.seek(s_transport.context, range))) {
+        error_text(error, cap, "更新服务器不支持断点续传。");
+        return false;
+    }
+    if (!range && s_transport.seek) (void)s_transport.seek(s_transport.context, 0);
     if (s_transport.open == https_open) {
         s_https.deadline_us = deadline; s_https.mirror_url[0] = 0;
         if (use_mirror) snprintf(s_https.mirror_url, sizeof(s_https.mirror_url), "%s", mirror);
@@ -256,7 +283,7 @@ static folio_online_state_t check_manifest(char* error, size_t cap) {
     for (;;) {
         if (use_mirror && !within_budget(deadline, error, cap)) { okay = false; break; }
         used = 0; retryable = false;
-        okay = http_begin(primary, mirror, use_mirror, &status, &length, deadline, error, cap);
+        okay = http_begin(primary, mirror, use_mirror, 0, &status, &length, deadline, error, cap);
         if (!okay) retryable = true;
         if (okay && length < -1) { error_text(error, cap, "服务器文件长度无效。"); okay = false; }
         if (okay && status == 404) {
@@ -371,29 +398,48 @@ static bool stage_write(const uint8_t* bytes, size_t count, uint32_t offset,
 }
 static folio_online_state_t download_image(char* error, size_t cap) {
     if (!verify_manifest(&s_work.manifest, error, cap) || !connection_ready(error, cap)) return FOLIO_ONLINE_FAILED;
+    const uint32_t total = s_work.manifest.image.size;
     const char* primary = s_work.manifest.url;
     char mirror[192];
     bool can_mirror = folio_remote_cdn_url(primary, s_work.manifest.image.version, mirror, sizeof(mirror));
     int status; int64_t length;
-    int64_t deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
+    // One network chunk plus one card batch. Buffering here is what keeps a
+    // slow card from setting the download speed.
     uint8_t* buffer = malloc(ONLINE_CHUNK);
-    if (!buffer) {
+    uint8_t* batch = malloc(ONLINE_WRITE_BATCH);
+    if (!buffer || !batch) {
+        free(buffer); free(batch);
         error_text(error, cap, "下载缓冲内存不足。"); memset(&s_work.preview, 0, sizeof(s_work.preview));
         return FOLIO_ONLINE_FAILED;
     }
     bool okay = false, retryable = false, use_mirror = false, stage_exists = false;
-    uint32_t received = 0;
+    uint32_t written = 0;   // bytes already committed to the staged file
+    uint32_t filled = 0;    // bytes held in the batch buffer
+    unsigned resumes = 0, stalled = 0;
+    // Each source gets its own budget: the primary used to consume the whole
+    // deadline, so the CDN fallback never got a turn.
+    int64_t deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
     for (;;) {
-        if (use_mirror && !within_budget(deadline, error, cap)) { okay = false; break; }
-        received = 0; retryable = false;
-        okay = http_begin(primary, mirror, use_mirror, &status, &length, deadline, error, cap);
+        const uint32_t resume_at = written;
+        retryable = false;
+        if (!within_budget(deadline, error, cap)) break;
+        okay = http_begin(primary, mirror, use_mirror, resume_at, &status, &length, deadline, error, cap);
         if (!okay) retryable = true;
         if (okay && length < -1) { error_text(error, cap, "服务器文件长度无效。"); okay = false; }
-        if (okay && status != 200) {
+        if (okay && resume_at) {
+            if (status == 200) {
+                // Range was ignored, so the body starts at zero and cannot be
+                // appended: force a clean attempt instead of corrupting the file.
+                error_text(error, cap, "更新服务器未按断点返回，正在重新下载。");
+                okay = false; retryable = true;
+            } else if (status != 206 || length < 0 || (uint64_t)length != (uint64_t)total - resume_at) {
+                error_text(error, cap, "断点续传响应与已签名清单不一致。"); okay = false;
+            }
+        } else if (okay && status != 200) {
             retryable = status >= 500 && status <= 599;
             okay = response_ok(status, error, cap);
         }
-        if (okay && length >= 0 && (uint64_t)length != s_work.manifest.image.size) {
+        if (okay && !resume_at && status == 200 && length >= 0 && (uint64_t)length != total) {
             error_text(error, cap, "服务器固件长度与已签名清单不一致。"); okay = false;
         }
         // Resolve/connect/headers finish before creating even an empty attempt.
@@ -409,32 +455,59 @@ static folio_online_state_t download_image(char* error, size_t cap) {
                 error_text(error, cap, "固件下载中断，当前固件保留。"); okay = false; retryable = true; break;
             }
             if (!n) {
-                okay = s_transport.complete(s_transport.context) && received == s_work.manifest.image.size;
+                okay = s_transport.complete(s_transport.context) && written + filled == total;
                 if (!okay) { error_text(error, cap, "固件下载不完整，当前固件保留。"); retryable = true; }
                 break;
             }
-            if ((uint32_t)n > s_work.manifest.image.size - received) {
+            if ((uint32_t)n > total - (written + filled)) {
                 error_text(error, cap, "下载数据超过已签名的固件大小。"); okay = false; break;
             }
-            if (!stage_write(buffer, (size_t)n, received, false, error, cap)) { okay = false; break; }
-            received += (uint32_t)n; progress(received, s_work.manifest.image.size);
+            memcpy(batch + filled, buffer, (size_t)n);
+            filled += (uint32_t)n;
+            if (filled == ONLINE_WRITE_BATCH) {
+                if (!stage_write(batch, filled, written, false, error, cap)) { okay = false; break; }
+                written += filled; filled = 0;
+            }
+            progress(written + filled, total);
             vTaskDelay(1);
         }
         if (okay) break;
-        // The signed URL is never rewritten; only this attempt can use the CDN.
-        if (!retryable || use_mirror || !can_mirror || cancelled(NULL)) break;
-        close_connection();
         if (cancelled(NULL)) break;
-        // Keep the old partial untouched. A retry gets a new unique attempt
-        // path, and only that new complete file can reach validation/install.
+        close_connection();
+        // Commit the tail so the staged file matches the resume offset we use.
+        if (stage_exists && filled) {
+            if (!stage_write(batch, filled, written, false, error, cap)) break;
+            written += filled; filled = 0;
+        }
+        const uint32_t got = written;
+        if (got == resume_at) ++stalled; else stalled = 0;
+        if (!retryable) break;
+        // Continue the same file when this attempt actually delivered bytes.
+        const bool resumable = stage_exists && got > 0 && got < total &&
+            s_transport.seek && resumes < ONLINE_MAX_RESUMES && stalled == 0;
+        if (resumable) {
+            ++resumes;
+            if (error && cap) *error = 0;
+            continue;
+        }
+        if (use_mirror || !can_mirror) break;
+        // No usable partial: one clean attempt on the mirror, on a new file.
+        // When no file exists yet the next iteration creates one, exactly like
+        // the first attempt, so stage_exists must not be forced true here.
         if (stage_exists && !create_stage(error, cap)) break;
-        received = 0; progress(0, s_work.manifest.image.size);
-        use_mirror = true;
+        written = 0; filled = 0; use_mirror = true;
+        resumes = 0; stalled = 0;
+        deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
         if (error && cap) *error = 0;
     }
     // The complete TLS session is destroyed BEFORE validation or installation.
-    close_connection(); free(buffer);
-    if (okay && !stage_write(NULL, 0, received, true, error, cap)) okay = false;
+    close_connection();
+    if (okay && filled) {
+        okay = stage_write(batch, filled, written, false, error, cap);
+        written += filled; filled = 0;
+    }
+    free(buffer); free(batch);
+    if (okay && !stage_write(NULL, 0, written, true, error, cap)) okay = false;
     if (okay && !within_budget(deadline, error, cap)) okay = false;
     // SHA256 and ESP image validation never trigger another network attempt.
     if (okay && lock_card(error, cap)) {
@@ -501,7 +574,7 @@ bool folio_online_update_init(const folio_online_hooks_t* hooks) {
     if (s_snapshot.busy || s_snapshot.state == FOLIO_ONLINE_INSTALLED) { portEXIT_CRITICAL(&s_mux); return false; }
     s_hooks = *hooks;
     if (hooks->transport) s_transport = *hooks->transport;
-    else s_transport = (folio_online_transport_t){&s_https, https_open, https_read, https_complete, https_close};
+    else s_transport = (folio_online_transport_t){&s_https, https_open, https_read, https_complete, https_close, https_seek};
     memset(&s_work, 0, sizeof(s_work)); memset(&s_snapshot, 0, sizeof(s_snapshot));
     s_connection_open = false; s_initialized = true; s_cancel = false;
     portEXIT_CRITICAL(&s_mux); return true;

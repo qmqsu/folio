@@ -38,6 +38,10 @@ typedef struct {
     int (*read)(void*, uint8_t* bytes, size_t capacity);
     bool (*complete)(void*);
     void (*close)(void*);
+    // Optional resumable download: request the next body to start at offset for
+    // the following open. Return false to report that the server cannot resume.
+    // Absent means every attempt starts at zero (still valid, just slower).
+    bool (*seek)(void*, uint32_t offset);
 } folio_online_transport_t;
 
 typedef struct {
