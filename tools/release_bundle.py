@@ -93,6 +93,16 @@ def archive_sources(snapshot):
     return buffer.getvalue()
 
 
+def legal_review(raw):
+    legal = protocol.load_json(raw)
+    for field, expected in {"schema": 1, "publisher": "qmqsu", "repository": "https://github.com/qmqsu/folio", "project_license": "MIT"}.items():
+        protocol.require(legal.get(field) == expected, "Release legal identity missing: " + field)
+    pending = legal.get("pending")
+    protocol.require(isinstance(pending, list) and len(pending) <= 64, "Release pending must be a bounded list")
+    protocol.require(all(isinstance(item, str) and 0 < len(item.encode("utf-8")) <= 512 for item in pending), "Release pending entries must be short strings")
+    return legal
+
+
 def validate_acceptance(raw, provenance):
     record = protocol.load_json(raw)
     expected = {"schema": 1, "version": provenance["version"], "source_commit": provenance["source_commit"],
@@ -170,9 +180,8 @@ def prepare(root, build, output, version, sequence, commit):
     for name, raw in snapshot.items():
         oid = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
         protocol.require(committed.get(name) == oid, "Source archive differs from exact tagged commit: " + name)
-    legal = protocol.load_json(snapshot.get(".github/release-legal.json", b"{}"))
-    for field, expected in {"schema": 1, "publisher": "qmqsu", "repository": "https://github.com/qmqsu/folio", "project_license": "MIT", "third_party_reviewed": True, "corresponding_source_reviewed": True, "font_licenses_reviewed": True}.items():
-        protocol.require(legal.get(field) == expected, "Release legal approval missing: " + field)
+    legal = legal_review(snapshot.get(".github/release-legal.json", b"{}"))
+    files["legal-review.json"] = protocol.canonical(legal)
     description = protocol.load_json((build / "project_description.json").read_bytes())
     protocol.require(description.get("project_name") == "Folio" and description.get("target") == "esp32s3" and description.get("project_version") == version, "Build metadata identity/version mismatch")
     protocol.require(Path(description["project_path"]).resolve() == root, "Mixed build/source checkout")
@@ -287,6 +296,8 @@ def sign_candidate(candidate, output, key_path, public_path):
     key, trusted = protocol.private_key(key_path), protocol.public_key(public_path)
     files = read_files(candidate)
     protocol.require("materials.sig" not in files, "Candidate is already signed")
+    legal = legal_review(files.get("legal-review.json", b"{}"))
+    protocol.require(legal["pending"] == [], "Release pending items must be resolved before signing")
     provenance = protocol.load_json(files["provenance.json"])
     protocol.require(protocol.digest(files["folio.bin"]) == provenance["app_sha256"], "Candidate application changed")
     protocol.require(protocol.digest(files["source.tar.gz"]) == provenance["source_sha256"], "Candidate source changed")

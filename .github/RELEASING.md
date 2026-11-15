@@ -145,7 +145,7 @@ Settings → Pages → Build and deployment 的 **Source 选择 GitHub Actions**
 
 ## 5. 后续发布：tag → preview → 人工 stable
 
-1. 在 main 完成代码审阅、主机/站点检查、公开源码逐文件白名单与法律材料审阅。[源码白名单](<release-source-files.txt>)必须包含本指南；不要把私有工程证据、密钥、备份加入白名单。缺材料时保持 fail-closed；别为让工作流变绿而改法律 gate。
+1. 在 main 完成代码审阅、主机/站点检查、公开源码逐文件白名单与法律材料审阅。[源码白名单](<release-source-files.txt>)必须包含本指南；不要把私有工程证据、密钥、备份加入白名单。[发行待决清单](<release-legal.json>)在未解决项完成前保持非空：`prepare` 可生成供本地审查的候选材料，`sign` 只有在 `pending` 为空时才执行。缺材料时保持 fail-closed；别为让工作流变绿而机械清空。
 2. 为将要发布的实际源码设置正确版本。标签必须与[项目版本](<../CMakeLists.txt>)及构建序号一致，可先运行 `python tools/release_ci.py version v<version>` 核对格式。仅在明确决定发布后创建并推送该源码的 `v<version>` 标签，不能重用旧标签或旧序号。`-dev`/`-rc.N` 和正式版本号都先进入 preview。
 3. 标签触发 build，使用固定 SDK、独立 release 配置、debugOFF 和完整材料门禁。只有 build 成功后才进入 `release-signing` 等待人工批准；签名绑定镜像和源码/许可材料。拒绝或缺密钥时应失败，不补造“成功包”。
 4. 共用发布器先发布不可变 Release 材料，再原子更新完整 Pages；发布用 `folio-pages-publication` 串行锁并校验状态，不覆盖旧版本。正式版本号最初也标记为 GitHub prerelease，preview 不等于实机验收。

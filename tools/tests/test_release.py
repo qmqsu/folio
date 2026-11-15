@@ -39,6 +39,7 @@ def fixture_candidate(key, version="0.8.32-dev"):
                   "app_sha256": protocol.digest(files["folio.bin"]), "source_sha256": protocol.digest(b"fixture source")}
     files["provenance.json"] = protocol.canonical(provenance)
     files["source.tar.gz"] = b"fixture source"
+    files["legal-review.json"] = protocol.canonical({"schema": 1, "publisher": "qmqsu", "repository": "https://github.com/qmqsu/folio", "project_license": "MIT", "pending": []})
     files["LICENSE"] = b"TEST FIXTURE MIT License"
     for kind, payload in zip(("ota", "usb"), protocol.payload_pair(version, provenance["sequence"], "preview", files)):
         files[kind + ".json"] = protocol.sign(payload, key, key.public_key())
@@ -233,6 +234,27 @@ class ReleaseTests(unittest.TestCase):
                 transport.require_environment("release-signing")
         with patch.object(transport, "gh", return_value=json.dumps(protected)):
             transport.require_environment("release-signing")
+
+    def test_pending_review_blocks_signing_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            files = fixture_candidate(self.fixture_key)
+            for name in ("materials.json", "materials.sig", "ota.json", "usb.json"):
+                files.pop(name)
+            legal = {"schema": 1, "publisher": "qmqsu", "repository": "https://github.com/qmqsu/folio", "project_license": "MIT"}
+            files["legal-review.json"] = protocol.canonical(dict(legal, pending=["WiFi upstream notice"]))
+            bundle.write_new(root / "candidate", files)
+            key_path = root / "fixture-only.pem"
+            key_path.write_bytes(self.fixture_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+            public_path = root / "public.pem"
+            public_path.write_bytes(self.public.public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+            with self.assertRaisesRegex(ValueError, "pending"):
+                bundle.sign_candidate(root / "candidate", root / "signed", key_path, public_path)
+            self.assertFalse((root / "signed").exists())
+            files["legal-review.json"] = protocol.canonical(dict(legal, pending=[]))
+            bundle.write_new(root / "candidate-clear", files)
+            bundle.sign_candidate(root / "candidate-clear", root / "signed", key_path, public_path)
+            self.assertTrue((root / "signed" / "ota.json").is_file())
 
     def test_authority_hash_mismatch_never_treated_as_empty_history(self):
         state = {"schema": 1, "generation": 1, "snapshot_sha256": "a" * 64}

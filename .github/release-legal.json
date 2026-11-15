@@ -3,8 +3,10 @@
   "publisher": "qmqsu",
   "repository": "https://github.com/qmqsu/folio",
   "project_license": "MIT",
-  "third_party_reviewed": false,
-  "corresponding_source_reviewed": false,
-  "font_licenses_reviewed": true,
-  "review_note": "Font licenses/current UI coverage and browser dependency/stub notices verified. Firmware linked-component and exact-build source/relink materials remain pending; source/site development is not firmware release approval."
+  "pending": [
+    "WiFi net80211/PHY upstream notice (espressif/esp32-wifi-lib#48)",
+    "lwIP/esp_netif directed notice coverage and six no-file-copyright provenance items",
+    "Final legal-commit CI build/prepare and candidate material review"
+  ],
+  "review_note": "Simplified review: prepare may generate local candidates with pending items, but signing is forbidden until pending is empty. d2f1c4d corresponding-source evidence is reviewed: 544-file source/Git-tree match, clean pinned-IDF debugOFF, actual EPDiy replacement/relink with only epdiy.c/libepdiy.a changed. Full-source rebuild is the supported path; relink.tar.gz is auxiliary, not standalone. Font licenses/current UI coverage and browser/stub notices are verified. FreeRTOS, esp_rom_longjmp, WiFi regulatory and Mozilla CA evidence has been added. No release."
 }
