@@ -89,7 +89,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python tools/release_ci.py commit-state --authority "$RUNNER_TEMP/state/authority.json" --site "$RUNNER_TEMP/pages"
       - name: Mirror verified release assets for domestic CDN fallback
-        if: inputs.mode != 'site'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python tools/release_mirror.py --root "$RUNNER_TEMP/pages"
