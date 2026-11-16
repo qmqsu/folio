@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "astro": "5.18.2",
-    "esptool-js": "0.7.1",
+    "esptool-js": "0.7.0",
     "@noble/hashes": "2.0.1"
   },
   "devDependencies": {

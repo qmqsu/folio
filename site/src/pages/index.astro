@@ -49,7 +49,7 @@ const repo = 'https://github.com/qmqsu/folio';
       <div class="section-head"><span class="mono">01 / 刷机</span><span class="mono en">FLASH</span></div>
       <div class="flash-head">
         <h2 id="flash-title">插上线，点一下。</h2>
-        <p class="section-lead">桌面版 Chrome 或 Edge，一根能传数据的线。写完逐段回读，NVS 和卡里的书都不动。</p>
+        <p class="section-lead">桌面版 Chrome 或 Edge，一根能传数据的线。写完由设备逐段校验，NVS 和卡里的书都不动。</p>
       </div>
       <div class="flash-bar">
         <div class="flash-action">
@@ -58,13 +58,8 @@ const repo = 'https://github.com/qmqsu/folio';
             <p class="mono" id="flash-version">正在查最新固件…</p>
             <p id="flash-status" role="status" aria-live="polite">正在准备。</p>
             <progress id="flash-progress" max="100" value="0" hidden></progress>
-            <a id="flash-save" class="flash-save" hidden download>保存备份</a>
           </div>
         </div>
-        <label class="flash-backup" for="flash-backup">
-          <input id="flash-backup" type="checkbox" checked />
-          <span>先自动备份 16 MiB</span>
-        </label>
       </div>
       <p class="flash-parts mono">写入四段 · bootloader 0x000000 · partition-table 0x008000 · app 0x010000 · ota-data 0x910000</p>
       <p class="flash-alt">仅接受已有 Folio 布局；会重置 OTA 选择到 factory，不写 NVS、字体资源或备用 OTA 槽。</p>

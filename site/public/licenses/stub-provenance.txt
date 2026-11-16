@@ -1,8 +1,8 @@
 Folio website — RAM flasher stub provenance
 
-esptool-js: version 0.7.1, Apache-2.0
-Source commit: d5b779b0314bdec367125f4c7e3c6d2206b14311
-https://github.com/espressif/esptool-js/tree/d5b779b0314bdec367125f4c7e3c6d2206b14311
+esptool-js: version 0.7.0, Apache-2.0
+Source commit: 4d8e8fe092f3425a4b85d1e883f4cc078a5efdd3
+https://github.com/espressif/esptool-js/tree/4d8e8fe092f3425a4b85d1e883f4cc078a5efdd3
 
 The upstream pinned stub-directory notice explicitly identifies esp-flasher-stub v1.2.2:
 https://github.com/espressif/esptool-js/blob/d5b779b0314bdec367125f4c7e3c6d2206b14311/src/targets/stub_flasher/README.md

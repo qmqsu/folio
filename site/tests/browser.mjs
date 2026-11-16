@@ -75,8 +75,8 @@ try {
     // The flasher must never be armed without a verified release (mock returns 404 here).
     await page.waitForFunction(() => !document.querySelector('#flash-button')?.disabled === false || document.querySelector('#flash-status')?.textContent?.length > 4);
     assert.equal(await page.locator('#flash-button').isDisabled(), true, `${width}px: flasher disabled without release`);
-    assert.equal(await page.locator('#flash-backup').isChecked(), true, `${width}px: backup opt-in is checked by default`);
-    assert.equal(await page.locator('#flash-backup').isDisabled(), true, `${width}px: backup toggle follows the release state`);
+    assert.equal(await page.locator('#flash-backup').count(), 0, `${width}px: no bulk-backup control`);
+    assert.equal(await page.locator('#flash-save').count(), 0, `${width}px: no backup download link`);
     assert.equal(await page.locator('#flash-progress').isHidden(), true);
     // The retired full installer must not come back by accident.
     const leftovers = await page.evaluate(() => ['connect-backup', 'check-release', 'install-button', 'browser-support', 'backup-panel', 'release-badge']

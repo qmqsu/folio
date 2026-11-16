@@ -1,6 +1,6 @@
 import { md5 } from '@noble/hashes/legacy.js';
 import { EXPECTED_PARTITIONS, OFFICIAL_PARTITIONS } from '../src/installer/partition';
-import { FLASH_SIZE, KEY_ID, LAYOUT, sha256, verifyEnvelope, type Release } from '../src/installer/manifest';
+import { FLASH_SIZE, KEY_ID, LAYOUT, hex, sha256, verifyEnvelope, type Release } from '../src/installer/manifest';
 import { SUPPORTED_FLASH_ID, type SerialDevice, type DeviceInfo } from '../src/installer/controller';
 
 export function table(official = false, length = 4096): Uint8Array {
@@ -46,7 +46,7 @@ export class FakeDevice implements SerialDevice {
   memory: Uint8Array;
   info: DeviceInfo = { chip: 'ESP32-S3', flashSize: FLASH_SIZE, flashId: SUPPORTED_FLASH_ID, securitySafe: true };
   writes: number[] = []; closed = 0; connected = 0; shortBackup = false; corruptReadback = false;
-  writeFailure = false; closeFailure = false; onRead?: (offset: number, size: number) => void;
+  writeFailure = false; closeFailure = false; onRead?: (offset: number, size: number) => void; onMd5?: (offset: number, size: number) => void;
   constructor(official = false) { this.memory = new Uint8Array(FLASH_SIZE).fill(0xa5); this.memory.set(table(official), 0x8000); }
   async connect(signal: AbortSignal): Promise<DeviceInfo> { signal.throwIfAborted(); this.connected++; return this.info; }
   async read(offset: number, size: number, signal: AbortSignal, progress: (bytes: number) => void): Promise<Uint8Array> {
@@ -54,6 +54,12 @@ export class FakeDevice implements SerialDevice {
     const output = this.memory.slice(offset, offset + size - (this.shortBackup && size === FLASH_SIZE ? 1 : 0));
     if (this.corruptReadback && this.writes.includes(offset)) output[0] ^= 1;
     return output;
+  }
+  async md5(offset: number, size: number, signal: AbortSignal): Promise<string> {
+    this.onMd5?.(offset, size); signal.throwIfAborted();
+    const bytes = this.memory.slice(offset, offset + size);
+    if (this.corruptReadback && this.writes.includes(offset)) bytes[0] ^= 1;
+    return hex(md5(bytes));
   }
   async write(part: Release['parts'][number], bytes: Uint8Array, signal: AbortSignal, progress: (bytes: number, total: number) => void): Promise<void> {
     signal.throwIfAborted(); this.writes.push(part.offset);

@@ -6,8 +6,6 @@ const button = document.getElementById('flash-button') as HTMLButtonElement | nu
 const status = document.getElementById('flash-status') as HTMLParagraphElement | null;
 const version = document.getElementById('flash-version') as HTMLElement | null;
 const progress = document.getElementById('flash-progress') as HTMLProgressElement | null;
-const backupBox = document.getElementById('flash-backup') as HTMLInputElement | null;
-const saveLink = document.getElementById('flash-save') as HTMLAnchorElement | null;
 
 if (button && status) {
   const support = browserSupport();
@@ -16,29 +14,15 @@ if (button && status) {
   let flash: QuickFlash | undefined;
 
   const say = (text: string): void => { status.textContent = text; };
-  const sync = (): void => {
-    button.disabled = busy || !release || !support.supported;
-    if (backupBox) { backupBox.checked = true; backupBox.disabled = true; }
-  };
-  let backupUrl: string | undefined;
-
-  const keepBackup = ({ bytes, sha256 }: { bytes: Uint8Array; sha256: string }): void => {
-    if (backupUrl) URL.revokeObjectURL(backupUrl);
-    backupUrl = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: 'application/octet-stream' }));
-    const name = `folio-backup-${sha256.slice(0, 8)}.bin`;
-    if (saveLink) { saveLink.href = backupUrl; saveLink.download = name; saveLink.hidden = false; saveLink.textContent = `保存备份（${name}）`; }
-    const link = document.createElement('a');
-    link.href = backupUrl; link.download = name;
-    document.body.append(link); link.click(); link.remove();
-  };
-
+  const sync = (): void => { button.disabled = busy || !release || !support.supported; };
   const showProgress = (update: QuickUpdate): void => {
     if (!progress) return;
     if (update.total) {
       progress.hidden = false;
       progress.value = Math.min(100, Math.floor((update.done ?? 0) / update.total * 100));
-    } else if (update.stage === 'success' || update.stage === 'failed' || update.stage === 'cancelled') {
+    } else {
       progress.hidden = true;
+      progress.value = 0;
     }
   };
 
@@ -75,7 +59,7 @@ if (button && status) {
       const port = await navigator.serial.requestPort();
       const device = new BrowserSerialDevice(port, 'default_reset');
       flash = new QuickFlash(release, device, update => { say(update.message); showProgress(update); });
-      await flash.run({ backup: backupBox?.checked === true, onBackup: keepBackup });
+      await flash.run();
     } catch (error) {
       say(error instanceof Error ? `没开始：${error.message}` : '没开始。');
     } finally {

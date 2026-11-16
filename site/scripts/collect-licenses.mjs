@@ -13,7 +13,7 @@ const nobleDir = dirname(require.resolve('@noble/hashes/legacy.js'));
 const pakoDir = dirname(espRequire.resolve('pako/package.json'));
 const atobDir = dirname(espRequire.resolve('atob-lite/package.json'));
 const specs = [
-  ['esptool-js 0.7.1 — Apache-2.0 — https://github.com/espressif/esptool-js/tree/d5b779b0314bdec367125f4c7e3c6d2206b14311', resolve(espDir, 'LICENSE')],
+  ['esptool-js 0.7.0 — Apache-2.0 — https://github.com/espressif/esptool-js/tree/4d8e8fe092f3425a4b85d1e883f4cc078a5efdd3', resolve(espDir, 'LICENSE')],
   ['RAM flasher stub provenance and pinned source versions', resolve(here, 'public/licenses/stub-provenance.txt')],
   ['esp-flasher-stub v1.2.2 + esp-stub-lib — MIT selection', resolve(here, 'public/licenses/esp-flasher-stub-MIT.txt')],
   ['@noble/hashes 2.0.1 — MIT — https://github.com/paulmillr/noble-hashes', resolve(nobleDir, 'LICENSE')],

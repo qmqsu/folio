@@ -5,7 +5,7 @@
 | 内容 | 来源 | 许可证 | 备注 |
 | --- | --- | --- | --- |
 | 页间 Folio 自研应用及网站代码 | 本项目 | MIT | 项目所有者于2026-11-14确认；见根目录LICENSE。下列第三方组件和字体继续单独适用各自许可，不重新许可为MIT。 |
-| 网站浏览器依赖 | esptool-js 0.7.1、@noble/hashes、pako、atob-lite | Apache-2.0 / MIT / zlib，分别适用 | 完整版权、许可与固定来源见[网站第三方声明](<site/public/third-party-licenses.txt>)；锁文件固定构建依赖，构建时核对运行库版本。 |
+| 网站浏览器依赖 | esptool-js 0.7.0、@noble/hashes、pako、atob-lite | Apache-2.0 / MIT / zlib，分别适用 | 完整版权、许可与固定来源见[网站第三方声明](<site/public/third-party-licenses.txt>)；锁文件固定构建依赖，构建时核对运行库版本。 |
 | USB RAM flasher stub | esp-flasher-stub v1.2.2 与固定 esp-stub-lib 子模块 | Apache-2.0 OR MIT，本分发选择 MIT | ESP32-S3 运行字段已与 v1.2.2 上游 JSON 逐项核对；原版权、完整 MIT、精确提交与哈希见[网站声明](<site/public/third-party-licenses.txt>)，不是按 esptool-js 外层许可推断。 |
 | Read Pico 板级支持与大多芯片驱动 | [MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware) | Apache-2.0 | 仅纳入独立组件；保留各组件原有 LICENSE 与版权信息。 |
 | EPDiy 显示驱动 | 官方固件所用 `components/epdiy` | LGPL-3.0-or-later | 该组件单独适用其目录中的 LICENSE；发布固件前需按 LGPL 履行分发要求。 |

@@ -5,7 +5,7 @@ import { fetchBounded } from '../src/installer/manifest';
 
 function protocol(bytes: Uint8Array, options: { digest?: Uint8Array; split?: number; extra?: boolean; splitDigest?: boolean } = {}) {
   const frames: Uint8Array[] = [];
-  const step = options.split && options.split > 0 ? options.split : 4096;
+  const step = options.split && options.split > 0 ? options.split : 512;
   for (let i = 0; i < bytes.length; i += step) frames.push(bytes.slice(i, i + step));
   if (options.extra) frames[0] = new Uint8Array(frames[0].length + 1);
   const digest = options.digest ?? md5(bytes);
@@ -23,17 +23,14 @@ describe('stub serial read protocol (no actual serial port)', () => {
   it('reads bounded data with exact ACKs and consumes/verifies terminal MD5', async () => {
     const bytes = new Uint8Array(9000).fill(0x42), p = protocol(bytes), progress: number[] = [];
     const output = await readStubFlash(p.loader, 0, bytes.length, new AbortController().signal, n => progress.push(n));
-    expect(output).toEqual(bytes); expect(p.frames).toEqual([]); expect(p.acknowledgements).toEqual([4096, 8192, 9000]); expect(progress).toEqual(p.acknowledgements);
-    const view = new DataView(p.requests[0].buffer); expect([0, 4, 8, 12].map(n => view.getUint32(n, true))).toEqual([0, 9000, 4096, 64]);
+    expect(output).toEqual(bytes); expect(p.frames).toEqual([]); expect(progress).toEqual(p.acknowledgements);
+    expect(p.acknowledgements).toEqual(Array.from({ length: 18 }, (_, index) => Math.min(512 * (index + 1), 9000)));
+    const view = new DataView(p.requests[0].buffer); expect([0, 4, 8, 12].map(n => view.getUint32(n, true))).toEqual([0, 9000, 512, 1]);
   });
-  it('accumulates split packets and a split terminal digest', async () => {
-    const bytes = new Uint8Array(9000).fill(0x5a), p = protocol(bytes, { split: 1000, splitDigest: true }), progress: number[] = [];
-    const output = await readStubFlash(p.loader, 0, bytes.length, new AbortController().signal, n => progress.push(n));
-    expect(output).toEqual(bytes);
-    // ACKs are the running total, one per arriving fragment, never a fixed 4096 step.
-    expect(p.acknowledgements).toEqual(progress);
-    expect(p.acknowledgements.slice(0, 3)).toEqual([1000, 2000, 3000]);
-    expect(p.acknowledgements.at(-1)).toBe(9000);
+  it('rejects a short data frame instead of treating corruption as a fragment', async () => {
+    const bytes = new Uint8Array(9000).fill(0x5a), p = protocol(bytes, { split: 1000 });
+    await expect(readStubFlash(p.loader, 0, bytes.length, new AbortController().signal, () => {})).rejects.toThrow('长度不符');
+    expect(p.acknowledgements).toEqual([]);
   });
   it.each([{ digest: new Uint8Array(16) }, { digest: new Uint8Array(15) }, { extra: true }])('rejects corrupted or malformed read stream %j', async options => {
     const p = protocol(new Uint8Array(4096).fill(1), options);

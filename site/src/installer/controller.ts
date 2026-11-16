@@ -6,6 +6,7 @@ export const SUPPORTED_FLASH_ID = 0x18405e; // SPI RDID little-endian: manufactu
 export interface SerialDevice {
   connect(signal: AbortSignal): Promise<DeviceInfo>;
   read(offset: number, size: number, signal: AbortSignal, progress: (bytes: number) => void): Promise<Uint8Array>;
+  md5(offset: number, size: number, signal: AbortSignal): Promise<string>;
   write(part: Part, bytes: Uint8Array, signal: AbortSignal, progress: (bytes: number, total: number) => void): Promise<void>;
   close(): Promise<void>;
 }

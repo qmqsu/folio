@@ -19,43 +19,31 @@ interface StubLoader {
   IS_STUB: boolean; ESP_READ_FLASH: number; FLASH_READ_TIMEOUT: number; transport: StubTransport;
   checkCommand(description: string, op: number, data: Uint8Array): Promise<number | Uint8Array>;
 }
-// esptool-js 0.7.1 readFlash omits the terminal MD5 frame. Consume and validate
-// that frame here, following esptool.py's READ_FLASH protocol. Linear allocation,
-// bounded packets, no raw console or MAC data. MD5 is transport integrity only;
-// publisher authenticity and final backup evidence use ECDSA/SHA-256.
+// Small bounded reads use the same 512-byte, one-frame flow as kiikoread.
+// Large image/protected-region verification uses the device MD5 command instead.
 export async function readStubFlash(loader: StubLoader, offset: number, size: number, signal: AbortSignal, progress: (bytes: number) => void): Promise<Uint8Array> {
   signal.throwIfAborted();
   if (!loader.IS_STUB || !Number.isInteger(offset) || !Number.isInteger(size) || offset < 0 || size <= 0 || offset + size > FLASH_SIZE) throw new Error('只允许 stub 模式下的有界 Flash 读取。');
   const request = new Uint8Array(16), view = new DataView(request.buffer);
-  [offset, size, 4096, 64].forEach((n, i) => view.setUint32(i * 4, n, true));
+  [offset, size, 512, 1].forEach((n, i) => view.setUint32(i * 4, n, true));
   const result = await loader.checkCommand('read flash', loader.ESP_READ_FLASH, request);
   if (result !== 0) throw new Error('设备拒绝读取 Flash。');
   const output = new Uint8Array(size);
   let received = 0;
-  // A browser read returns whatever the port has, not one fixed packet: USB-JTAG
-  // splits frames arbitrarily. Accumulate and acknowledge the running total, the
-  // same way esptool's own readFlash does, and only refuse data past the request.
   while (received < size) {
     signal.throwIfAborted();
-    const packet = await loader.transport.read(loader.FLASH_READ_TIMEOUT);
+    const packet = await loader.transport.read(5000);
     signal.throwIfAborted();
     if (packet.length === 0) continue;
-    if (received + packet.length > size) throw new Error('Flash 读取包越界。');
+    const expected = Math.min(512, size - received);
+    if (packet.length !== expected) throw new Error(`Flash 读取包长度不符：应为 ${expected}，实为 ${packet.length}。`);
     output.set(packet, received); received += packet.length;
     const ack = new Uint8Array(4); new DataView(ack.buffer).setUint32(0, received, true);
     await loader.transport.write(ack); progress(received);
   }
-  // The terminal MD5 can be split across reads as well.
-  const digest = new Uint8Array(16);
-  let digested = 0;
-  while (digested < digest.length) {
-    signal.throwIfAborted();
-    const packet = await loader.transport.read(loader.FLASH_READ_TIMEOUT);
-    signal.throwIfAborted();
-    if (packet.length === 0) continue;
-    if (digested + packet.length > digest.length) throw new Error('Flash 校验包越界。');
-    digest.set(packet, digested); digested += packet.length;
-  }
+  const digest = await loader.transport.read(5000);
+  signal.throwIfAborted();
+  if (digest.length !== 16) throw new Error('Flash 读取缺少结束校验包。');
   if (hex(digest) !== hex(md5(output))) throw new Error('Flash 读取传输 MD5 不符。');
   return output;
 }
@@ -68,6 +56,7 @@ export class BrowserSerialDevice implements SerialDevice {
   constructor(port: SerialPort, private reset: 'default_reset' | 'usb_reset' | 'no_reset') {
     this.#transport = new Transport(port, false, true);
     this.#loader = new ESPLoader({ transport: this.#transport, baudrate: 115200, romBaudrate: 115200,
+      serialOptions: { bufferSize: 8192 },
       debugLogging: false, enableTracing: false, terminal: { clean() {}, write() {}, writeLine() {} } });
   }
   connect(signal: AbortSignal): Promise<DeviceInfo> {
@@ -80,7 +69,7 @@ export class BrowserSerialDevice implements SerialDevice {
     // attempts are free, and a hard deadline turns a silent hang into a message
     // that tells the user what to do instead.
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const detect = this.#loader.detectChip(this.reset, 5);
+    const detect = this.#loader.detectChip(this.reset);
     detect.catch(() => {}); // the losing side of the race must not go unhandled
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('连接设备超时')), CONNECT_TIMEOUT_MS);
@@ -106,7 +95,7 @@ export class BrowserSerialDevice implements SerialDevice {
     if (this.#loader.chip.postConnect) await this.#loader.chip.postConnect(this.#loader);
     await this.#loader.runStub();
     signal.throwIfAborted();
-    if (!this.#loader.IS_STUB) throw new Error('无法启动只读备份所需的 RAM stub。');
+    if (!this.#loader.IS_STUB) throw new Error('无法启动设备校验所需的 RAM stub。');
     const flashId = await this.#loader.readFlashId();
     signal.throwIfAborted();
     // SPI RDID is returned as a little-endian register integer, not printed JEDEC order.
@@ -116,6 +105,14 @@ export class BrowserSerialDevice implements SerialDevice {
   }
   async read(offset: number, size: number, signal: AbortSignal, progress: (bytes: number) => void): Promise<Uint8Array> {
     return readStubFlash(this.#loader, offset, size, signal, progress);
+  }
+  async md5(offset: number, size: number, signal: AbortSignal): Promise<string> {
+    signal.throwIfAborted();
+    if (!this.#loader.IS_STUB || !Number.isInteger(offset) || !Number.isInteger(size) || offset < 0 || size <= 0 || offset + size > FLASH_SIZE) throw new Error('设备端 MD5 校验范围无效。');
+    const digest = await this.#loader.flashMd5sum(offset, size);
+    signal.throwIfAborted();
+    if (typeof digest !== 'string' || !/^[0-9a-f]{32}$/i.test(digest)) throw new Error('设备端 MD5 响应无效。');
+    return digest.toLowerCase();
   }
   async write(part: Part, bytes: Uint8Array, signal: AbortSignal, progress: (bytes: number, total: number) => void): Promise<void> {
     signal.throwIfAborted();
