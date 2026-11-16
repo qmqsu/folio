@@ -3,13 +3,16 @@ import { md5 } from '@noble/hashes/legacy.js';
 import { FLASH_SIZE, hex, sha256, type Part } from './manifest';
 import { SUPPORTED_FLASH_ID, type SerialDevice, type DeviceInfo } from './controller';
 
+// Bounded so a browser whose control lines never reach the chip fails loudly.
+export const CONNECT_TIMEOUT_MS = 30000;
+
 export function browserSupport(): { supported: boolean; reason: string } {
   const desktop = !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) && !(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const chromeOrEdge = /(?:Chrome|Edg)\//.test(navigator.userAgent) && !/OPR\//.test(navigator.userAgent);
   if (!isSecureContext) return { supported: false, reason: '请使用 HTTPS 页面；USB 安装需要安全上下文。' };
   if (!desktop || !chromeOrEdge || !('serial' in navigator)) return { supported: false, reason: 'USB 安装需要桌面版 Chrome 或 Edge 及 Web Serial。手机、Safari、Firefox 请使用设备 OTA 或手动指南。' };
   if (!crypto.subtle) return { supported: false, reason: '此浏览器无法验证发布签名，已禁用安装。' };
-  return { supported: true, reason: '桌面 Web Serial 可用。网站不会自动连接设备。原生 USB 复位仍未经过本安装器硬件验证。' };
+  return { supported: true, reason: '桌面 Web Serial 可用。网站不会自动连接设备。部分 macOS 浏览器无法用 DTR/RTS 让原生 USB-JTAG 进入下载模式，连接失败时请换 Chrome 或使用手动方式。' };
 }
 interface StubTransport { read(timeout: number): Promise<Uint8Array>; write(data: Uint8Array): Promise<void> }
 interface StubLoader {
@@ -59,7 +62,26 @@ export class BrowserSerialDevice implements SerialDevice {
   }
   async #connect(signal: AbortSignal): Promise<DeviceInfo> {
     signal.throwIfAborted();
-    await this.#loader.detectChip(this.reset, 2);
+    // A native USB-JTAG port does not always honour DTR/RTS, so on some macOS
+    // browsers the ROM never sees the reset and the sync just waits. Extra
+    // attempts are free, and a hard deadline turns a silent hang into a message
+    // that tells the user what to do instead.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const detect = this.#loader.detectChip(this.reset, 5);
+    detect.catch(() => {}); // the losing side of the race must not go unhandled
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('连接设备超时')), CONNECT_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([detect, deadline]);
+    } catch (error) {
+      signal.throwIfAborted();
+      await this.#transport.disconnect().catch(() => {});
+      const reason = error instanceof Error ? error.message : '连接失败';
+      throw new Error(`${reason}。请确认串口选的是「USB JTAG_serial debug unit」，换一根数据线或换个 USB 口后再点一次；仍不行请用 Chrome，或改用下面的手动方式。`);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
     signal.throwIfAborted();
     const chip = this.#loader.chip.CHIP_NAME;
     if (chip !== 'ESP32-S3') throw new Error('不是 ESP32-S3，已停止。');

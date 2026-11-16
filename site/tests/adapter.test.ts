@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-const state = vi.hoisted(() => ({ writes: [] as unknown[], closed: 0, chip: 'ESP32-S3', flashId: 0x18405e, secure: false, crypt: 0, resets: [] as string[], detectWait: undefined as Promise<void> | undefined }));
+const state = vi.hoisted(() => ({ writes: [] as unknown[], closed: 0, chip: 'ESP32-S3', flashId: 0x18405e, secure: false, crypt: 0, resets: [] as string[], attempts: undefined as number | undefined, detectWait: undefined as Promise<void> | undefined }));
 vi.mock('esptool-js', () => ({
   Transport: class { async disconnect() { state.closed++; } },
   ESPLoader: class {
     chip = { CHIP_NAME: state.chip, postConnect: async () => {} };
     IS_STUB = true;
-    async detectChip(mode: string) { state.resets.push(mode); await state.detectWait; }
+    async detectChip(mode: string, attempts?: number) { state.resets.push(mode); state.attempts = attempts; await state.detectWait; }
+    async detectChipReject() {}
     async getSecurityInfo() { return { flashCryptCnt: state.crypt, parsedFlags: { SECURE_BOOT_EN: state.secure, SECURE_DOWNLOAD_ENABLE: false } }; }
     async runStub() {}
     async readFlashId() { return state.flashId; }
@@ -15,13 +16,14 @@ vi.mock('esptool-js', () => ({
 import { BrowserSerialDevice } from '../src/installer/serial';
 import { fixture } from './fixtures';
 const signal = () => new AbortController().signal;
-beforeEach(() => { state.writes = []; state.closed = 0; state.chip = 'ESP32-S3'; state.flashId = 0x18405e; state.secure = false; state.crypt = 0; state.resets = []; state.detectWait = undefined; });
+beforeEach(() => { state.writes = []; state.closed = 0; state.chip = 'ESP32-S3'; state.flashId = 0x18405e; state.secure = false; state.crypt = 0; state.resets = []; state.attempts = undefined; state.detectWait = undefined; });
 describe('esptool-js adapter contract (mock library, never a USB device)', () => {
   it('keeps signed headers unchanged and never enables eraseAll', async () => {
     const f = await fixture(), device = new BrowserSerialDevice({} as SerialPort, 'usb_reset');
     expect(await device.connect(signal())).toMatchObject({ chip: 'ESP32-S3', flashSize: 16777216, flashId: 0x18405e });
     await device.write(f.release.parts[0], f.images[0], signal(), () => {});
     expect(state.resets).toEqual(['usb_reset']);
+    expect(state.attempts).toBe(5); // extra sync attempts before reporting failure
     expect(state.writes).toHaveLength(1);
     expect(state.writes[0]).toMatchObject({ flashMode: 'keep', flashFreq: 'keep', flashSize: 'keep', eraseAll: false, compress: true, fileArray: [{ address: 0, data: f.images[0] }] });
     await device.close(); await device.close(); expect(state.closed).toBe(1);
