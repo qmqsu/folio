@@ -6,6 +6,8 @@
 
 [官网与一键安装](<https://qmqsu.github.io/folio/>) · [下载固件](<https://github.com/qmqsu/folio/releases>) · [安装与适配说明](<docs/刷机说明.md>) · [问题反馈](<https://github.com/qmqsu/folio/issues>)
 
+作者账号：[小红书](<https://xhslink.cn/o/4N9m2vnpf1k>) · [哔哩哔哩](<https://b23.tv/PjdNjXM>)
+
 <p align="center">
   <img src="site/public/images/home.webp" alt="Folio 首页" width="220">
   <img src="site/public/images/library.webp" alt="Folio 书架" width="220">
