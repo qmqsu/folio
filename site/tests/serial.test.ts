@@ -3,12 +3,14 @@ import { md5 } from '@noble/hashes/legacy.js';
 import { readStubFlash, browserSupport } from '../src/installer/serial';
 import { fetchBounded } from '../src/installer/manifest';
 
-function protocol(bytes: Uint8Array, options: { digest?: Uint8Array; short?: boolean; extra?: boolean } = {}) {
+function protocol(bytes: Uint8Array, options: { digest?: Uint8Array; split?: number; extra?: boolean; splitDigest?: boolean } = {}) {
   const frames: Uint8Array[] = [];
-  for (let i = 0; i < bytes.length; i += 4096) frames.push(bytes.slice(i, i + 4096));
-  if (options.short) frames[0] = frames[0].slice(0, 10);
-  if (options.extra) frames[0] = new Uint8Array(4097);
-  frames.push(options.digest ?? md5(bytes));
+  const step = options.split && options.split > 0 ? options.split : 4096;
+  for (let i = 0; i < bytes.length; i += step) frames.push(bytes.slice(i, i + step));
+  if (options.extra) frames[0] = new Uint8Array(frames[0].length + 1);
+  const digest = options.digest ?? md5(bytes);
+  if (options.splitDigest && !options.digest) { frames.push(digest.slice(0, 7), digest.slice(7)); }
+  else frames.push(digest);
   const acknowledgements: number[] = [];
   const requests: Uint8Array[] = [];
   const loader = { IS_STUB: true, ESP_READ_FLASH: 0xd2, FLASH_READ_TIMEOUT: 3000,
@@ -24,7 +26,16 @@ describe('stub serial read protocol (no actual serial port)', () => {
     expect(output).toEqual(bytes); expect(p.frames).toEqual([]); expect(p.acknowledgements).toEqual([4096, 8192, 9000]); expect(progress).toEqual(p.acknowledgements);
     const view = new DataView(p.requests[0].buffer); expect([0, 4, 8, 12].map(n => view.getUint32(n, true))).toEqual([0, 9000, 4096, 64]);
   });
-  it.each([{ digest: new Uint8Array(16) }, { digest: new Uint8Array(15) }, { short: true }, { extra: true }])('rejects corrupted or malformed read stream %j', async options => {
+  it('accumulates split packets and a split terminal digest', async () => {
+    const bytes = new Uint8Array(9000).fill(0x5a), p = protocol(bytes, { split: 1000, splitDigest: true }), progress: number[] = [];
+    const output = await readStubFlash(p.loader, 0, bytes.length, new AbortController().signal, n => progress.push(n));
+    expect(output).toEqual(bytes);
+    // ACKs are the running total, one per arriving fragment, never a fixed 4096 step.
+    expect(p.acknowledgements).toEqual(progress);
+    expect(p.acknowledgements.slice(0, 3)).toEqual([1000, 2000, 3000]);
+    expect(p.acknowledgements.at(-1)).toBe(9000);
+  });
+  it.each([{ digest: new Uint8Array(16) }, { digest: new Uint8Array(15) }, { extra: true }])('rejects corrupted or malformed read stream %j', async options => {
     const p = protocol(new Uint8Array(4096).fill(1), options);
     await expect(readStubFlash(p.loader, 0, 4096, new AbortController().signal, () => {})).rejects.toThrow();
   });

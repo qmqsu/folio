@@ -32,18 +32,31 @@ export async function readStubFlash(loader: StubLoader, offset: number, size: nu
   if (result !== 0) throw new Error('设备拒绝读取 Flash。');
   const output = new Uint8Array(size);
   let received = 0;
+  // A browser read returns whatever the port has, not one fixed packet: USB-JTAG
+  // splits frames arbitrarily. Accumulate and acknowledge the running total, the
+  // same way esptool's own readFlash does, and only refuse data past the request.
   while (received < size) {
     signal.throwIfAborted();
     const packet = await loader.transport.read(loader.FLASH_READ_TIMEOUT);
     signal.throwIfAborted();
-    if (packet.length !== Math.min(4096, size - received)) throw new Error('Flash 读取包截断或越界。');
+    if (packet.length === 0) continue;
+    if (received + packet.length > size) throw new Error('Flash 读取包越界。');
     output.set(packet, received); received += packet.length;
     const ack = new Uint8Array(4); new DataView(ack.buffer).setUint32(0, received, true);
     await loader.transport.write(ack); progress(received);
   }
-  const digest = await loader.transport.read(loader.FLASH_READ_TIMEOUT);
-  signal.throwIfAborted();
-  if (digest.length !== 16 || hex(digest) !== hex(md5(output))) throw new Error('Flash 读取传输 MD5 不符。');
+  // The terminal MD5 can be split across reads as well.
+  const digest = new Uint8Array(16);
+  let digested = 0;
+  while (digested < digest.length) {
+    signal.throwIfAborted();
+    const packet = await loader.transport.read(loader.FLASH_READ_TIMEOUT);
+    signal.throwIfAborted();
+    if (packet.length === 0) continue;
+    if (digested + packet.length > digest.length) throw new Error('Flash 校验包越界。');
+    digest.set(packet, digested); digested += packet.length;
+  }
+  if (hex(digest) !== hex(md5(output))) throw new Error('Flash 读取传输 MD5 不符。');
   return output;
 }
 export class BrowserSerialDevice implements SerialDevice {
