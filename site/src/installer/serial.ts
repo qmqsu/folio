@@ -89,7 +89,9 @@ export class BrowserSerialDevice implements SerialDevice {
       await Promise.race([detect, deadline]);
     } catch (error) {
       signal.throwIfAborted();
-      await this.#transport.disconnect().catch(() => {});
+      // Never block the message on a close that may itself be waiting for the
+      // pending read: report first, clean up in the background.
+      void this.#transport.disconnect().catch(() => {});
       const reason = error instanceof Error ? error.message : '连接失败';
       throw new Error(`${reason}。请确认串口选的是「USB JTAG_serial debug unit」，换一根数据线或换个 USB 口后再点一次；仍不行请用 Chrome，或改用下面的手动方式。`);
     } finally {

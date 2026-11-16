@@ -51,7 +51,7 @@ export class QuickFlash {
       }
       signal.throwIfAborted();
 
-      this.#status('connecting', '连接设备，读取芯片与分区表');
+      this.#status('connecting', '连接设备，读取芯片与分区表（最多等 30 秒）');
       this.#open = true;
       const info: DeviceInfo = await this.device.connect(signal);
       if (info.chip !== 'ESP32-S3' || info.flashSize !== FLASH_SIZE || !info.securitySafe) {
