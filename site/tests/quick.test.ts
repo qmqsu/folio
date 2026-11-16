@@ -41,10 +41,11 @@ describe('one-click flash (simulated device only)', () => {
     for (const offset of [0, 0x8000, 0x10000, 0x910000]) expect(seen).toContain(offset);
     expect(nvs.every((byte, i) => byte === device.memory[0x9000 + i])).toBe(true);
     expect(storage.every((byte, i) => byte === device.memory[0x410000 + i])).toBe(true);
+    expect(device.resets).toBe(1);
     expect(device.closed).toBe(1);
     expect(flash.connected).toBe(false);
     expect(updates.filter(u => u.stage === 'verifying').length).toBeGreaterThanOrEqual(8);
-    expect(updates.at(-1)?.message).toContain('重启');
+    expect(updates.at(-1)?.message).toContain('已重启');
   });
 
   it('never flashes a device it cannot identify', async () => {

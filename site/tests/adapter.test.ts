@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-const state = vi.hoisted(() => ({ writes: [] as unknown[], closed: 0, chip: 'ESP32-S3', flashId: 0x18405e, secure: false, crypt: 0, resets: [] as string[], attempts: undefined as number | undefined, detectWait: undefined as Promise<void> | undefined, serialOptions: undefined as { bufferSize?: number } | undefined, md5Calls: [] as number[][] }));
+const state = vi.hoisted(() => ({ writes: [] as unknown[], closed: 0, chip: 'ESP32-S3', flashId: 0x18405e, secure: false, crypt: 0, resets: [] as string[], attempts: undefined as number | undefined, detectWait: undefined as Promise<void> | undefined, serialOptions: undefined as { bufferSize?: number } | undefined, md5Calls: [] as number[][], signals: [] as boolean[][] }));
 vi.mock('esptool-js', () => ({
-  Transport: class { async disconnect() { state.closed++; } },
+  Transport: class { async disconnect() { state.closed++; } async setSignals(dtr: boolean, rts: boolean) { state.signals.push([dtr, rts]); } },
   ESPLoader: class {
     constructor(options: { serialOptions?: { bufferSize?: number } }) { state.serialOptions = options.serialOptions; }
     chip = { CHIP_NAME: state.chip, postConnect: async () => {} };
@@ -17,7 +17,7 @@ vi.mock('esptool-js', () => ({
 import { BrowserSerialDevice } from '../src/installer/serial';
 import { fixture } from './fixtures';
 const signal = () => new AbortController().signal;
-beforeEach(() => { state.writes = []; state.closed = 0; state.chip = 'ESP32-S3'; state.flashId = 0x18405e; state.secure = false; state.crypt = 0; state.resets = []; state.attempts = undefined; state.detectWait = undefined; state.serialOptions = undefined; state.md5Calls = []; });
+beforeEach(() => { state.writes = []; state.closed = 0; state.chip = 'ESP32-S3'; state.flashId = 0x18405e; state.secure = false; state.crypt = 0; state.resets = []; state.attempts = undefined; state.detectWait = undefined; state.serialOptions = undefined; state.md5Calls = []; state.signals = []; });
 describe('esptool-js adapter contract (mock library, never a USB device)', () => {
   it('keeps signed headers unchanged, never enables eraseAll and uses device MD5', async () => {
     const f = await fixture(), device = new BrowserSerialDevice({} as SerialPort, 'usb_reset');
@@ -30,6 +30,8 @@ describe('esptool-js adapter contract (mock library, never a USB device)', () =>
     expect(state.serialOptions).toEqual({ bufferSize: 8192 });
     expect(state.writes).toHaveLength(1);
     expect(state.writes[0]).toMatchObject({ flashMode: 'keep', flashFreq: 'keep', flashSize: 'keep', eraseAll: false, compress: true, fileArray: [{ address: 0, data: f.images[0] }] });
+    await device.reset(signal());
+    expect(state.signals).toEqual([[false, true], [false, false]]);
     await device.close(); await device.close(); expect(state.closed).toBe(1);
     await expect(device.write(f.release.parts[0], f.images[0], signal(), () => {})).rejects.toThrow('门禁');
     await expect(device.md5(0x1000000, 1, signal())).rejects.toThrow('范围');

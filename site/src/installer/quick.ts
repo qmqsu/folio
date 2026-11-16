@@ -86,8 +86,10 @@ export class QuickFlash {
         }
       }
 
+      this.#status('verifying', '全部校验通过，正在重启设备');
+      await this.device.reset(signal);
       await this.#close();
-      this.#status('success', '四段写入与设备端 MD5 校验全部通过，NVS/PHY 和字体资源区未变。设备会自己重启，拔线前等它亮屏。');
+      this.#status('success', '四段写入与设备端 MD5 校验全部通过，NVS/PHY 和字体资源区未变。已重启，等它亮屏后再拔线。');
     } catch (error) {
       await this.#fail(error);
     }

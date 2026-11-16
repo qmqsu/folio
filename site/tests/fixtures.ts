@@ -45,7 +45,7 @@ export async function fixture() {
 export class FakeDevice implements SerialDevice {
   memory: Uint8Array;
   info: DeviceInfo = { chip: 'ESP32-S3', flashSize: FLASH_SIZE, flashId: SUPPORTED_FLASH_ID, securitySafe: true };
-  writes: number[] = []; closed = 0; connected = 0; shortBackup = false; corruptReadback = false;
+  writes: number[] = []; closed = 0; connected = 0; resets = 0; shortBackup = false; corruptReadback = false;
   writeFailure = false; closeFailure = false; onRead?: (offset: number, size: number) => void; onMd5?: (offset: number, size: number) => void;
   constructor(official = false) { this.memory = new Uint8Array(FLASH_SIZE).fill(0xa5); this.memory.set(table(official), 0x8000); }
   async connect(signal: AbortSignal): Promise<DeviceInfo> { signal.throwIfAborted(); this.connected++; return this.info; }
@@ -61,6 +61,7 @@ export class FakeDevice implements SerialDevice {
     if (this.corruptReadback && this.writes.includes(offset)) bytes[0] ^= 1;
     return hex(md5(bytes));
   }
+  async reset(signal: AbortSignal): Promise<void> { this.resets++; signal.throwIfAborted(); }
   async write(part: Release['parts'][number], bytes: Uint8Array, signal: AbortSignal, progress: (bytes: number, total: number) => void): Promise<void> {
     signal.throwIfAborted(); this.writes.push(part.offset);
     if (this.writeFailure) throw new Error('Simulated write failure');

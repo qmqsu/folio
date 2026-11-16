@@ -7,6 +7,7 @@ export interface SerialDevice {
   connect(signal: AbortSignal): Promise<DeviceInfo>;
   read(offset: number, size: number, signal: AbortSignal, progress: (bytes: number) => void): Promise<Uint8Array>;
   md5(offset: number, size: number, signal: AbortSignal): Promise<string>;
+  reset(signal: AbortSignal): Promise<void>;
   write(part: Part, bytes: Uint8Array, signal: AbortSignal, progress: (bytes: number, total: number) => void): Promise<void>;
   close(): Promise<void>;
 }

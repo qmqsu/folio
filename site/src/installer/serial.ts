@@ -53,7 +53,7 @@ export class BrowserSerialDevice implements SerialDevice {
   #closing?: Promise<void>;
   #connection?: Promise<DeviceInfo>;
   #writable = false;
-  constructor(port: SerialPort, private reset: 'default_reset' | 'usb_reset' | 'no_reset') {
+  constructor(port: SerialPort, private resetMode: 'default_reset' | 'usb_reset' | 'no_reset') {
     this.#transport = new Transport(port, false, true);
     this.#loader = new ESPLoader({ transport: this.#transport, baudrate: 115200, romBaudrate: 115200,
       serialOptions: { bufferSize: 8192 },
@@ -69,7 +69,7 @@ export class BrowserSerialDevice implements SerialDevice {
     // attempts are free, and a hard deadline turns a silent hang into a message
     // that tells the user what to do instead.
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const detect = this.#loader.detectChip(this.reset);
+    const detect = this.#loader.detectChip(this.resetMode);
     detect.catch(() => {}); // the losing side of the race must not go unhandled
     const deadline = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('连接设备超时')), CONNECT_TIMEOUT_MS);
@@ -113,6 +113,16 @@ export class BrowserSerialDevice implements SerialDevice {
     signal.throwIfAborted();
     if (typeof digest !== 'string' || !/^[0-9a-f]{32}$/i.test(digest)) throw new Error('设备端 MD5 响应无效。');
     return digest.toLowerCase();
+  }
+  async reset(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    // after('hard_reset') only writes RTS=false, which is already false after
+    // USB-JTAG sync. Pulse EN low with IO0 high to leave the RAM stub and boot.
+    await this.#transport.setSignals(false, true);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    await this.#transport.setSignals(false, false);
+    await new Promise(resolve => setTimeout(resolve, 200));
+    signal.throwIfAborted();
   }
   async write(part: Part, bytes: Uint8Array, signal: AbortSignal, progress: (bytes: number, total: number) => void): Promise<void> {
     signal.throwIfAborted();
