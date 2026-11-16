@@ -7,7 +7,7 @@ const repo = 'https://github.com/qmqsu/folio';
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="页间 Folio：给小纸 Pico（RDP-G01-W）做的阅读固件。TXT 和 EPUB 原生排版，一键刷入，手机传书。" />
+  <meta name="description" content="页间 Folio 是小纸 Pico（RDP-G01-W）的第三方阅读固件，支持 TXT、EPUB、微信读书、手机传书、排版调整和在线更新。" />
   <meta name="color-scheme" content="light" />
   <meta name="referrer" content="no-referrer" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://qmqsu.github.io https://testingcf.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'none'" />
@@ -31,14 +31,15 @@ const repo = 'https://github.com/qmqsu/folio';
   <main id="main">
     <section class="hero wrap" aria-labelledby="hero-title">
       <div class="hero-copy">
-        <p class="mono hero-kicker">RDP-G01-W · 4.7″ 墨水屏 · 原生排版</p>
-        <h1 id="hero-title">把书，<br />放回纸上<span class="period">。</span></h1>
+        <p class="mono hero-kicker">页间 Folio · 小纸 Pico 第三方阅读固件</p>
+        <h1 id="hero-title">小纸 Pico，<br />换个更好用的<br />阅读系统<span class="period">。</span></h1>
         <p class="hero-subtitle">轻量化阅读固件，统一的界面设计，简洁直观的交互，原生集成微信阅读。</p>
+        <p class="hero-description">打开接着上次读，手机里的书直接传过去，字体和排版按自己的习惯调。本地书存在 TF 卡里，不联网也能看。</p>
         <div class="actions">
-          <a class="button primary" href="#flash">一键刷机 <span aria-hidden="true">↓</span></a>
-          <a class="text-link" href="#interfaces">看看界面 <span aria-hidden="true">↓</span></a>
+          <a class="button primary" href="#flash">一键刷入 <span aria-hidden="true">↓</span></a>
+          <a class="text-link" href="#interfaces">看看实际界面 <span aria-hidden="true">↓</span></a>
         </div>
-        <p class="hero-note mono">应用 MIT 开源 · 不联网也能读</p>
+        <p class="hero-note mono">开源免费 · 本地书籍离线可读</p>
       </div>
       <figure class="hero-shot">
         <img src="/folio/images/home.webp" alt="Folio 首页：继续阅读、阅读时长和最近阅读。" />
@@ -48,8 +49,8 @@ const repo = 'https://github.com/qmqsu/folio';
     <section class="flash wrap" id="flash" aria-labelledby="flash-title">
       <div class="section-head"><span class="mono">01 / 刷机</span><span class="mono en">FLASH</span></div>
       <div class="flash-head">
-        <h2 id="flash-title">插上线，点一下。</h2>
-        <p class="section-lead">桌面版 Chrome 或 Edge，一根能传数据的线。写完由设备逐段校验，NVS 和卡里的书都不动。</p>
+        <h2 id="flash-title">不用命令行，插线就能装。</h2>
+        <p class="section-lead">用电脑上的 Chrome 或 Edge 打开本页，连接小纸 Pico，点击“一键刷入”，按提示确认设备即可。只支持小纸 Pico（RDP-G01-W），安装前请备份重要书籍和阅读记录。</p>
       </div>
       <div class="flash-bar">
         <div class="flash-action">
@@ -61,15 +62,13 @@ const repo = 'https://github.com/qmqsu/folio';
           </div>
         </div>
       </div>
-      <p class="flash-parts mono">写入四段 · bootloader 0x000000 · partition-table 0x008000 · app 0x010000 · ota-data 0x910000</p>
-      <p class="flash-alt">仅接受已有 Folio 布局；会重置 OTA 选择到 factory，不写 NVS、字体资源或备用 OTA 槽。</p>
-      <p class="flash-alt">不想用网页？<a href={`${repo}/releases`}>下载镜像 ↗</a>　<a href={`${repo}/blob/main/docs/刷机说明.md`}>手动刷写说明 ↗</a>　TF 卡更新包放进 <code>update/</code></p>
+      <p class="flash-alt"><a href={`${repo}/blob/main/docs/刷机说明.md`}>适配与备份说明 ↗</a>　<a href={`${repo}/releases`}>下载固件 ↗</a>　<a href={`${repo}/issues`}>问题反馈 ↗</a></p>
     </section>
 
     <section class="interfaces wrap" id="interfaces" aria-labelledby="interfaces-title">
       <div class="section-head"><span class="mono">02 / 界面</span><span class="mono en">SCREENS</span></div>
-      <h2 id="interfaces-title">屏幕上只有字。</h2>
-      <p class="section-lead">书架、阅读、设置，三屏就够。界面是固件渲染的，书是示例。</p>
+      <h2 id="interfaces-title">首页接着读，底部找功能。</h2>
+      <p class="section-lead">继续阅读、最近在读和阅读时长都放在首页。书架负责找书，阅读页只留正文，字体、传书和系统设置都在底部“设置”里。</p>
       <div class="interface-grid">
         <figure><img src="/folio/images/library.webp" alt="书架：封面、书名、阅读位置。" /><figcaption>书架</figcaption></figure>
         <figure><img src="/folio/images/reading.webp" alt="阅读：正文、章节、页码。" /><figcaption>阅读</figcaption></figure>
@@ -79,50 +78,50 @@ const repo = 'https://github.com/qmqsu/folio';
 
     <section class="features wrap" id="features" aria-labelledby="features-title">
       <div class="section-head"><span class="mono">03 / 功能</span><span class="mono en">FEATURES</span></div>
-      <h2 id="features-title">书页之外的几件事。</h2>
+      <h2 id="features-title">平时读书，主要用这些。</h2>
       <div class="feature-grid">
         <article>
-          <h3>书放在卡里</h3>
-          <p>TF 卡的 <code>books</code> 目录，TXT 和 EPUB 都认。有目录、书签，开机接着上次读。</p>
+          <h3>自己的书，直接读</h3>
+          <p>TXT 和 EPUB 放进 TF 卡就能上架。支持目录、书签、封面和续读，下次打开接着上次的位置。</p>
         </article>
         <article>
-          <h3>字随你调</h3>
-          <p>字号、行距、页边距、对齐都能改。内置宋体，另外三款字体放进卡里就能选。</p>
+          <h3>微信读书，下载后离线看</h3>
+          <p>登录自己的账号，查看书架并下载书籍。下载完成后，不联网也能继续读。</p>
         </article>
         <article>
-          <h3>手机传书</h3>
-          <p>同一个 Wi-Fi 打开传书页，书、图片、字体都能传。退出传书页，服务就关。</p>
+          <h3>手机传书，不用拔卡</h3>
+          <p>手机和小纸连接同一 Wi-Fi，在浏览器里上传书籍、图片和字体，传完回到书架就能看。</p>
         </article>
         <article>
-          <h3>关机也是一页</h3>
-          <p>锁屏和关机壁纸自己选，32 MiB 内的大图也放得下。</p>
+          <h3>字体和排版，按习惯调</h3>
+          <p>字号、行距、页边距、对齐方式都能改，也可以换字体。怎么看着舒服，就怎么设。</p>
         </article>
         <article>
-          <h3>读到哪，记到哪</h3>
-          <p>继续阅读、最近在读、每天读多久，都留在卡上。</p>
+          <h3>锁屏和关机壁纸，自己换</h3>
+          <p>把喜欢的图片传到设备里，就能设置成锁屏或关机画面。</p>
         </article>
         <article>
-          <h3>微信读书 <span class="tag">实验</span></h3>
-          <p>设备上登录、看书架、下载后离线读。走的是非公开协议，上游一改就可能失效。</p>
+          <h3>以后更新，不用再刷机</h3>
+          <p>在小纸上手动检查更新，下载后确认安装。网络不方便时，也能用 TF 卡升级。</p>
         </article>
       </div>
     </section>
 
     <section class="about wrap" id="about" aria-labelledby="about-title">
       <div class="section-head"><span class="mono">04 / 关于</span><span class="mono en">ABOUT</span></div>
-      <h2 id="about-title">源码在 GitHub。</h2>
-      <p class="about-text">应用以 MIT 开源。板级支持、EPDiy、字体和第三方组件各按自己的许可。微信读书的协议适配参考了 wxBook 和 CrossMux。</p>
+      <h2 id="about-title">先把小纸 Pico 这台设备做好。</h2>
+      <p class="about-text">页间 Folio 是我为小纸 Pico 做的第三方阅读固件，不是官方系统。我希望它在小纸上稳定、顺手，把日常阅读需要的功能做好。源码公开，安装细节、适配范围和已知限制都写在 GitHub。遇到问题，也可以直接反馈。</p>
       <div class="actions">
-        <a class="text-link" href={repo}>源码 ↗</a>
-        <a class="text-link" href={`${repo}/blob/main/LICENSES.md`}>第三方许可 ↗</a>
-        <a class="text-link" href={`${repo}/issues`}>反馈 ↗</a>
+        <a class="text-link" href={repo}>查看源码 ↗</a>
+        <a class="text-link" href={`${repo}/blob/main/docs/刷机说明.md`}>安装文档 ↗</a>
+        <a class="text-link" href={`${repo}/issues`}>提交反馈 ↗</a>
       </div>
     </section>
   </main>
 
   <footer class="wrap">
     <a class="brand" href="#main">页间 <b>Folio</b></a>
-    <p>给小纸 Pico 做的阅读固件。</p>
+    <p>给小纸 Pico 做的第三方阅读固件。</p>
     <a href="#main">回到顶部 ↑</a>
   </footer>
   <script>import '../installer/quick-ui';</script>
