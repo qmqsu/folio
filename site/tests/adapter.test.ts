@@ -36,6 +36,10 @@ describe('esptool-js adapter contract (mock library, never a USB device)', () =>
     await expect(device.write(f.release.parts[0], f.images[0], signal(), () => {})).rejects.toThrow('门禁');
     await expect(device.md5(0x1000000, 1, signal())).rejects.toThrow('范围');
   });
+  it('rejects a serial port that is not the reader USB-JTAG interface', async () => {
+    const port = { getInfo: () => ({ usbVendorId: 0x1a86, usbProductId: 0x55d3 }) } as SerialPort;
+    expect(() => new BrowserSerialDevice(port, 'default_reset')).toThrow('USB JTAG_serial debug unit');
+  });
   it('rejects writes before connection and to NVS/resources even after connection', async () => {
     const f = await fixture(), device = new BrowserSerialDevice({} as SerialPort, 'default_reset');
     await expect(device.write(f.release.parts[0], f.images[0], signal(), () => {})).rejects.toThrow('门禁');

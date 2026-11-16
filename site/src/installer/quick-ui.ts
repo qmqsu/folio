@@ -56,7 +56,7 @@ if (button && status) {
     sync();
     try {
       // Must stay inside the click gesture: pick the port before any await.
-      const port = await navigator.serial.requestPort();
+      const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a, usbProductId: 0x1001 }] });
       const device = new BrowserSerialDevice(port, 'default_reset');
       flash = new QuickFlash(release, device, update => { say(update.message); showProgress(update); });
       await flash.run();

@@ -54,6 +54,10 @@ export class BrowserSerialDevice implements SerialDevice {
   #connection?: Promise<DeviceInfo>;
   #writable = false;
   constructor(port: SerialPort, private resetMode: 'default_reset' | 'usb_reset' | 'no_reset') {
+    const info = port.getInfo?.() ?? {};
+    if ((info.usbVendorId !== undefined && info.usbVendorId !== 0x303a) || (info.usbProductId !== undefined && info.usbProductId !== 0x1001)) {
+      throw new Error('选中的不是小纸的 USB JTAG_serial debug unit，请重新选择串口。');
+    }
     this.#transport = new Transport(port, false, true);
     this.#loader = new ESPLoader({ transport: this.#transport, baudrate: 115200, romBaudrate: 115200,
       serialOptions: { bufferSize: 8192 },

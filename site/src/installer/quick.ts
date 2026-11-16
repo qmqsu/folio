@@ -48,12 +48,20 @@ export class QuickFlash {
 
       this.#status('connecting', '连接设备，读取芯片与分区表（最多等 30 秒）');
       this.#open = true;
-      const info: DeviceInfo = await this.device.connect(signal);
-      if (info.chip !== 'ESP32-S3' || info.flashSize !== FLASH_SIZE || !info.securitySafe) {
-        throw new Error('芯片、Flash 容量或安全状态不匹配，已停止。');
+      let info: DeviceInfo, table: Uint8Array;
+      try {
+        info = await this.device.connect(signal);
+        if (info.chip !== 'ESP32-S3' || info.flashSize !== FLASH_SIZE || !info.securitySafe) {
+          throw new Error('芯片、Flash 容量或安全状态不匹配，已停止。');
+        }
+        if (info.flashId !== SUPPORTED_FLASH_ID) throw new Error('这台机器的 Flash 料号还没验证过，一键刷不写。');
+        table = await this.device.read(0x8000, 4096, signal, () => {});
+      } catch (error) {
+        if (error instanceof Error && /No serial data received/.test(error.message)) {
+          throw new Error(`设备没有回应（${error.message}）。请确认选中 USB JTAG_serial debug unit，关闭其他串口程序，短按电源键唤醒后再点一次。`);
+        }
+        throw error;
       }
-      if (info.flashId !== SUPPORTED_FLASH_ID) throw new Error('这台机器的 Flash 料号还没验证过，一键刷不写。');
-      const table = await this.device.read(0x8000, 4096, signal, () => {});
       const layout = assessInstalledLayout(table);
       if (!layout.compatible || layout.migration) {
         throw new Error(layout.migration ? '这台还是原厂四分区布局，一键刷不会替你改分区表。' : '分区布局不认识，一键刷不写。');

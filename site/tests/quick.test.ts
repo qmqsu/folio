@@ -109,6 +109,16 @@ describe('one-click flash (simulated device only)', () => {
     expect(flash.connected).toBe(false);
   });
 
+  it('turns no serial data into actionable port instructions', async () => {
+    const { flash, device, updates } = await setup();
+    vi.spyOn(device, 'connect').mockRejectedValue(new Error('No serial data received'));
+    await flash.run();
+    expect(flash.stage).toBe('failed');
+    expect(updates.at(-1)?.message).toContain('USB JTAG_serial debug unit');
+    expect(updates.at(-1)?.message).toContain('短按电源键');
+    expect(device.writes).toEqual([]);
+  });
+
   it('reports a connection failure even when the browser close never settles', async () => {
     const { flash, device, updates } = await setup();
     vi.spyOn(device, 'connect').mockRejectedValue(new Error('连接设备超时'));
