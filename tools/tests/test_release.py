@@ -396,6 +396,40 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(stable["channels/preview.json"], first["channels/preview.json"])
         with self.assertRaises(ValueError): pages.compose(stable, self.public, promotion=promotion)
 
+    def test_maintainer_waiver_is_one_candidate_not_hardware_evidence(self):
+        candidate = fixture_candidate(self.fixture_key, '0.8.39')
+        provenance = dict(protocol.load_json(candidate['provenance.json']), source_commit=bundle.WAIVER_COMMIT)
+        candidate['provenance.json'] = protocol.canonical(provenance)
+        del candidate['materials.json'], candidate['materials.sig']
+        bundle.sign_materials(candidate, self.fixture_key)
+        record = {k: provenance[k] for k in ('version', 'source_commit', 'app_sha256')}
+        record.update(schema=2, kind='maintainer-waiver', hardware='RDP-G01-W', layout=protocol.LAYOUT,
+                      maintainer='qmqsu', hardware_tested=False, reason='维护者决定本版本不经实机验收直接发布。',
+                      authorized_at='2026-11-14T12:00:00Z')
+        raw = protocol.canonical(record)
+        with self.assertRaises(ValueError):  # Synthetic bytes are NOT pinned by production.
+            bundle.validate_acceptance(raw, provenance)
+        with patch.object(bundle, 'WAIVER_APP_SHA256', provenance['app_sha256']):
+            self.assertEqual(bundle.validate_acceptance(raw, provenance), record)
+            for key, value in (('version', '0.8.40'), ('source_commit', 'f' * 40), ('app_sha256', 'f' * 64)):
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    bundle.validate_acceptance(protocol.canonical(dict(record, **{key: value})), dict(provenance, **{key: value}))
+            for key, value in (('schema', 1), ('kind', 'other'), ('checks', {}), ('tested_at', record['authorized_at']),
+                               ('hardware_tested', True), ('hardware_tested', 0), ('maintainer', 'other'),
+                               ('approved', True), ('reason', 'verified'), ('authorized_at', '9999-01-01T00:00:00Z')):
+                with self.subTest(key=key), self.assertRaises(ValueError):
+                    bundle.validate_acceptance(protocol.canonical(dict(record, **{key: value})), provenance)
+            first = pages.compose({}, self.public, candidate=candidate)
+            promotion = {'acceptance.json': raw}
+            for kind in ('ota', 'usb'):
+                payload = protocol.verify(candidate[kind + '.json'], self.public)
+                promotion[kind + '.json'] = protocol.sign(dict(payload, channel='stable'), self.fixture_key, self.public)
+            stable = pages.compose(first, self.public, promotion=promotion)
+            self.assertEqual(stable['acceptance/0.8.39.json'], raw)
+            self.assertEqual(stable['firmware/0.8.39/folio.bin'], candidate['folio.bin'])
+            with self.assertRaises(ValueError):
+                pages.compose(first, self.public, promotion=dict(promotion, **{'usb.json': b'{}'}))
+
     def test_snapshot_malicious_paths_links_and_duplicates(self):
         for name, kind in (("../escape", tarfile.REGTYPE), ("channels/a", tarfile.SYMTYPE), ("unapproved/a", tarfile.REGTYPE)):
             buffer = io.BytesIO()

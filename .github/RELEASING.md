@@ -151,6 +151,7 @@ Settings → Pages → Build and deployment 的 **Source 选择 GitHub Actions**
 4. 共用发布器先发布不可变 Release 材料，再原子更新完整 Pages；发布用 `folio-pages-publication` 串行锁并校验状态，不覆盖旧版本。正式版本号最初也标记为 GitHub prerelease，preview 不等于实机验收。
 5. 真正验收**该已签名包中的同一镜像**。在 main 新增 `.github/release-acceptance/<version>.json`，绑定准确 source commit、app SHA-256、审核者、UTC 测试时间及全部硬件检查。检查项和拒绝条件见[验收校验器](<../tools/release_bundle.py>)与[协议说明](<../docs/发布与在线更新.md>)；单独 HTTPS 404、帧缓存截图、源码重建或主机测试均不代替完整实机验收。
 6. 只可提升无 `-dev`/`-rc` 后缀的既有 preview。从 **main** 手工运行 `Promote hardware-accepted stable release`，输入原标签，在 `release-stable` 审阅同一包和真实验收记录。流程下载原离线包、**绝不重建镜像**；只签 stable 通道，原子部署后才把 GitHub Release 改为 stable。序号不能伪增以规避设备反回滚。
+   **单次例外（仅 0.8.39）**：维护者决定此版免去实机验收。公开记录须写明 `hardware_tested: false`，并与固定的版本、源提交和应用 SHA-256 全部匹配。免测不代表实机通过，不替代候选包签名、镜像校验或 GitHub 环境审批，也不适用于后续版本。
 7. 若不可变 Release 已成功而 Pages 后续失败，从 main 运行[恢复工作流](<workflows/recover-release.yml>)并输入原标签，恢复原签名字节；不重新签名、不重建、不覆盖资产。若权威状态与线上快照不一致，按明确的失败信息人工核对，不能把错误当成首次空站点。
 
 普通 main push 和 pull request 的实际入口是[Checks](<workflows/check.yml>)：PR 不部署、不拿生产签名 secret；main 检查通过后更新当前网站并保留旧固件与通道。详细签名协议、单调序号、四段写入限制和完整验收项见[发布与在线更新](<../docs/发布与在线更新.md>)。

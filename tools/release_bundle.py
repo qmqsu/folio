@@ -103,17 +103,37 @@ def legal_review(raw):
     return legal
 
 
+# A single publisher-authorized exception, never an option supplied by the caller.
+WAIVER_VERSION = "0.8.39"
+WAIVER_COMMIT = "783257a0f8f2a6696605cd74e570371fa19f7f04"
+WAIVER_APP_SHA256 = "f9de0be26d89e0cb2408f9bdd1abe637fcd39611708066173ef980825728125a"
+
+
+def validate_decision_time(value):
+    from datetime import datetime, timezone, timedelta
+    protocol.require(isinstance(value, str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", value), "UTC release decision timestamp required")
+    when = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    protocol.require(when <= datetime.now(timezone.utc) + timedelta(minutes=5), "Release decision timestamp is in the future")
+
+
 def validate_acceptance(raw, provenance):
     record = protocol.load_json(raw)
+    if "kind" in record:
+        identity = {"version": WAIVER_VERSION, "source_commit": WAIVER_COMMIT, "app_sha256": WAIVER_APP_SHA256}
+        protocol.require(isinstance(WAIVER_APP_SHA256, str) and re.fullmatch(r"[0-9a-f]{64}", WAIVER_APP_SHA256) and
+                         all(provenance.get(k) == v for k, v in identity.items()), "No waiver for this candidate")
+        expected = {**identity, "schema": 2, "kind": "maintainer-waiver", "hardware": "RDP-G01-W", "layout": protocol.LAYOUT,
+                    "maintainer": "qmqsu", "hardware_tested": False, "reason": "维护者决定本版本不经实机验收直接发布。"}
+        protocol.require(set(record) == set(expected) | {"authorized_at"} and
+                         all(type(record[k]) is type(v) and record[k] == v for k, v in expected.items()), "Invalid maintainer waiver")
+        validate_decision_time(record["authorized_at"])
+        return record
     expected = {"schema": 1, "version": provenance["version"], "source_commit": provenance["source_commit"],
                 "app_sha256": provenance["app_sha256"], "hardware": "RDP-G01-W", "layout": protocol.LAYOUT, "approved": True}
     for key, value in expected.items():
         protocol.require(record.get(key) == value and type(record.get(key)) is type(value), "Acceptance mismatch: " + key)
     protocol.require(isinstance(record.get("reviewer"), str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}", record["reviewer"]), "Named human reviewer required")
-    protocol.require(isinstance(record.get("tested_at"), str) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", record["tested_at"]), "UTC hardware acceptance timestamp required")
-    from datetime import datetime, timezone, timedelta
-    tested_at = datetime.fromisoformat(record["tested_at"].replace("Z", "+00:00"))
-    protocol.require(tested_at <= datetime.now(timezone.utc) + timedelta(minutes=5), "Hardware acceptance timestamp is in the future")
+    validate_decision_time(record.get("tested_at"))
     public_record = protocol.canonical(record)
     protocol.require(not PRIVATE.search(public_record) and b"/Users/" not in public_record and b".local-secrets/" not in public_record, "Acceptance contains private material")
     protocol.require(isinstance(record.get("checks"), dict) and set(record["checks"]) == CHECKS, "All hardware acceptance checks required")
@@ -321,6 +341,7 @@ def promote(candidate, output, acceptance, key_path, public_path):
     verify_materials(files, trusted)
     provenance = protocol.load_json(files["provenance.json"])
     protocol.require("-" not in provenance["version"], "Prerelease cannot be promoted to stable")
+    protocol.require(protocol.digest(files["folio.bin"]) == provenance["app_sha256"], "Promotion application/provenance mismatch")
     record = validate_acceptance(acceptance.read_bytes(), provenance)
     result = {"acceptance.json": protocol.canonical(record)}
     for kind in ("ota", "usb"):
