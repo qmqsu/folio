@@ -56,6 +56,7 @@ int main(int argc,char** argv) {
     assert(!strcmp(folio_upload_directory(kind),"update"));
     assert(folio_upload_in_directory("book.epub","books",NULL));
     assert(folio_upload_in_directory("font.ttf","fonts",NULL));
+    assert(folio_upload_name("京华老宋体.ttf",&kind,&limit) && kind==FOLIO_UPLOAD_TTF && limit==32u*1024u*1024u);
     assert(folio_upload_in_directory("folio.bin","update",NULL));
     assert(!folio_upload_in_directory("font.ttf","books",NULL));
     assert(!folio_upload_in_directory("book.epub","update",NULL));
@@ -89,7 +90,9 @@ int main(int argc,char** argv) {
     snprintf(path,sizeof(path),"%s/books/.keep.part",root);write_file(path,"keep");assert(folio_upload_clean_staging(directory));assert(access(path,F_OK)==0);
     snprintf(path,sizeof(path),"%s/books/.folio-upload-%s.part",root,nonce);assert(symlink("ok.txt",path)==0);assert(!folio_upload_clean_staging(directory));assert(unlink(path)==0);
     assert(folio_upload_begin(root,"empty.txt",0,nonce,valid,&u)==FOLIO_UPLOAD_TOO_LARGE);
-    assert(folio_upload_begin(root,"huge.ttf",6u*1024u*1024u+1,nonce,valid,&u)==FOLIO_UPLOAD_TOO_LARGE);
+    assert(folio_upload_begin(root,"large.ttf",32u*1024u*1024u,nonce,valid,&u)==FOLIO_UPLOAD_OK);
+    folio_upload_abort(&u);clean(root);
+    assert(folio_upload_begin(root,"huge.ttf",32u*1024u*1024u+1,nonce,valid,&u)==FOLIO_UPLOAD_TOO_LARGE);
     assert(folio_upload_begin(root,"short.txt",5,nonce,valid,&u)==FOLIO_UPLOAD_OK);assert(folio_upload_write(u,"he",2)==FOLIO_UPLOAD_OK);
     assert(folio_upload_finish(&u,error,sizeof(error))==FOLIO_UPLOAD_TRUNCATED && !u);clean(root);
     assert(folio_upload_begin(root,"excess.txt",5,nonce,valid,&u)==FOLIO_UPLOAD_OK);assert(folio_upload_write(u,"hello!",6)==FOLIO_UPLOAD_TOO_LARGE);

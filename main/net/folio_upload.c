@@ -1,4 +1,5 @@
 #include "folio_upload.h"
+#include "../book/folio_font.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -62,7 +63,7 @@ bool folio_upload_name(const char* name, folio_upload_kind_t* kind, size_t* limi
     else if (!strcmp(name,"folio.bin.sha256")) { k=FOLIO_UPLOAD_SHA256; cap=160; }
     else if (!strcasecmp(dot,".txt")) { k=FOLIO_UPLOAD_TXT; cap=16u*1024u*1024u; }
     else if (!strcasecmp(dot,".epub")) { k=FOLIO_UPLOAD_EPUB; cap=32u*1024u*1024u; }
-    else if (!strcasecmp(dot,".ttf")) { k=FOLIO_UPLOAD_TTF; cap=6u*1024u*1024u; }
+    else if (!strcasecmp(dot,".ttf")) { k=FOLIO_UPLOAD_TTF; cap=FOLIO_FONT_MAX_FILE_BYTES; }
     else if (!strcasecmp(dot,".png")) { k=FOLIO_UPLOAD_PNG; cap=32u*1024u*1024u; }
     else if (!strcasecmp(dot,".jpg") || !strcasecmp(dot,".jpeg")) { k=FOLIO_UPLOAD_JPEG; cap=32u*1024u*1024u; }
     else if (!strcasecmp(dot,".pdf")) { k=FOLIO_UPLOAD_PDF; cap=32u*1024u*1024u; }

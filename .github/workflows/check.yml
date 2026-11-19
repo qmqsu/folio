@@ -37,6 +37,14 @@ jobs:
           test -f "$IDF_PATH/components/esp_http_client/esp_http_client.c"
           test -f "$IDF_PATH/components/http_parser/http_parser.c"
           python tools/tests/run_ci_host_tests.py release update settings online_update online_update_guard power
+      - name: Exercise card fonts and transfer limits under sanitizers
+        env:
+          CC: clang
+        run: |
+          sh tools/tests/run_font_text.sh main/assets/folio_builtin.ttf
+          sh tools/tests/run_font_resource_tests.sh
+          sh tools/tests/run_stb_alloc_tests.sh
+          sh tools/tests/run_upload_tests.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22.23.4'

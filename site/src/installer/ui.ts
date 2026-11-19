@@ -45,7 +45,9 @@ function updateControls(): void {
   button('connect-backup').disabled = active || checking || !release || !support.supported || !checkbox('physical-model').checked;
   button('cancel').disabled = !(active || checking) || pickerPending;
   const ready = installer?.stage === 'awaiting-confirmation';
-  for (const id of ['backup-saved', 'factory-confirm', 'migration-confirm']) checkbox(id).disabled = !ready || operation;
+  checkbox('backup-saved').disabled = !ready || operation;
+  checkbox('factory-confirm').disabled = !ready || !installer?.compatible || operation;
+  checkbox('migration-confirm').disabled = !ready || !installer?.compatible || !installer.migration || operation;
   button('install-button').disabled = operation || !ready || !installer?.compatible || !binaryDownloaded || !evidenceDownloaded ||
     !checkbox('backup-saved').checked || !checkbox('factory-confirm').checked || (installer.migration && !checkbox('migration-confirm').checked);
 }
@@ -127,7 +129,7 @@ button('connect-backup').addEventListener('click', async () => {
   try {
     // Must run directly inside the user gesture, BEFORE downloads / any await.
     // No getPorts(), automatic reconnection or USB VID/PID-as-model assumptions.
-    const port = await navigator.serial.requestPort();
+    const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a, usbProductId: 0x1001 }] });
     pickerPending = false; operation = true;
     installer = new Installer(release, new BrowserSerialDevice(port, reset.value as 'default_reset' | 'usb_reset' | 'no_reset'), render);
     updateControls();

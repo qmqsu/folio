@@ -29,12 +29,16 @@ export async function readStubFlash(loader: StubLoader, offset: number, size: nu
   const result = await loader.checkCommand('read flash', loader.ESP_READ_FLASH, request);
   if (result !== 0) throw new Error('设备拒绝读取 Flash。');
   const output = new Uint8Array(size);
-  let received = 0;
+  let received = 0, emptyFrames = 0;
   while (received < size) {
     signal.throwIfAborted();
     const packet = await loader.transport.read(5000);
     signal.throwIfAborted();
-    if (packet.length === 0) continue;
+    if (packet.length === 0) {
+      if (++emptyFrames > 2) throw new Error('Flash 读取连续收到空帧，传输无进展。');
+      continue;
+    }
+    emptyFrames = 0;
     const expected = Math.min(512, size - received);
     if (packet.length !== expected) throw new Error(`Flash 读取包长度不符：应为 ${expected}，实为 ${packet.length}。`);
     output.set(packet, received); received += packet.length;

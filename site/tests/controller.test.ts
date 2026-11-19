@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Installer, type Update } from '../src/installer/controller';
 import { FLASH_SIZE } from '../src/installer/manifest';
 import { FakeDevice, fixture } from './fixtures';
 
-async function setup(official = false) {
+async function setup(official: boolean | 'spiffs' = false) {
   const f = await fixture(), device = new FakeDevice(official), updates: Update[] = [];
   const installer = new Installer(f.release, device, update => updates.push(update), f.download);
   const save = () => installer.confirmBackupSaved(installer.evidence!.sha256, true, true, true);
@@ -44,9 +44,61 @@ describe('destructive-operation safety state machine (simulated device only)', (
     await expect(installer.install(true)).rejects.toThrow();
   });
   it('permits known official layout only after a separate migration authorization', async () => {
-    const { installer, device, save } = await setup(true); await installer.prepare(true); save();
+    const { installer, device, save } = await setup(true);
+    device.memory.fill(0xff, 0x910000, 0xf20000);
+    await installer.prepare(true); save();
     expect(installer.migration).toBe(true); await expect(installer.install(true)).rejects.toThrow('迁移');
     expect(device.writes).toEqual([]); await installer.install(true, true); expect(installer.stage).toBe('success');
+  });
+  it.each([0x910000, 0x911fff, 0x91ffff, 0x920000, 0xc20000, 0xf1ffff])('blocks even one occupied legacy tail byte at %i', async offset => {
+    const { installer, device, save } = await setup(true);
+    device.memory.fill(0xff, 0x910000, 0xf20000); device.memory[offset] = 0xfe;
+    await installer.prepare(true); save();
+    expect(installer.evidence?.layout).toContain('已有数据'); expect(installer.canInstall).toBe(false);
+    await expect(installer.install(true, true)).rejects.toThrow(); expect(device.writes).toEqual([]);
+    await installer.cancel();
+  });
+  it('rechecks the new OTA region before the very first write', async () => {
+    const { installer, device, save } = await setup(true);
+    device.memory.fill(0xff, 0x910000, 0xf20000);
+    await installer.prepare(true); save(); device.memory[0xf1ffff] = 0;
+    await installer.install(true, true); expect(installer.stage).toBe('failed'); expect(device.writes).toEqual([]);
+  });
+  it('allows the early 2 MiB factory layout only with the original SPIFFS and all affected space erased', async () => {
+    const { installer, device, save } = await setup('spiffs');
+    device.memory.fill(0xff, 0x210000, 0xf20000);
+    expect(device.memory[0x20ffff]).toBe(0xa5); // Occupied legacy factory itself is allowed.
+    const ranges: number[][] = []; device.onMd5 = (at, n) => ranges.push([at, n]);
+    await installer.prepare(true); save(); expect(installer.layoutLabel).toContain('SPIFFS');
+    await expect(installer.install(true)).rejects.toThrow(); expect(device.writes).toEqual([]);
+    await installer.install(true, true); expect(installer.stage).toBe('success');
+    expect(ranges).toContainEqual([0x210000, 0xf20000 - 0x210000]);
+    expect(device.writes).toEqual([0, 0x8000, 0x10000, 0x910000]);
+  });
+  it.each([0x210000, 0x40ffff, 0x410000, 0x70ffff, 0x710000, 0xf1ffff])('refuses to repurpose legacy SPIFFS or unassigned bytes at %i', async offset => {
+    const { installer, device, save } = await setup('spiffs');
+    device.memory.fill(0xff, 0x210000, 0xf20000); device.memory[offset] = 0xfe;
+    await installer.prepare(true); save(); expect(installer.layoutLabel).toContain('原 SPIFFS 与新版 factory/storage 重叠');
+    expect(installer.compatible).toBe(false); await expect(installer.install(true, true)).rejects.toThrow();
+    expect(device.writes).toEqual([]); await installer.cancel();
+  });
+  it('blocks a legacy SPIFFS byte that changed after the backup', async () => {
+    const { installer, device, save } = await setup('spiffs'); device.memory.fill(0xff, 0x210000, 0xf20000);
+    await installer.prepare(true); save(); device.memory[0x210000] = 0;
+    await installer.install(true, true); expect(installer.stage).toBe('failed'); expect(device.writes).toEqual([]);
+  });
+  it('rejects an incomplete device digest instead of treating it as blank', async () => {
+    const { installer, device, save } = await setup(true);
+    device.memory.fill(0xff, 0x910000, 0xf20000);
+    await installer.prepare(true); save();
+    device.md5 = async () => '';
+    await installer.install(true, true); expect(installer.stage).toBe('failed'); expect(device.writes).toEqual([]);
+  });
+  it('rejects collateral storage changes before reporting success', async () => {
+    const { installer, device, save } = await setup();
+    await installer.prepare(true); save();
+    device.onMd5 = offset => { if (offset === 0x410000 && device.writes.length) device.memory[0x90ffff] ^= 1; };
+    await installer.install(true); expect(installer.stage).toBe('failed');
   });
   it('allows backup but never writes unknown layout or unvalidated 16MiB flash vendor', async () => {
     for (const unknown of ['layout', 'vendor']) {
@@ -74,6 +126,16 @@ describe('destructive-operation safety state machine (simulated device only)', (
     Object.assign(device, { [failure]: true }); await installer.install(true);
     expect(installer.stage).toBe('failed'); expect(updates.some(u => u.stage === 'success')).toBe(false); expect(device.closed).toBe(1);
   });
+  it.each(['failed', 'cancelled', 'after-write'])('reports a hung close on %s without claiming success', async path => {
+    const { installer, device, save, updates } = await setup();
+    const close = vi.spyOn(device, 'close').mockImplementation(() => new Promise<void>(() => {}));
+    if (path === 'failed') { device.info.securitySafe = false; await installer.prepare(true); }
+    else { await installer.prepare(true); if (path === 'cancelled') await installer.cancel(); else { save(); await installer.install(true); } }
+    expect(installer.stage).toBe(path === 'cancelled' ? 'cancelled' : 'failed');
+    expect(updates.some(u => u.stage === 'success')).toBe(false); expect(close).toHaveBeenCalledTimes(1);
+    expect(updates.at(-1)?.message).toContain('串口关闭失败');
+    if (path !== 'after-write') expect(device.writes).toEqual([]);
+  }, 7000);
   it('cancels during backup with no writes and closes exactly once', async () => {
     const { installer, device } = await setup();
     device.onRead = (_offset, size) => { if (size === FLASH_SIZE) void installer.cancel(); };

@@ -4,9 +4,9 @@
 
 页面只有一份自托管脚本（刷机 UI）和一份 CSS，没有 CDN、远程字体、后端、账号或分析服务；CSP 只放行本域脚本，`connect-src` 仅本站清单域与备用镜像。构建产出的 HTML 约 7 KB。
 
-**一键刷机**（[quick.ts](<src/installer/quick.ts>)）的顺序：校验签名清单 → 下载并校验四段镜像 → 核对芯片/料号/分区布局 → 记录 NVS/PHY 与字体资源区的设备端 MD5 → 写入四段并逐段做设备端 MD5 校验 → 再确认保护区 MD5 未变。它不强制下载 16 MiB 备份，不改分区表、不写 NVS 与 storage；因此只接受已兼容布局，原厂四分区和未知布局一律拒绝。页面加载时静默检查清单，没有发布或校验失败时按钮保持禁用。
+**一键刷机**（[quick.ts](<src/installer/quick.ts>)）的顺序：校验签名清单 → 下载并校验四段镜像 → 核对芯片/料号/分区布局 → 记录 NVS/PHY 与字体资源区的设备端 MD5 → 写入四段并逐段做设备端 MD5 校验 → 再确认保护区 MD5 未变。它不强制下载 16 MiB 备份，重写同布局分区表，不迁移布局，不写 NVS 与 storage；因此只接受已兼容布局，原厂四分区和未知布局一律拒绝。页面加载时静默检查清单，没有发布或校验失败时按钮保持禁用。
 
-旧的逐步安装向导（备份、证据下载、迁移授权、四步状态机）仍保留在 [src/installer](<src/installer/>) 里并有单测，但页面不再引用它。若以后恢复那条更重的路径，约束见下一节。
+首页另有独立的[旧四分区备份与迁移向导](<src/pages/migrate.astro>)，不会从一键刷自动进入或续写。它要求完整备份、证据下载、确认已落盘及独立迁移授权。
 
 ## 本机构建
 
@@ -41,15 +41,15 @@ export ASTRO_TELEMETRY_DISABLED=1
 
 浏览器完整依赖许可在 [公开 notice](<public/third-party-licenses.txt>)。RAM stub 不是笼统继承站点 MIT：[确切来源与哈希](<public/licenses/stub-provenance.txt>) 核实为 esp-flasher-stub v1.2.2 / commit `23959b780454adf885916d42f2274ec648e96a94`，子模块 `esp-stub-lib@d61983fa4d1f66b9c088608c1f702ad877121279`，选择其双许可中的 [MIT 选项全文](<public/licenses/esp-flasher-stub-MIT.txt>)；esptool-js 本身仍是 Apache-2.0。实际S3 stub运行字段已与上游发布文件逐一比较相同，构建脚本检查固定包哈希，升级依赖需重审。
 
-## 逐步安装器源码（页面不再引用）
+## 旧四分区备份与迁移向导
 
-以下是保留的安装器源码所实现的约束，供以后再上线时对照；当前页面不提供刷写入口。
+入口：`/folio/migrate/`。页面初始不连接、不写入。[4 MiB factory + FAT](<https://github.com/MindReset/read_pico_firmware/blob/6a247cc94420b85c650b32a6b2c063a360070eee/partitions_16M.csv>) 布局的新增 OTA 地址范围 `0x910000..0xf1ffff`（含对齐空隙）必须逐字节为 FF；对于[更早的 2 MiB factory + SPIFFS 布局](<https://github.com/MindReset/read_pico_firmware/blob/28e7e13669e04764e10b97b190e769ba578e2270/partitions_16M.csv>)，原 SPIFFS 与新版 factory/storage 重叠，必须检查 `0x210000..0xf1ffff` 整个区间。任一区间非空只允许保存备份。写前由设备重新计算整个区间的 MD5，并与已确认全 FF 的备份比较；写后以设备 MD5 核对 storage，保留原有四段回读 SHA-256 和 NVS/PHY 逐字节比较。
 
 1. 桌面 Chrome/Edge + HTTPS + Web Serial + WebCrypto。无 JS、手机、Safari/Firefox 均不允许连接/烧录；普通页面仍可读。
 2. 用户根据实物或购买资料确认 **RDP-G01-W**，不能仅凭 S3 或 USB VID/PID。随后读取芯片、Flash RDID、容量和安全信息。
 3. 目前运行时 Flash/PSRAM 120MHz profile 为实验配置：只允许 **Zbit ZB25VQ128**，JEDEC `5e 40 18`，esptool 寄存器整数 `0x18405e`。其他 16MiB 厂牌可备份但拒写。Secure Boot/加密/安全下载模式不支持。
-4. 实际分区表（含 MD5 和完整 4KiB 扇区尾部）须精确匹配 Folio v2，或 [固定官方提交的四分区表](<https://github.com/MindReset/read_pico_firmware/blob/6a247cc94420b85c650b32a6b2c063a360070eee/partitions_16M.csv>)。后者须单独授权新增高位 OTA 分区；不是对所有原厂、ThingsOS 或第三方固件的兼容承诺。未知布局只允许完整备份。
-5. 下载校验四段镜像 → 完整读取 16MiB → 生成 SHA-256 证据 → 用户分别保存备份/证据并确认落盘 → 明确同意切 factory（迁移还需另行同意）→ 写入/逐段回读 SHA → 验证 NVS/PHY 保留区 → 关闭串口 → 才报告完成。
+4. 实际分区表（含 MD5 和完整 4KiB 扇区尾部）须精确匹配 Folio v2，或上述两种已核实的官方四分区表之一。两种迁移均须满足对应区间空白门禁并单独授权；不是对所有原厂、ThingsOS 或第三方固件的兼容承诺。未知布局只允许完整备份。
+5. 下载校验四段镜像 → 完整读取 16MiB → 生成 SHA-256 证据 → 用户分别保存备份/证据并确认落盘 → 明确同意切 factory（迁移还需另行同意）→ 写入/逐段回读 SHA → 验证 NVS/PHY 与 storage 保留区 → 关闭串口 → 才报告完成。
 6. 无 erase-all、merged、字体资源写入。原生 USB 复位不自动重试其他策略。成功后不自动重启设备，提示用户按硬件说明重启。
 
 本轮已在私有调试设备上完成完整 Flash 备份和 app-only 安装／回读，**但网页四段安装流程尚未完成硬件验收**。页面没有把静态构建、模拟测试或浏览器截图当作实机刷机成功。备份下载事件不能证明落盘，必须由用户在电脑中核对。温度、120MHz 稳定性、原生 USB 复位/重枚举与真实掉电恢复仍需后续独立硬件验证。
@@ -61,8 +61,8 @@ export ASTRO_TELEMETRY_DISABLED=1
 - 真实布局/渲染：1440、1024、768、375、320px 与 844×390 横屏，无横向溢出；全页只有一个 `h1`，五个区块都在。
 - 图片真的解码：逐张检查 `naturalWidth`，不留空白框。
 - 真实键盘：跳到正文、可见焦点；首屏与导航的「一键刷机」都落到 `#flash`。
-- 刷机入口受控：清单 404 时按钮与备份开关都禁用、不弹串口；伪造签名信封被拒后仍禁用；备份开关默认勾选。
-- 旧逐步向导的节点（`#connect-backup`、`#install-button` 等）必须查不到。
+- 刷机入口受控：清单 404 或伪造签名时，首页不能刷写，也不弹串口。
+- 首页不混入迁移控件；独立向导默认不勾选任何授权，签名验证失败不能连接或安装。
 - 只发本域与清单域的请求；页面恰好一份自托管模块脚本。
 - 无 JavaScript：标题、说明、六张功能卡照常可读，刷机按钮保持禁用。
 - 证据写入 [浏览器报告](<../artifacts/firmware-0832/site/browser-report.json>) 与同目录 PNG。
@@ -74,8 +74,8 @@ export ASTRO_TELEMETRY_DISABLED=1
 - [分区](<src/installer/partition.ts>)：Folio/固定官方布局识别、MD5 与擦除尾部。
 - [状态机](<src/installer/controller.ts>)：下载、备份、确认、写入、回读、取消和关闭。
 - [串口适配](<src/installer/serial.ts>)：固定 esptool-js，READ_FLASH 帧/ACK/尾 MD5 校验，不打印 MAC/原始 Flash。
-- [一键刷机](<src/installer/quick.ts>)、[页面接线](<src/installer/quick-ui.ts>)：签名校验、四段写入与回读、芯片/料号/布局门禁；不含备份。**当前页面只用这一层**。
-- [交互层](<src/installer/ui.ts>)：旧向导的能力检测、串口手势、进度与中断提示。页面不再导入。
+- [一键刷机](<src/installer/quick.ts>)、[页面接线](<src/installer/quick-ui.ts>)：签名校验、四段写入与回读、芯片/料号/布局门禁；不含备份。**首页只用这一层**。
+- [交互层](<src/installer/ui.ts>)：独立备份迁移向导的能力检测、串口手势、进度与中断提示。
 - [单元测试](<tests/>)：仅临时测试密钥、人工构造镜像/内存 Flash 和协议替身，不接触生产私钥或硬件。
 
 首次 pnpm 依赖安装因 pnpm 11 忽略旧 `.npmrc`，曾意外使用机器默认 package store；已报告 lead，并改用站点配置与显式 `--store-dir`。未读取/清理外部缓存，不影响源码与发布产物；后续 frozen install 已在站点 store 验证通过。

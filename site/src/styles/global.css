@@ -180,3 +180,6 @@ button.button:disabled{background:transparent;border-color:var(--line-strong);co
   html{scroll-behavior:auto}
   *,*::before,*::after{transition:none!important;animation:none!important}
 }
+
+/* Independent migration wizard */
+.wizard{max-width:48rem;padding-block:2rem}.wizard section{padding-block:1.4rem}.wizard h1{margin-block:1.5rem}.wizard h2{font-size:1.5rem;margin-bottom:1rem}.wizard section h2+*{margin-top:0}.wizard label{display:block;padding-block:.45rem}.wizard button,.wizard select,.wizard summary{min-height:44px;font:inherit}.wizard button{margin-block:.4rem}.wizard pre{white-space:pre-wrap;overflow-wrap:anywhere}.wizard details{margin-top:.8rem}

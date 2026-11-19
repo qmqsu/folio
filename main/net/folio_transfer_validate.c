@@ -298,7 +298,7 @@ bool folio_transfer_validate(const char* path,folio_upload_kind_t kind,char* err
     if(cancelled())return false;
     bool ok=false;
     if(kind==FOLIO_UPLOAD_EPUB)ok=validate_epub(path,error,cap);
-    else if(kind==FOLIO_UPLOAD_TTF) {folio_font_t* font=folio_font_open(path,32);ok=font!=NULL;folio_font_close(font);}
+    else if(kind==FOLIO_UPLOAD_TTF)ok=folio_font_validate_file(path);
     else if(folio_upload_saved_only(kind))ok=saved_file(path,kind);
     else if(kind==FOLIO_UPLOAD_FIRMWARE)ok=folio_update_validate_image(path,error,cap);
     else if(kind==FOLIO_UPLOAD_SHA256) {

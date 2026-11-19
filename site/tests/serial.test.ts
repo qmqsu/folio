@@ -27,6 +27,28 @@ describe('stub serial read protocol (no actual serial port)', () => {
     expect(p.acknowledgements).toEqual(Array.from({ length: 18 }, (_, index) => Math.min(512 * (index + 1), 9000)));
     const view = new DataView(p.requests[0].buffer); expect([0, 4, 8, 12].map(n => view.getUint32(n, true))).toEqual([0, 9000, 512, 1]);
   });
+  it('reads the complete 16 MiB backup with all frame ACKs and its final digest', async () => {
+    const size = 0x1000000, data = new Uint8Array(size);
+    for (let at = 0; at < size; at++) data[at] = (at >>> 16) ^ (at >>> 8) ^ at;
+    const digest = md5(data); let readAt = 0, ack = 0, finalDigestRead = false;
+    const p = protocol(new Uint8Array());
+    p.loader.transport.read = async () => {
+      if (readAt === size) { finalDigestRead = true; return digest; }
+      if (readAt !== ack) throw new Error('Missing ACK');
+      const frame = data.subarray(readAt, readAt + 512); readAt += frame.length; return frame;
+    };
+    p.loader.transport.write = async bytes => { ack = new DataView(bytes.buffer).getUint32(0, true); };
+    const output = await readStubFlash(p.loader, 0, size, new AbortController().signal, () => {});
+    expect(ack).toBe(size); expect(finalDigestRead).toBe(true); expect(output.length).toBe(size);
+    expect(md5(output)).toEqual(digest);
+  });
+  it('stops a stalled full backup after three empty frames without ACKs or progress', async () => {
+    const p = protocol(new Uint8Array(512));
+    const read = vi.spyOn(p.loader.transport, 'read').mockResolvedValue(new Uint8Array());
+    const progress = vi.fn();
+    await expect(readStubFlash(p.loader, 0, 0x1000000, new AbortController().signal, progress)).rejects.toThrow('空帧');
+    expect(read).toHaveBeenCalledTimes(3); expect(progress).not.toHaveBeenCalled(); expect(p.acknowledgements).toEqual([]);
+  });
   it('rejects a short data frame instead of treating corruption as a fragment', async () => {
     const bytes = new Uint8Array(9000).fill(0x5a), p = protocol(bytes, { split: 1000 });
     await expect(readStubFlash(p.loader, 0, bytes.length, new AbortController().signal, () => {})).rejects.toThrow('长度不符');

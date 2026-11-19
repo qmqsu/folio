@@ -39,6 +39,7 @@ static unsigned checks;
     } \
 } while (0)
 
+bool fail_crypto_init, fail_hash_setup, fail_hash_finish;
 static const char *test_pack_path;
 static const char *test_songti_path;
 size_t font_test_cancel_calls;
@@ -666,8 +667,53 @@ static void test_fault_injection(void)
            allocation_cases, cancellation_cases);
 }
 
+static void test_card_only(const char* missing, const char* valid_pack)
+{
+    test_pack_path = missing;
+    for (unsigned i = 1; i <= 3; ++i) {
+        folio_font_t* font = folio_font_open(native_paths[i], 24);
+        CHECK(font != NULL && (font->fallback != NULL) == (i == 3));
+        CHECK(font_glyph_index(font, 0x4e66) != 0);
+        folio_font_close(font);
+        check_clean();
+    }
+    for (unsigned failure = 0; failure < 5; ++failure) {
+        reset_hooks();
+        fail_crypto_init = failure == 0;
+        fail_hash_setup = failure == 1;
+        fail_hash_finish = failure == 2;
+        if (failure == 3) font_test_cancel_at = 4;
+        if (failure == 4) allocation_fail_at = 2;
+        CHECK(folio_font_open(native_paths[1], 24) == NULL);
+        check_clean();
+    }
+    reset_hooks();
+    FILE* file = fopen(card_faces[3].path, "r+b");
+    CHECK(file != NULL && fseek(file, -1, SEEK_END) == 0);
+    int byte = fgetc(file);
+    CHECK(byte != EOF && fseek(file, -1, SEEK_END) == 0);
+    CHECK(fputc(byte ^ 1, file) != EOF && fclose(file) == 0);
+    CHECK(folio_font_open(native_paths[3], 24) == NULL); /* Same length, wrong SHA. */
+    check_clean();
+    file = fopen(card_faces[0].path, "wb");
+    CHECK(file != NULL && fclose(file) == 0);
+    CHECK(folio_font_open(native_paths[1], 24) == NULL);
+    check_clean();
+    test_pack_path = valid_pack;
+    reset_hooks();
+    folio_font_t* font = folio_font_open(native_paths[3], 24);
+    CHECK(font && font->fallback && file_calls == 1); /* No card access. */
+    folio_font_close(font);
+    check_clean();
+    printf("verified card fallback: 3 faces, Symbols, SHA/size/crypto/cancel/OOM failures, flash priority; %u checks\n", checks);
+}
+
 int main(int argc, char **argv)
 {
+    if (argc == 4 && !strcmp(argv[1], "--card-only")) {
+        test_card_only(argv[2], argv[3]);
+        return 0;
+    }
     if (argc != 6) {
         fprintf(stderr, "usage: %s songti.ttf pack.bin charset-B.txt fallback.txt private-temp-dir\n", argv[0]);
         return 2;

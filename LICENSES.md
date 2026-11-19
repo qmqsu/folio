@@ -9,7 +9,7 @@
 | USB RAM flasher stub | esp-flasher-stub v1.2.2 与固定 esp-stub-lib 子模块 | Apache-2.0 OR MIT，本分发选择 MIT | ESP32-S3 运行字段已与 v1.2.2 上游 JSON 逐项核对；原版权、完整 MIT、精确提交与哈希见[网站声明](<site/public/third-party-licenses.txt>)，不是按 esptool-js 外层许可推断。 |
 | Read Pico 板级支持与大多芯片驱动 | [MindReset/read_pico_firmware](https://github.com/MindReset/read_pico_firmware) | Apache-2.0 | 仅纳入独立组件；保留各组件原有 LICENSE 与版权信息。 |
 | EPDiy 显示驱动 | 官方固件所用 `components/epdiy` | LGPL-3.0-or-later | 该组件单独适用其目录中的 LICENSE；发布固件前需按 LGPL 履行分发要求。 |
-| TrueType 栅格化库 | Sean Barrett, `stb_truetype.h` v1.26 | MIT 或 Public Domain（Unlicense），二选一 | 原始双许可全文保留在 `main/book/vendor/stb_truetype.h` 文件末尾，并原样提取到 `licenses/stb_truetype.txt`。 |
+| TrueType 栅格化库 | Sean Barrett, `stb_truetype.h` v1.26 | MIT 或 Public Domain（Unlicense），二选一 | 本项目为分配失败分支添加了防御检查；原始双许可全文保留在 `main/book/vendor/stb_truetype.h` 文件末尾，并原样提取到 `licenses/stb_truetype.txt`。 |
 | JPEG 封面解码 | [nothings/stb](https://github.com/nothings/stb)，`stb_image.h` v2.30 | MIT 或 Public Domain（Unlicense），二选一 | 固定提交 `003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5`；只启用 JPEG；保留原始双许可，防御修改记录于 `main/book/vendor/COVER-SOURCES.md`。 |
 | JPEG 大图壁纸解码 | [Espressif esp_jpeg 1.3.1](https://components.espressif.com/components/espressif/esp_jpeg/versions/1.3.1/readme) 中的 ChaN TJpgDec R0.03 | ChaN宽松许可（保留版权、无担保） | 固定提交和归档哈希见[来源记录](<main/book/vendor/tjpgd/README.md>)；核心版权条款保留在源码及[独立许可副本](<licenses/TJpgDec.txt>)。未采用Espressif整图包装器；其Apache-2.0声明仍保留。主机与设备使用同一软件C核心。 |
 | PNG 流式封面／壁纸解码 | [kikuchan/pngle](https://github.com/kikuchan/pngle) | MIT | 固定提交 `b1c68193f1d3f8642b3e0e095d457a828038e6fb`；源码、修改说明及上游校验值在 `main/book/vendor/`。 |

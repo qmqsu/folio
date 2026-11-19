@@ -13,9 +13,13 @@ const char* folio_font_builtin_path(unsigned index);
 const char* folio_font_builtin_label(const char* path);
 folio_font_t* folio_font_open_builtin(int pixel_height);
 
+// Card files are paged; this limit is independent of the resident built-in TTF limit.
+#define FOLIO_FONT_MAX_FILE_BYTES (32u * 1024u * 1024u)
 #define FOLIO_FONT_MAX_BYTES (6u * 1024u * 1024u)
 
 folio_font_t* folio_font_open(const char* path, int pixel_height);
+// Validate every outline of a staged upload before installing the file.
+bool folio_font_validate_file(const char* path);
 folio_font_t* folio_font_open_first_on_card(int pixel_height, char* path_out, uint32_t path_cap);
 void folio_font_close(folio_font_t* font);
 // Changes size without reloading the TTF. The bounded bitmap cache keeps sizes separate.

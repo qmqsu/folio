@@ -1,4 +1,5 @@
-import { assertVerified, FLASH_SIZE, sha256, validateImage, fetchWithMirror, type Release, type Part } from './manifest';
+import { md5 } from '@noble/hashes/legacy.js';
+import { assertVerified, FLASH_SIZE, hex, sha256, validateImage, fetchWithMirror, type Release, type Part } from './manifest';
 import { assessInstalledLayout, type LayoutAssessment } from './partition';
 
 export interface DeviceInfo { chip: string; flashSize: number; flashId: number; securitySafe: boolean }
@@ -11,6 +12,8 @@ export interface SerialDevice {
   write(part: Part, bytes: Uint8Array, signal: AbortSignal, progress: (bytes: number, total: number) => void): Promise<void>;
   close(): Promise<void>;
 }
+// Check the entire newly claimed tail, including alignment padding between OTA entries.
+const MIGRATION_END = 0xf20000; // exclusive end of ota_1
 export type Stage = 'idle' | 'downloading' | 'connecting' | 'backing-up' | 'awaiting-confirmation' | 'writing' | 'verifying' | 'success' | 'failed' | 'cancelled';
 export interface Update { stage: Stage; message: string; done?: number; total?: number }
 export interface BackupEvidence {
@@ -75,6 +78,9 @@ export class Installer {
       signal.throwIfAborted();
       const digest = await sha256(backup);
       signal.throwIfAborted();
+      if (this.#layout.migration && !backup.subarray(this.#layout.blankFrom, MIGRATION_END).every(b => b === 0xff)) {
+        this.#layout = { ...this.#layout, compatible: false, label: `${this.#layout.label}。迁移涉及的区间已有数据：仅允许备份，禁止迁移。` };
+      }
       this.#backup = backup;
       this.#evidence = { schema: 1, kind: 'folio-local-flash-backup', size: FLASH_SIZE, sha256: digest, createdAt: new Date().toISOString(), chip: info.chip,
         hardware: 'RDP-G01-W (user confirmed)', layout: this.#layout.label,
@@ -96,6 +102,12 @@ export class Installer {
       for (let i = 0; i < this.release.parts.length; i++) await validateImage(this.release.parts[i], this.#images[i], this.release);
       const table = await this.device.read(0x8000, 4096, signal, () => {});
       if (!table.every((b, i) => b === this.#backup![0x8000 + i]) || table.length !== 4096) throw new Error('分区表变化，请重新完整备份。');
+      if (this.#layout?.migration) {
+        this.#status('verifying', '写入前重新确认迁移涉及的区间全部为空。');
+        const start = this.#layout.blankFrom;
+        const expected = hex(md5(this.#backup!.subarray(start, MIGRATION_END)));
+        if (await this.device.md5(start, MIGRATION_END - start, signal) !== expected) throw new Error('迁移区间与已确认全 FF 的完整备份不符，禁止迁移。');
+      }
       for (let i = 0; i < this.release.parts.length; i++) {
         const part = this.release.parts[i]; signal.throwIfAborted();
         this.#wrote = true;
@@ -110,14 +122,25 @@ export class Installer {
       this.#status('verifying', '核对 NVS 与 PHY 保留区未被改写', 0, 0x7000);
       const preserved = await this.device.read(0x9000, 0x7000, signal, n => this.#status('verifying', '核对 NVS 与 PHY 保留区', n, 0x7000));
       if (preserved.length !== 0x7000 || !preserved.every((b, i) => b === this.#backup![0x9000 + i])) throw new Error('NVS/PHY 保留区与备份不符，停止并按恢复指南处理。');
+      this.#status('verifying', '核对 storage 保留区与安装前备份');
+      const storageDigest = hex(md5(this.#backup!.subarray(0x410000, 0x910000)));
+      if (await this.device.md5(0x410000, 0x500000, signal) !== storageDigest) throw new Error('storage 保留区与备份不符，停止并按恢复指南处理。');
       signal.throwIfAborted();
       await this.#close();
-      this.#status('success', '四段写入与回读 SHA-256 全部通过，NVS 保留区一致，串口已关闭。请按设备说明重新启动；这不代表硬件功能验收。');
+      this.#status('success', '四段写入与回读 SHA-256 全部通过，NVS/PHY 和 storage 保留区一致，串口已关闭。请按设备说明重新启动；这不代表硬件功能验收。');
     } catch (error) { await this.#fail(error); }
   }
   async #close(): Promise<void> {
     if (!this.#open) return;
-    this.#closePromise ??= this.device.close().then(() => { this.#open = false; });
+    this.#closePromise ??= (async () => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          this.device.close().then(() => { this.#open = false; }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('关闭串口超时。')), 2000); }),
+        ]);
+      } finally { if (timer !== undefined) clearTimeout(timer); }
+    })();
     await this.#closePromise;
   }
   async #fail(error: unknown): Promise<void> {

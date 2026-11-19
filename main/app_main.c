@@ -584,7 +584,8 @@ static void select_font(size_t index) {
     }
     const char* message = failure == FONT_SAVE_FAILED ? "字体选择未能保存，已恢复原字体和阅读位置。" :
         failure == FONT_READER_FAILED ? "新字体未能完成阅读排版，已恢复原字体和阅读位置。" :
-        folio_font_is_builtin_path(candidate.font_path) ? "内置字体资源缺失、损坏或内存不足，已恢复原字体。原选择未改变。" :
+        !strcmp(candidate.font_path, FOLIO_FONT_BUILTIN_PATH) ? "内置宋体未能加载，已恢复原字体。" :
+        folio_font_is_builtin_path(candidate.font_path) ? "已恢复原字体。可将配套字库放入 TF 卡根目录 folio-fonts/ 后重试；内存不足时也无法加载。" :
         "无法加载这款字体，已恢复原字体。请检查 TF 卡和 TrueType glyf 字体文件。";
     show_error(message, s_fonts_return);
 }

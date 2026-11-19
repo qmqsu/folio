@@ -1,0 +1,38 @@
+---
+import '../styles/global.css';
+---
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self' https://qmqsu.github.io https://testingcf.jsdelivr.net; object-src 'none'; base-uri 'self'; form-action 'none'" />
+  <title>旧四分区备份与迁移 · 页间 Folio</title>
+</head>
+<body><main class="wrap wizard">
+  <a href="/folio/#flash">← 返回刷机首页</a>
+  <h1>旧四分区备份与迁移</h1>
+  <p>适用于 RDP-G01-W 的已知原厂四分区。连接和备份不会改写 Flash。4 MiB factory + FAT 布局须确认新增 OTA 区间全空；更早的 2 MiB factory + SPIFFS 布局与新版 factory/storage 重叠，从旧 SPIFFS 起到新 OTA 槽末尾都必须为空。发现任何已有数据就只允许备份。TF 卡请另行备份。</p>
+  <p id="browser-support">需要启用 JavaScript 的桌面 Chrome 或 Edge。</p>
+  <section><h2>1 · 检查稳定版固件</h2>
+    <button id="check-release" disabled>检查签名清单</button> <span id="release-badge"></span><p id="release-info"></p>
+  </section>
+  <section><h2>2 · 读取完整备份</h2>
+    <label><input type="checkbox" id="physical-model" /> 已根据实物或购买凭据确认型号为 RDP-G01-W</label>
+    <label>连接方式 <select id="reset-mode"><option value="default_reset">默认复位</option><option value="usb_reset">原生 USB 复位</option><option value="no_reset">已手动进入下载模式</option></select></label>
+    <button id="connect-backup" disabled>选择设备并备份（只读）</button>
+  </section>
+  <section id="backup-panel" hidden><h2 id="backup-title" tabindex="-1">3 · 保存备份再决定是否安装</h2>
+    <p>备份可能含账号和网络凭据，只存本机，不要公开。请确认下载目录中有两个文件。</p><pre id="backup-details"></pre>
+    <button id="save-backup">下载 16 MiB 备份</button> <button id="save-evidence">下载 SHA-256 证据</button>
+    <label><input type="checkbox" id="backup-saved" disabled /> 已在电脑中找到完整备份和证据</label>
+    <label><input type="checkbox" id="factory-confirm" disabled /> 同意重写启动程序、factory 应用及启动选择，下次从 factory 启动</label>
+    <label id="migration-field" hidden><input type="checkbox" id="migration-confirm" disabled /> 另行同意将上方已识别的原厂四分区改为 Folio 七分区；若为旧 SPIFFS 布局，将重新划分已确认全空的原 SPIFFS 区间</label>
+    <button id="install-button" disabled>开始写入固件</button>
+  </section>
+  <section><h2>操作状态</h2><p id="install-status" role="status" aria-live="polite">尚未连接设备。</p>
+    <progress aria-label="当前步骤进度" id="install-progress" max="100" value="0"></progress> <span id="progress-value"></span>
+    <button id="cancel" disabled>取消并关闭串口</button>
+    <details id="recovery"><summary>中断或校验失败怎么办？</summary><p>不要把部分写入视为成功，也不要擦除设备。保留备份和证据，查看<a href="https://github.com/qmqsu/folio/blob/main/docs/刷机说明.md#恢复">恢复说明</a>。</p></details>
+  </section>
+</main><script>import '../installer/ui';</script></body></html>

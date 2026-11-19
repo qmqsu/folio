@@ -3,7 +3,7 @@ import { QuickFlash, type QuickUpdate } from '../src/installer/quick';
 import { FLASH_SIZE } from '../src/installer/manifest';
 import { FakeDevice, fixture } from './fixtures';
 
-async function setup(official = false) {
+async function setup(official: boolean | 'spiffs' = false) {
   const f = await fixture();
   const device = new FakeDevice(official);
   const updates: QuickUpdate[] = [];
@@ -72,10 +72,10 @@ describe('one-click flash (simulated device only)', () => {
     expect(unknown.flash.stage).toBe('failed');
     expect(unknown.device.writes).toEqual([]);
 
-    const factory = await setup(true);
-    await factory.flash.run();
-    expect(factory.flash.stage).toBe('failed');
-    expect(factory.device.writes).toEqual([]);
+    for (const kind of [true, 'spiffs'] as const) {
+      const factory = await setup(kind); await factory.flash.run();
+      expect(factory.flash.stage).toBe('failed'); expect(factory.device.writes).toEqual([]);
+    }
   });
 
   it('stops when the device MD5 does not match the signed image', async () => {
@@ -107,6 +107,13 @@ describe('one-click flash (simulated device only)', () => {
     expect(flash.stage).toBe('failed');
     expect(device.closed).toBe(1);
     expect(flash.connected).toBe(false);
+  });
+
+  it('checks PHY data as well as the NVS partition', async () => {
+    const { flash, device } = await setup();
+    device.onMd5 = offset => { if (device.writes.length && offset === 0x9000) device.memory[0xe000] ^= 1; };
+    await flash.run();
+    expect(flash.stage).toBe('failed'); expect(device.resets).toBe(0);
   });
 
   it('turns no serial data into actionable port instructions', async () => {

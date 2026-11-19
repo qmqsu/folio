@@ -14,6 +14,9 @@
 #include "esp_heap_caps.h"
 #include "epdiy.h"
 #include "folio_text.h"
+#if defined(ESP_PLATFORM) || defined(FOLIO_TEST_CARD_FONT)
+#include "psa/crypto.h"
+#endif
 #ifdef ESP_PLATFORM
 #include "miniz.h"
 #include "esp_partition.h"
@@ -29,6 +32,13 @@
 #include "freertos/task.h"
 #endif
 
+static void* font_raster_alloc(size_t size, void* context) {
+    void* p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p && context) *(bool*)context = true;
+    return p;
+}
+#define STBTT_malloc(size, context) font_raster_alloc((size), (context))
+#define STBTT_free(pointer, context) ((void)(context), free(pointer))
 #define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
 #if defined(__GNUC__)
@@ -68,7 +78,27 @@ typedef struct {
     uint8_t* pixels;
 } glyph_cache_entry_t;
 
+// Large card faces keep only metrics and a validated, remapped glyph tree in RAM.
+#define CARD_RESIDENT_LIMIT (512u * 1024u)
+#define CARD_TREE_LIMIT (256u * 1024u)
+#define CARD_TREE_N 256u
+#define CARD_LOCA_BYTES ((CARD_TREE_N + 1) * 4u)
+#define CACHE_BITMAP_LIMIT (384u * 1024u)
+
+typedef struct {
+    FILE* file;
+    uint32_t glyf_offset, glyf_length;
+    uint8_t* tree;
+    size_t capacity;
+    uint16_t ids[CARD_TREE_N];
+    uint8_t states[CARD_TREE_N], depths[CARD_TREE_N];
+    uint16_t radii[CARD_TREE_N];
+    uint32_t costs[CARD_TREE_N];
+} card_face_t;
+
 struct folio_font {
+    card_face_t* card;
+    size_t cache_bytes;
     uint8_t* bytes;
     size_t length;
     stbtt_fontinfo info;
@@ -424,6 +454,37 @@ static bool validate_component_tree(const table_view_t* loca, const table_view_t
 __attribute__((weak,noinline)) bool folio_io_cancelled(void) { return false; }
 static bool font_cancelled(void) { return folio_io_cancelled(); }
 
+static bool validate_metrics(table_view_t head, table_view_t maxp, table_view_t hhea,
+                             table_view_t hmtx, table_view_t loca, table_view_t glyf,
+                             table_view_t cmap, uint32_t* cmap_out) {
+    if (head.length < 54 || maxp.length < 6 || hhea.length < 36 || hmtx.length < 4 ||
+        loca.length < 4 || glyf.length < 10) return false;
+
+    uint16_t glyph_count = be16(maxp.data + 4);
+    uint16_t metric_count = be16(hhea.data + 34);
+    int16_t loca_format = (int16_t)be16(head.data + 50);
+    if (glyph_count == 0 || metric_count == 0 || metric_count > glyph_count ||
+        (loca_format != 0 && loca_format != 1)) return false;
+    int ascent = (int16_t)be16(hhea.data + 4), descent = (int16_t)be16(hhea.data + 6);
+    int line_gap = (int16_t)be16(hhea.data + 8);
+    int em_height = ascent - descent;
+    if (be16(head.data + 18) < 16 || be16(head.data + 18) > 16384 ||
+        ascent <= 0 || descent > 0 || em_height < 16 || em_height > 65534 ||
+        line_gap < 0 || line_gap > em_height) return false;
+    uint32_t cmap4_offset = 0;
+    if (!validate_cmap4(&cmap, glyph_count, &cmap4_offset)) return false;
+    uint32_t required_metrics = (uint32_t)metric_count * 4 + (uint32_t)(glyph_count - metric_count) * 2;
+    if (hmtx.length < required_metrics) return false;
+    for (uint16_t i = 0; i < metric_count; ++i) {
+        if (be16(hmtx.data + (uint32_t)i * 4) > (uint32_t)em_height * 4) return false;
+    }
+    uint32_t need_loca = (uint32_t)(glyph_count + 1) * (loca_format ? 4 : 2);
+    if (loca.length < need_loca) return false;
+
+    *cmap_out = cmap4_offset;
+    return true;
+}
+
 static bool validate_ttf(const uint8_t* data, size_t length, uint32_t* cmap4_offset_out) {
     if (font_cancelled()) return false;
     if (data == NULL || length < 12 || length > FOLIO_FONT_MAX_BYTES) return false;
@@ -449,30 +510,10 @@ static bool validate_ttf(const uint8_t* data, size_t length, uint32_t* cmap4_off
         else if (has_tag(entry, "glyf")) glyf = table;
         else if (has_tag(entry, "cmap")) cmap = table;
     }
-    if (head.length < 54 || maxp.length < 6 || hhea.length < 36 || hmtx.length < 4 ||
-        loca.length < 4 || glyf.length < 10) return false;
-
+    uint32_t cmap4_offset;
+    if (!validate_metrics(head, maxp, hhea, hmtx, loca, glyf, cmap, &cmap4_offset)) return false;
     uint16_t glyph_count = be16(maxp.data + 4);
-    uint16_t metric_count = be16(hhea.data + 34);
     int16_t loca_format = (int16_t)be16(head.data + 50);
-    if (glyph_count == 0 || metric_count == 0 || metric_count > glyph_count ||
-        (loca_format != 0 && loca_format != 1)) return false;
-    int ascent = (int16_t)be16(hhea.data + 4), descent = (int16_t)be16(hhea.data + 6);
-    int line_gap = (int16_t)be16(hhea.data + 8);
-    int em_height = ascent - descent;
-    if (be16(head.data + 18) < 16 || be16(head.data + 18) > 16384 ||
-        ascent <= 0 || descent > 0 || em_height < 16 || em_height > 65534 ||
-        line_gap < 0 || line_gap > em_height) return false;
-    uint32_t cmap4_offset = 0;
-    if (!validate_cmap4(&cmap, glyph_count, &cmap4_offset)) return false;
-    uint32_t required_metrics = (uint32_t)metric_count * 4 + (uint32_t)(glyph_count - metric_count) * 2;
-    if (hmtx.length < required_metrics) return false;
-    for (uint16_t i = 0; i < metric_count; ++i) {
-        if (be16(hmtx.data + (uint32_t)i * 4) > (uint32_t)em_height * 4) return false;
-    }
-    uint32_t need_loca = (uint32_t)(glyph_count + 1) * (loca_format ? 4 : 2);
-    if (loca.length < need_loca) return false;
-
     uint32_t previous = 0;
     for (uint16_t i = 0; i < glyph_count; ++i) {
         if ((i & 127u) == 0) { if (font_cancelled()) return false; font_yield(); }
@@ -530,6 +571,83 @@ static void* font_alloc(size_t size) {
     return ptr;
 }
 
+static bool card_read(FILE* file, uint32_t offset, void* dst, size_t size) {
+    return !font_cancelled() && (ftell(file) == (long)offset || fseek(file, (long)offset, SEEK_SET) == 0) &&
+           fread(dst, 1, size, file) == size;
+}
+
+static void store_be32(uint8_t* p, uint32_t value) {
+    p[0] = value >> 24; p[1] = value >> 16; p[2] = value >> 8; p[3] = value;
+}
+
+// Construct a private glyph snapshot. Never pass mutable SD data to stb before
+// validating the exact bytes it will render (including referenced components).
+static bool card_glyph(folio_font_t* font, uint16_t gid, stbtt_fontinfo* info) {
+    card_face_t* card = font->card;
+    size_t used = CARD_LOCA_BYTES;
+    unsigned count = 1;
+    card->ids[0] = gid;
+    for (unsigned i = 0; i < count; ++i) {
+        unsigned id = card->ids[i];
+        const uint8_t* loc = font->bytes + font->info.loca;
+        bool wide = font->info.indexToLocFormat != 0;
+        uint32_t start = wide ? be32(loc + id*4) : be16(loc + id*2)*2u;
+        uint32_t end = wide ? be32(loc + id*4 + 4) : be16(loc + id*2 + 2)*2u;
+        if (end < start || end > card->glyf_length || end-start > CARD_TREE_LIMIT-used) return false;
+        size_t size = end-start;
+        if (used + size > card->capacity) {
+            size_t cap = card->capacity ? card->capacity : 4096;
+            while (cap < used + size) cap *= 2;
+            uint8_t* tree = font_alloc(cap);
+            if (!tree) return false;
+            if (card->tree) memcpy(tree, card->tree, used);
+            free(card->tree); card->tree = tree; card->capacity = cap;
+        }
+        store_be32(card->tree + i*4, used-CARD_LOCA_BYTES);
+        uint8_t* glyph = card->tree + used;
+        used += size;
+        if (!size) continue;
+        if (size < 10 || !card_read(card->file, card->glyf_offset + start, glyph, size) ||
+            (int16_t)be16(glyph+2) > (int16_t)be16(glyph+6) ||
+            (int16_t)be16(glyph+4) > (int16_t)be16(glyph+8)) return false;
+        int16_t contours = (int16_t)be16(glyph);
+        if (contours >= 0) {
+            if (!validate_simple_glyph(glyph, size, contours)) return false;
+        } else {
+            if (!validate_composite_glyph(glyph, size, font->info.numGlyphs)) return false;
+            unsigned pos = 10, flags;
+            do {
+                flags = be16(glyph + pos);
+                unsigned child = be16(glyph + pos + 2), j = 0;
+                while (j < count && card->ids[j] != child) ++j;
+                if (j == count) {
+                    if (count == CARD_TREE_N) return false;
+                    card->ids[count++] = child;
+                }
+                glyph[pos+2] = j >> 8; glyph[pos+3] = j;
+                pos += 4 + ((flags & 1) ? 4 : 2) + ((flags & 8) ? 2 : (flags & 64) ? 4 : (flags & 128) ? 8 : 0);
+            } while (flags & 32);
+        }
+    }
+    store_be32(card->tree + count*4, used-CARD_LOCA_BYTES);
+    table_view_t loca = {card->tree, (count+1)*4, 0};
+    table_view_t glyf = {card->tree+CARD_LOCA_BYTES, used-CARD_LOCA_BYTES, 0};
+    memset(card->states, 0, count);
+    if (!validate_component_tree(&loca, &glyf, true, count, 0, card->states, card->costs,
+                                 card->depths, card->radii, 0)) return false;
+    *info = (stbtt_fontinfo){.data=card->tree, .loca=0, .glyf=CARD_LOCA_BYTES,
+                             .indexToLocFormat=1, .numGlyphs=(int)count};
+    return true;
+}
+
+static void evict_bitmap(folio_font_t* font, glyph_cache_entry_t* entry) {
+    if (entry->pixels && entry->pixels != (uint8_t*)font) {
+        font->cache_bytes -= (size_t)entry->width * entry->height;
+        free(entry->pixels);
+    }
+    memset(entry, 0, sizeof(*entry));
+}
+
 static glyph_cache_entry_t* glyph_get(folio_font_t* font, uint32_t cp) {
     for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) {
         if (font->cache[i].pixels != NULL && font->cache[i].codepoint == cp &&
@@ -550,19 +668,39 @@ static glyph_cache_entry_t* glyph_get(folio_font_t* font, uint32_t cp) {
     }
 
     glyph_cache_entry_t* entry = &font->cache[slot];
-    if (entry->pixels != NULL && entry->pixels != (uint8_t*)font) free(entry->pixels);
-    memset(entry, 0, sizeof(*entry));
+    stbtt_fontinfo snapshot;
+    stbtt_fontinfo* info = &source->info;
+    if (source->card) {
+        if (!card_glyph(source, glyph_index, &snapshot)) return NULL;
+        info = &snapshot; glyph_index = 0;
+    }
+    evict_bitmap(font, entry);
     int x0, y0, x1, y1;
-    stbtt_GetGlyphBitmapBox(&source->info, glyph_index, source->scale, source->scale, &x0, &y0, &x1, &y1);
+    stbtt_GetGlyphBitmapBox(info, glyph_index, source->scale, source->scale, &x0, &y0, &x1, &y1);
     int width = x1 - x0, height = y1 - y0;
     if (width < 0 || height < 0 || width > font->pixel_height * 4 || height > font->pixel_height * 4) return NULL;
     size_t bytes = (size_t)width * (size_t)height;
+    if (bytes > CACHE_BITMAP_LIMIT) return NULL;
+    while (bytes > CACHE_BITMAP_LIMIT - font->cache_bytes) {
+        glyph_cache_entry_t* victim = NULL;
+        for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) {
+            glyph_cache_entry_t* p = &font->cache[i];
+            if (p->pixels && p->pixels != (uint8_t*)font && (!victim || p->age < victim->age)) victim = p;
+        }
+        if (!victim) return NULL;
+        evict_bitmap(font, victim);
+    }
     uint8_t* pixels = bytes ? font_alloc(bytes) : NULL;
     if (bytes && pixels == NULL) return NULL;
     if (bytes) {
         memset(pixels, 0, bytes);
-        stbtt_MakeGlyphBitmap(&source->info, pixels, width, height, width,
+        bool oom = false;
+        stbtt_fontinfo raster = *info;
+        raster.userdata = &oom;
+        stbtt_MakeGlyphBitmap(&raster, pixels, width, height, width,
                              source->scale, source->scale, glyph_index);
+        if (oom) { free(pixels); return NULL; }
+        font->cache_bytes += bytes;
         for(size_t i=0;i<bytes;++i) {
             unsigned a=pixels[i];pixels[i]=(uint8_t)(a+a*(255-a)/510);
         }
@@ -603,6 +741,21 @@ static folio_font_t* font_alloc_state(void) {
 }
 
 #if defined(ESP_PLATFORM) || defined(FOLIO_FONT_PACK_PATH)
+/* Takes ownership of font on both success and failure. */
+static folio_font_t* font_finish_builtin(folio_font_t* font, int pixel_height) {
+    uint32_t cmap = 0;
+    if (!validate_ttf(font->bytes, font->length, &cmap) ||
+        !stbtt_InitFont(&font->info, font->bytes, 0)) {
+        folio_font_close(font);
+        return NULL;
+    }
+    font->info.index_map = (int)cmap;
+    font->info.kern = font->info.gpos = 0;
+    font->cmap_segments = be16(font->bytes + cmap + 6) / 2;
+    if (!folio_font_set_size(font, pixel_height)) { folio_font_close(font); return NULL; }
+    return font;
+}
+
 static folio_font_t* font_open_deflated(const uint8_t* data, size_t total, size_t raw_size,
                                        int pixel_height, bool check_crc, uint32_t raw_crc) {
     if(!data || !total || raw_size<12 || raw_size>FOLIO_FONT_MAX_BYTES || pixel_height<12 || pixel_height>72)return NULL;
@@ -647,19 +800,71 @@ static folio_font_t* font_open_deflated(const uint8_t* data, size_t total, size_
 #else
     inflateEnd(&inflater);
 #endif
-    uint32_t cmap=0;
-    if(!okay || (check_crc && folio_font_pack_crc32(font->bytes,raw_size)!=raw_crc) ||
-       !validate_ttf(font->bytes,raw_size,&cmap) || !stbtt_InitFont(&font->info,font->bytes,0)) {
+    if(!okay || (check_crc && folio_font_pack_crc32(font->bytes,raw_size)!=raw_crc)) {
         folio_font_close(font);return NULL;
     }
-    font->info.index_map=(int)cmap;font->info.kern=font->info.gpos=0;
-    font->cmap_segments=be16(font->bytes+cmap+6)/2;
-    if(!folio_font_set_size(font,pixel_height)){folio_font_close(font);return NULL;}
-    return font;
+    return font_finish_builtin(font,pixel_height);
 }
 #endif
 
-static folio_font_t* font_open_resource(const char* id,int pixel_height) {
+#if defined(ESP_PLATFORM) || defined(FOLIO_TEST_CARD_FONT)
+/* Only these unmodified OFL assets can stand in for a built-in face. */
+static const struct {
+    const char* id;
+    const char* path;
+    size_t length;
+    uint8_t sha256[33]; /* 32 digest bytes plus the literal's NUL. */
+} card_faces[] = {
+    {"hei", FOLIO_SD_ROOT "/folio-fonts/folio_hei.ttf", 2043496,
+     "\x6f\xdb\xc4\x17\xcb\xb4\x12\x8a\x43\x77\xfc\x5d\x84\x4f\x81\x75\x19\xe0\x39\xdf\xdd\xf0\xa3\x2a\xcc\x8d\x58\xdb\x3d\xd9\x41\xb7"},
+    {"kai", FOLIO_SD_ROOT "/folio-fonts/folio_kai.ttf", 3477784,
+     "\xaf\xd2\xb9\x96\x29\x48\xeb\x67\x5a\xc6\x54\xdc\x2c\x10\x47\x6f\x6a\xa7\xa2\xf2\x27\x85\x2b\x09\x92\xad\x06\x00\x36\x42\xe1\x3c"},
+    {"yuan", FOLIO_SD_ROOT "/folio-fonts/folio_yuan.ttf", 2689336,
+     "\xf7\x73\x53\x97\x2b\xd5\xe4\xb3\xb4\x76\xc0\xc9\xaa\x81\xac\xa7\xdd\xc1\xb0\x2f\xc9\x2f\xba\xda\x1b\xe8\x8a\xa3\x95\x43\x06\x30"},
+    {"symbols", FOLIO_SD_ROOT "/folio-fonts/folio_symbols.ttf", 5144,
+     "\x1d\xee\x19\xf0\x20\xa7\x55\x89\x81\x47\x62\xb6\xd3\x2e\x44\x27\xcd\xd2\xec\xe9\x84\x79\xa9\x49\xdc\x9c\xc1\xb8\x2a\xa0\xce\xdd"},
+};
+
+static folio_font_t* font_open_card_face(const char* id, int pixel_height) {
+    size_t i = 0;
+    for (; i < sizeof(card_faces) / sizeof(card_faces[0]); ++i) {
+        if (!strcmp(id, card_faces[i].id)) break;
+    }
+    if (i == sizeof(card_faces) / sizeof(card_faces[0])) return NULL;
+    FILE* file = fopen(card_faces[i].path, "rb");
+    if (!file) return NULL;
+    size_t length = card_faces[i].length;
+    folio_font_t* font = NULL;
+    psa_hash_operation_t hash = PSA_HASH_OPERATION_INIT;
+    if (fseek(file, 0, SEEK_END) == 0 && ftell(file) == (long)length &&
+        fseek(file, 0, SEEK_SET) == 0 && psa_crypto_init() == PSA_SUCCESS &&
+        psa_hash_setup(&hash, PSA_ALG_SHA_256) == PSA_SUCCESS) {
+        font = font_alloc_state();
+    }
+    if (font) {
+        font->length = length;
+        font->bytes = font_alloc(length);
+    }
+    bool ok = font && font->bytes;
+    for (size_t pos = 0; ok && pos < length;) {
+        size_t n = length - pos < 32768 ? length - pos : 32768;
+        ok = !font_cancelled() && fread(font->bytes + pos, 1, n, file) == n &&
+             psa_hash_update(&hash, font->bytes + pos, n) == PSA_SUCCESS;
+        pos += n;
+        font_yield();
+    }
+    uint8_t digest[32];
+    size_t n = 0;
+    ok = ok && fgetc(file) == EOF && !ferror(file) &&
+         psa_hash_finish(&hash, digest, sizeof(digest), &n) == PSA_SUCCESS &&
+         n == sizeof(digest) && !memcmp(digest, card_faces[i].sha256, n);
+    psa_hash_abort(&hash);
+    if (fclose(file) != 0 || !ok) { folio_font_close(font); return NULL; }
+    return font_finish_builtin(font, pixel_height);
+}
+#endif
+
+static folio_font_t* font_open_flash_resource(const char* id,int pixel_height) {
 #if defined(ESP_PLATFORM) || defined(FOLIO_FONT_PACK_PATH)
     const size_t pack_size=0x500000u;
     const void* mapped=NULL;
@@ -699,6 +904,20 @@ static folio_font_t* font_open_resource(const char* id,int pixel_height) {
 #endif
 }
 
+static folio_font_t* font_open_resource(const char* id, int pixel_height) {
+    folio_font_t* font = font_open_flash_resource(id, pixel_height);
+#if defined(ESP_PLATFORM) || defined(FOLIO_TEST_CARD_FONT)
+    if (!font && !font_cancelled()) {
+        font = font_open_card_face(id, pixel_height);
+        if (font && !strcmp(id, "yuan")) {
+            font->fallback = font_open_card_face("symbols", pixel_height);
+            if (!font->fallback) { folio_font_close(font); return NULL; }
+        }
+    }
+#endif
+    return font;
+}
+
 folio_font_t* folio_font_open_builtin(int pixel_height) {
 #ifdef ESP_PLATFORM
     extern const uint8_t data_start[] asm("_binary_folio_builtin_deflate_start");
@@ -710,6 +929,74 @@ folio_font_t* folio_font_open_builtin(int pixel_height) {
     (void)pixel_height;return NULL;
 #endif
 }
+// Owns file on entry, including every failure path. Keep large outlines on SD;
+// only the small layout tables are needed when measuring or paginating a book.
+static folio_font_t* open_card_face(FILE* file, uint32_t length, int pixel_height) {
+    enum { HEAD, MAXP, HHEA, HMTX, LOCA, CMAP, GLYF, TABLES };
+    static const char tags[TABLES][5] = {"head", "maxp", "hhea", "hmtx", "loca", "cmap", "glyf"};
+    static const uint32_t caps[GLYF] = {54, 6, 36, 65535u*4, 65536u*4, 512u*1024};
+    table_view_t tables[TABLES] = {0};
+    uint8_t header[12];
+    uint8_t* directory = NULL;
+    folio_font_t* font = font_alloc_state();
+    if (!font || !(font->card = calloc(1, sizeof(*font->card)))) {
+        fclose(file); folio_font_close(font); return NULL;
+    }
+    font->card->file = file;
+    if (!card_read(file, 0, header, sizeof(header)) ||
+        (be32(header) != 0x00010000 && be32(header) != 0x74727565)) goto fail;
+    unsigned count = be16(header+4);
+    if (count < TABLES || count > 64 || !(directory = malloc(count*16)) ||
+        !card_read(file, 12, directory, count*16)) goto fail;
+    for (unsigned i = 0; i < count; ++i) {
+        const uint8_t* entry = directory + i*16;
+        uint32_t offset = be32(entry+8), size = be32(entry+12);
+        if (!contains_range(length, offset, size) || (size && offset < 12+count*16)) goto fail;
+        for (unsigned j = 0; j < i; ++j) if (!memcmp(entry, directory+j*16, 4)) goto fail;
+        for (unsigned j = 0; j < TABLES; ++j) if (has_tag(entry, tags[j])) {
+            tables[j].length = size; tables[j].offset = offset;
+        }
+    }
+    free(directory); directory = NULL;
+    for (unsigned i = 0; i < GLYF; ++i) {
+        if (!tables[i].length) goto fail;
+        if (tables[i].length > caps[i]) {
+            if (i == CMAP) goto fail;
+            tables[i].length = caps[i];
+        }
+        font->length += tables[i].length;
+    }
+    font->bytes = font_alloc(font->length);
+    if (!font->bytes) goto fail;
+    size_t used = 0;
+    for (unsigned i = 0; i < GLYF; ++i) {
+        if (!card_read(file, tables[i].offset, font->bytes+used, tables[i].length)) goto fail;
+        tables[i].data = font->bytes+used; tables[i].offset = (uint32_t)used; used += tables[i].length;
+    }
+    uint32_t cmap;
+    if (!validate_metrics(tables[HEAD], tables[MAXP], tables[HHEA], tables[HMTX], tables[LOCA],
+                          tables[GLYF], tables[CMAP], &cmap)) goto fail;
+    font->cmap_segments = be16(font->bytes+cmap+6)/2;
+    font->info = (stbtt_fontinfo){.data=font->bytes, .numGlyphs=be16(tables[MAXP].data+4),
+        .index_map=(int)cmap, .hhea=(int)tables[HHEA].offset, .hmtx=(int)tables[HMTX].offset,
+        .loca=(int)tables[LOCA].offset, .indexToLocFormat=be16(tables[HEAD].data+50)};
+    font->card->glyf_offset = tables[GLYF].offset;
+    font->card->glyf_length = tables[GLYF].length;
+    // Opening/repagination must not scan megabytes of outlines. Check the
+    // immutable index up front; glyph reads validate their own snapshots.
+    uint32_t prev = 0;
+    for (int i = 0; i <= font->info.numGlyphs; ++i) {
+        uint32_t off;
+        if (!read_loca(&tables[LOCA], font->info.indexToLocFormat != 0, (uint16_t)i, &off) ||
+            off < prev || off > font->card->glyf_length) goto fail;
+        prev = off;
+    }
+    if (!folio_font_set_size(font, pixel_height)) goto fail;
+    return font;
+fail:
+    free(directory); folio_font_close(font); return NULL;
+}
+
 folio_font_t* folio_font_open(const char* path, int pixel_height) {
     if (path == NULL || pixel_height < 12 || pixel_height > 72) return NULL;
     if(folio_font_is_builtin_path(path)) {
@@ -722,11 +1009,19 @@ folio_font_t* folio_font_open(const char* path, int pixel_height) {
     if (file == NULL) return NULL;
     if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return NULL; }
     long length = ftell(file);
-    if (length < 12 || (unsigned long)length > FOLIO_FONT_MAX_BYTES || fseek(file, 0, SEEK_SET) != 0) {
+    if (length < 12 || (unsigned long)length > FOLIO_FONT_MAX_FILE_BYTES || fseek(file, 0, SEEK_SET) != 0) {
         fclose(file);
         return NULL;
     }
 
+    bool paged = (unsigned long)length > CARD_RESIDENT_LIMIT;
+#if !defined(ESP_PLATFORM) && defined(FOLIO_BUILTIN_FONT_PATH)
+    // The host simulator's application-resident Song face has no SD dependency.
+    const char* bundled = FOLIO_BUILTIN_FONT_PATH;
+    if (bundled && !strcmp(path, bundled)) paged = false;
+#endif
+    if (paged) return open_card_face(file, (uint32_t)length, pixel_height);
+    if ((unsigned long)length > FOLIO_FONT_MAX_BYTES) { fclose(file); return NULL; }
     folio_font_t* font = font_alloc_state();
     if (font == NULL) { fclose(file); return NULL; }
     font->length = (size_t)length;
@@ -755,6 +1050,20 @@ folio_font_t* folio_font_open(const char* path, int pixel_height) {
     font->cmap_segments = be16(font->bytes + cmap4_offset + 6) / 2;
     if (!folio_font_set_size(font, pixel_height)) { folio_font_close(font); return NULL; }
     return font;
+}
+
+bool folio_font_validate_file(const char* path) {
+    if (!path || folio_font_is_builtin_path(path)) return false;
+    folio_font_t* font = folio_font_open(path, 32);
+    if (!font) return false;
+    bool valid = true;
+    if (font->card) for (int i = 0; i < font->info.numGlyphs; ++i) {
+        stbtt_fontinfo snapshot;
+        if ((i & 127) == 0) { if (font_cancelled()) { valid = false; break; } font_yield(); }
+        if (!card_glyph(font, (uint16_t)i, &snapshot)) { valid = false; break; }
+    }
+    folio_font_close(font);
+    return valid;
 }
 
 folio_font_t* folio_font_open_first_on_card(int pixel_height, char* path_out, uint32_t path_cap) {
@@ -787,6 +1096,11 @@ void folio_font_close(folio_font_t* font) {
     for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) {
         if (font->cache[i].pixels != NULL && font->cache[i].pixels != (uint8_t*)font) free(font->cache[i].pixels);
     }
+    if (font->card) {
+        fclose(font->card->file);
+        free(font->card->tree);
+        free(font->card);
+    }
     free(font->bytes);
     free(font);
 }
@@ -804,7 +1118,14 @@ bool folio_font_set_size(folio_font_t* font, int pixel_height) {
         int total=0,top=0,count=0;
         for(unsigned i=0;i<sizeof(samples)/sizeof(samples[0]);++i) {
             int gid=font_glyph_index(font,samples[i]),x0,y0,x1,y1;
-            if(gid && stbtt_GetGlyphBox(&font->info,gid,&x0,&y0,&x1,&y1) && y1-y0>=16) {
+            stbtt_fontinfo snapshot;
+            stbtt_fontinfo* info = &font->info;
+            if (!gid) continue;
+            if (font->card) {
+                if (!card_glyph(font, gid, &snapshot)) return false;
+                info = &snapshot; gid = 0;
+            }
+            if(stbtt_GetGlyphBox(info,gid,&x0,&y0,&x1,&y1) && y1-y0>=16) {
                 total+=y1-y0;top+=y1;++count;
             }
         }

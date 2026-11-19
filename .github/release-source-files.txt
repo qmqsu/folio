@@ -344,6 +344,7 @@ site/src/installer/quick.ts
 site/src/installer/serial.ts
 site/src/installer/ui.ts
 site/src/pages/index.astro
+site/src/pages/migrate.astro
 site/src/styles/global.css
 site/tests/adapter.test.ts
 site/tests/browser.mjs
@@ -444,6 +445,7 @@ tools/tests/run_power_tests.sh
 tools/tests/run_reader_tests.sh
 tools/tests/run_release_tests.sh
 tools/tests/run_settings_tests.sh
+tools/tests/run_stb_alloc_tests.sh
 tools/tests/run_storage_tests.sh
 tools/tests/run_transfer_lifecycle_tests.sh
 tools/tests/run_ui_preview.sh
@@ -454,6 +456,7 @@ tools/tests/run_weread_cache_tests.sh
 tools/tests/run_weread_time_tests.sh
 tools/tests/settings_stubs/nvs.h
 tools/tests/settings_stubs/nvs_flash.h
+tools/tests/stb_alloc_test.c
 tools/tests/test_activity.c
 tools/tests/test_catalog.c
 tools/tests/test_clock.c

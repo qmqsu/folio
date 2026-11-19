@@ -64,12 +64,12 @@ export class QuickFlash {
       }
       const layout = assessInstalledLayout(table);
       if (!layout.compatible || layout.migration) {
-        throw new Error(layout.migration ? '这台还是原厂四分区布局，一键刷不会替你改分区表。' : '分区布局不认识，一键刷不写。');
+        throw new Error(layout.migration ? '检测到原厂四分区。请使用下方「原厂旧四分区：备份与迁移」；一键刷不会自动迁移。' : '分区布局不认识，一键刷不写。');
       }
       signal.throwIfAborted();
 
       // Device-side hashes prove preservation without downloading private flash contents.
-      const protectedRegions = [[0x9000, 0x5000, 'NVS/PHY'], [0x410000, 0x500000, '字体资源区']] as const;
+      const protectedRegions = [[0x9000, 0x7000, 'NVS/PHY'], [0x410000, 0x500000, '字体资源区']] as const;
       const preserved = new Map<number, string>();
       for (const [offset, size, name] of protectedRegions) {
         this.#status('verifying', `记录${name}的设备端校验值`);

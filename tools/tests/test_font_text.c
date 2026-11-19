@@ -7,7 +7,15 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "esp_heap_caps.h"
+static size_t allocation_countdown;
+static void* fault_caps_malloc(size_t size, unsigned caps) {
+    if (allocation_countdown && --allocation_countdown == 0) return NULL;
+    return heap_caps_malloc(size, caps);
+}
+#define heap_caps_malloc fault_caps_malloc
 #include "../../main/book/folio_font.c"
+#undef heap_caps_malloc
 
 static unsigned draw_count;
 static bool capture_colors;
@@ -132,7 +140,75 @@ static void rejects(fixture_t* fixture) {
     assert(unlink(path) == 0);
 }
 
+// Put the actual outlines beyond 6 MiB instead of depending on a third-party font.
+static void paged_font_regressions(void) {
+    fixture_t f = make_font();
+    uint32_t far = 8u * 1024u * 1024u;
+    put32(f.data + 12 + 5*16 + 8, far);
+    // Glyph A is a translated copy of '?'. This exercises remapped child IDs.
+    uint8_t* composite = f.data + f.glyf + 34;
+    memset(composite, 0, 34); put16(composite, 0xFFFF);
+    put16(composite + 6, 100); put16(composite + 8, 100);
+    put16(composite + 10, 3); put16(composite + 12, 1);
+    char path[] = "/tmp/folio-font-paged-XXXXXX";
+    int fd = mkstemp(path); assert(fd >= 0);
+    assert(write(fd, f.data, f.length) == (ssize_t)f.length);
+    assert(pwrite(fd, f.data + f.glyf, 68, far) == 68);
+    assert(folio_font_validate_file(path));
+    for (unsigned i = 0; i < 8; ++i) {
+        folio_font_t* font = folio_font_open(path, 34);
+        assert(font && font->card && font->length < 1024 && font->card->capacity == 0);
+        assert(folio_font_advance(font, 'A', 0) == 24 && font->card->capacity == 0);
+        int a[4], q[4];
+        assert(folio_font_glyph_bounds(font, 'A', &a[0], &a[1], &a[2], &a[3]));
+        assert(folio_font_glyph_bounds(font, '?', &q[0], &q[1], &q[2], &q[3]));
+        assert(!memcmp(a, q, sizeof(a)) && font->card->capacity == 4096);
+        check_glyph_bounds(font, 'A');
+        folio_font_close(font);
+    }
+    // A damaged non-sample glyph cannot reach the rasterizer (even if the
+    // card changes AFTER selection). The layout remains usable with '?' ink.
+    folio_font_t* font = folio_font_open(path, 34);
+    put16(composite + 12, 2);
+    assert(pwrite(fd, composite, 34, far+34) == 34);
+    assert(font && !glyph_get(font, 'A') && glyph_get(font, '?'));
+    check_glyph_bounds(font, 'A'); folio_font_close(font);
+    assert(!folio_font_validate_file(path));
+    font = folio_font_open(path, 34); assert(font);
+    assert(ftruncate(fd, far) == 0);
+    assert(!folio_font_draw_glyph(font, (uint8_t[1]){0}, 10, 80, 'A'));
+    folio_font_close(font);
+    assert(ftruncate(fd, FOLIO_FONT_MAX_FILE_BYTES+1) == 0);
+    assert(!folio_font_open(path, 34) && !folio_font_validate_file(path));
+    assert(close(fd) == 0 && unlink(path) == 0);
+    puts("paged font: 8 MiB outline offset, compound ink, 8 reopens, changed/short file and size cap passed");
+}
+
+static void bitmap_budget_regressions(void) {
+    fixture_t f = make_font();
+    for (unsigned i = 0; i < 2; ++i) {
+        uint8_t* glyph = f.data + f.glyf + 34*i;
+        put16(glyph+6, 3000); put16(glyph+8, 3000);
+        put16(glyph+20, 3000); put16(glyph+24, (uint16_t)-3000); put16(glyph+30, 3000);
+    }
+    char path[128]; folio_font_t* font = open_fixture(&f, path); assert(font);
+    allocation_countdown = 2; // First raster scratch allocation, after bitmap allocation.
+    assert(!glyph_get(font, 'A') && font->cache_bytes == 0);
+    assert(glyph_get(font, 'A') && font->cache_bytes > 0);
+    for (int size = 135; size <= 144; ++size) {
+        assert(folio_font_set_size(font, size));
+        assert(glyph_get(font, 'A') && glyph_get(font, '?'));
+        assert(font->cache_bytes <= CACHE_BITMAP_LIMIT);
+    }
+    unsigned live = 0;
+    for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) if (font->cache[i].pixels) ++live;
+    assert(live == 2); // The byte limit evicts before running out of slots.
+    folio_font_close(font); assert(unlink(path) == 0);
+}
+
 static void font_regressions(void) {
+    paged_font_regressions();
+    bitmap_budget_regressions();
     fixture_t valid = make_font();
     char path[128];
     folio_font_t* font = open_fixture(&valid, path);
@@ -340,6 +416,9 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         folio_font_t* font = folio_font_open(argv[i], 34);
         if (font == NULL) { fprintf(stderr, "font rejected: %s\n", argv[i]); return 1; }
+        assert(folio_font_validate_file(argv[i]));
+        if (font->card) printf("paged face: metadata=%zu bytes, initial tree=%zu bytes, glyphs=%d\n",
+                               font->length, font->card->capacity, font->info.numGlyphs);
         uint8_t framebuffer[1] = {0};
         for (uint32_t cp = 32; cp < 256; ++cp) {
             assert(folio_font_advance(font, cp, 0) >= 0);

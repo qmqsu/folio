@@ -2043,6 +2043,10 @@ static void test_native_font_selection(const char* directory) {
     assert(settings_writes == writes);
     scan_fonts(); show_view(VIEW_FONTS, true); save_pgm(directory, "173-native-resource-fallback");
     assert(folio_settings_save(&s_settings) && !strcmp(persisted_settings.font_path, ids[2]));
+    select_font(2); /* No usable resource but the original Songti can be restored. */
+    assert(s_view == VIEW_ERROR && strstr(s_error, "folio-fonts/") && strstr(s_error, "内存不足"));
+    assert_font_identity(ids[0], ids[2]);
+    save_pgm(directory, "173-native-card-recovery-hint");
     retained = s_font; opens = font_open_attempts;
     fail_settings_write = true; select_font(0); fail_settings_write = false;
     assert_font_identity(ids[0], ids[2]);

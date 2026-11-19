@@ -6,7 +6,7 @@ import { chromium } from 'playwright-core';
 
 const site = resolve(import.meta.dirname, '..');
 const dist = resolve(site, 'dist');
-const evidence = resolve(site, '../artifacts/firmware-0832/site');
+const evidence = resolve(site, process.env.FOLIO_BROWSER_EVIDENCE || '../artifacts/firmware-0832/site');
 await mkdir(evidence, { recursive: true });
 const browserPath = process.env.FOLIO_TEST_BROWSER || '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge';
 await access(browserPath);
@@ -15,7 +15,7 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://127.0.0.1');
   if (!url.pathname.startsWith('/folio/')) { res.writeHead(404).end(); return; }
   const relative = decodeURIComponent(url.pathname.slice('/folio/'.length)) || 'index.html';
-  const path = resolve(dist, relative);
+  const path = resolve(dist, relative.endsWith('/') ? relative + 'index.html' : relative);
   if (!path.startsWith(dist + sep)) { res.writeHead(403).end(); return; }
   try {
     const bytes = await readFile(path);
@@ -115,6 +115,16 @@ try {
   assert.equal(await page.locator('#flash-button').isDisabled(), true);
   assert.equal(await page.evaluate(() => window.__serialCalls), 0);
   report.checks.push('Mock untrusted envelope rejected; flasher disabled; no serial access');
+
+  await page.locator('a[href="/folio/migrate/"]').click();
+  await page.locator('#check-release').click();
+  await page.waitForFunction(() => document.querySelector('#release-badge')?.textContent === '不可用');
+  assert.equal(await page.locator('#connect-backup').isDisabled(), true);
+  assert.equal(await page.locator('#install-button').isDisabled(), true);
+  for (const id of ['physical-model', 'backup-saved', 'factory-confirm', 'migration-confirm']) assert.equal(await page.locator('#' + id).isChecked(), false);
+  assert.equal(await page.evaluate(() => window.__serialCalls), 0);
+  report.checks.push('Migration link opens isolated backup wizard; unsigned manifest and unchecked consent cannot open serial or write');
+  await page.goto(url, { waitUntil: 'networkidle' });
 
   const withoutJs = await context.browser().newContext({ javaScriptEnabled: false, viewport: { width: 375, height: 812 } });
   const fallback = await withoutJs.newPage();

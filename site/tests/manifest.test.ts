@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { assertVerified, validatePayload, verifyEnvelope, validateImage, firmwareUrl, fetchRelease, fetchWithMirror, mirrorUrl, MAX_ENVELOPE_BYTES, PUBLIC_KEY_HEX, PUBLIC_KEY_SHA256, sha256 } from '../src/installer/manifest';
+import { md5 } from '@noble/hashes/legacy.js';
 import { fixture, table } from './fixtures';
 import { assessInstalledLayout, validatePartitionTable } from '../src/installer/partition';
 
@@ -8,6 +9,11 @@ describe('ECDSA envelope and strict USB contract', () => {
   it('accepts raw 64-byte P256 signatures over exact UTF8 bytes; freezes the result', async () => {
     const f = await fixture(); expect(f.release.kind).toBe('usb'); expect(atob(f.envelope.signature).length).toBe(64);
     expect(() => assertVerified(f.release)).not.toThrow(); expect(Object.isFrozen(f.release.parts[0])).toBe(true);
+  });
+  it('refuses noncanonical legacy labels even when the table digest is valid', () => {
+    const bytes = table(true); bytes[16] = 1; // Hidden payload after NUL in the first label.
+    bytes.set(md5(bytes.subarray(0, 4 * 32)), 4 * 32 + 16);
+    expect(assessInstalledLayout(bytes).compatible).toBe(false);
   });
   it('pins the owner-provided production SEC1 fingerprint', async () => {
     expect(await sha256(Uint8Array.from(PUBLIC_KEY_HEX.match(/../g)!, s => parseInt(s, 16)))).toBe(PUBLIC_KEY_SHA256);
