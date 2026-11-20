@@ -430,6 +430,17 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 pages.compose(first, self.public, promotion=dict(promotion, **{'usb.json': b'{}'}))
 
+    def test_0840_waiver_is_bound_to_the_signed_source_and_image(self):
+        provenance = {'version': bundle.WAIVER_0840_VERSION, 'source_commit': bundle.WAIVER_0840_COMMIT,
+                      'app_sha256': bundle.WAIVER_0840_APP_SHA256}
+        path = Path(__file__).resolve().parents[2] / '.github/release-acceptance/0.8.40.json'
+        raw = path.read_bytes()
+        record = bundle.validate_acceptance(raw, provenance)
+        self.assertIs(record['hardware_tested'], False)
+        for key in provenance:
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                bundle.validate_acceptance(raw, dict(provenance, **{key: '0' * len(provenance[key])}))
+
     def test_snapshot_malicious_paths_links_and_duplicates(self):
         for name, kind in (("../escape", tarfile.REGTYPE), ("channels/a", tarfile.SYMTYPE), ("unapproved/a", tarfile.REGTYPE)):
             buffer = io.BytesIO()

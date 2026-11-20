@@ -103,10 +103,13 @@ def legal_review(raw):
     return legal
 
 
-# A single publisher-authorized exception, never an option supplied by the caller.
+# Publisher-authorized exceptions are pinned per source/image, never caller options.
 WAIVER_VERSION = "0.8.39"
 WAIVER_COMMIT = "783257a0f8f2a6696605cd74e570371fa19f7f04"
 WAIVER_APP_SHA256 = "f9de0be26d89e0cb2408f9bdd1abe637fcd39611708066173ef980825728125a"
+WAIVER_0840_VERSION = "0.8.40"
+WAIVER_0840_COMMIT = "d845c25b463229744adcf1663f5ac9a57be1330b"
+WAIVER_0840_APP_SHA256 = "adf76bad4160215289449d0b850093cd35ffda688538fa567c62d335002946a5"
 
 
 def validate_decision_time(value):
@@ -119,9 +122,13 @@ def validate_decision_time(value):
 def validate_acceptance(raw, provenance):
     record = protocol.load_json(raw)
     if "kind" in record:
-        identity = {"version": WAIVER_VERSION, "source_commit": WAIVER_COMMIT, "app_sha256": WAIVER_APP_SHA256}
-        protocol.require(isinstance(WAIVER_APP_SHA256, str) and re.fullmatch(r"[0-9a-f]{64}", WAIVER_APP_SHA256) and
-                         all(provenance.get(k) == v for k, v in identity.items()), "No waiver for this candidate")
+        candidates = [
+            {"version": WAIVER_VERSION, "source_commit": WAIVER_COMMIT, "app_sha256": WAIVER_APP_SHA256},
+            {"version": WAIVER_0840_VERSION, "source_commit": WAIVER_0840_COMMIT, "app_sha256": WAIVER_0840_APP_SHA256},
+        ]
+        identity = next((candidate for candidate in candidates if all(provenance.get(k) == v for k, v in candidate.items())), None)
+        protocol.require(identity is not None, "No waiver for this candidate")
+        protocol.require(re.fullmatch(r"[0-9a-f]{64}", identity["app_sha256"]), "Invalid waiver application digest")
         expected = {**identity, "schema": 2, "kind": "maintainer-waiver", "hardware": "RDP-G01-W", "layout": protocol.LAYOUT,
                     "maintainer": "qmqsu", "hardware_tested": False, "reason": "维护者决定本版本不经实机验收直接发布。"}
         protocol.require(set(record) == set(expected) | {"authorized_at"} and

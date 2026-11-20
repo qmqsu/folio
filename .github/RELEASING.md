@@ -146,12 +146,12 @@ Settings → Pages → Build and deployment 的 **Source 选择 GitHub Actions**
 ## 5. 后续发布：tag → preview → 人工 stable
 
 1. 在 main 完成代码审阅、主机/站点检查、公开源码逐文件白名单与法律材料审阅。[源码白名单](<release-source-files.txt>)必须包含本指南；不要把私有工程证据、密钥、备份加入白名单。[发行待决清单](<release-legal.json>)在未解决项完成前保持非空：`prepare` 可生成供本地审查的候选材料，`sign` 只有在 `pending` 为空时才执行。缺材料时保持 fail-closed；别为让工作流变绿而机械清空。
-2. 为将要发布的实际源码设置正确版本。标签必须与[项目版本](<../CMakeLists.txt>)及构建序号一致，可先运行 `python tools/release_ci.py version v<version>` 核对格式。仅在明确决定发布后创建并推送该源码的 `v<version>` 标签，不能重用旧标签或旧序号。`-dev`/`-rc.N` 和正式版本号都先进入 preview。
+2. 为将要发布的实际源码设置正确版本。标签必须与[项目版本](<../CMakeLists.txt>)及构建序号一致，可先运行 `python tools/release_ci.py version v<version>` 核对格式。仅在明确决定发布后创建并推送该源码的 `v<version>` 标签，不能重用旧标签或旧序号。维护者选择 bug 修复验证后直接升稳：递增正式补丁版本号，不默认创建 `-dev` 标签。`-dev`/`-rc.N` 和正式版本号都先进入 preview；这里的 preview 只是签名候选的技术暂态，不是必须公开使用的开发通道。
 3. 标签触发 build，使用固定 SDK、独立 release 配置、debugOFF 和完整材料门禁。只有 build 成功后才进入 `release-signing` 等待人工批准；签名绑定镜像和源码/许可材料。拒绝或缺密钥时应失败，不补造“成功包”。
 4. 共用发布器先发布不可变 Release 材料，再原子更新完整 Pages；发布用 `folio-pages-publication` 串行锁并校验状态，不覆盖旧版本。正式版本号最初也标记为 GitHub prerelease，preview 不等于实机验收。
 5. 真正验收**该已签名包中的同一镜像**。在 main 新增 `.github/release-acceptance/<version>.json`，绑定准确 source commit、app SHA-256、审核者、UTC 测试时间及全部硬件检查。检查项和拒绝条件见[验收校验器](<../tools/release_bundle.py>)与[协议说明](<../docs/发布与在线更新.md>)；单独 HTTPS 404、帧缓存截图、源码重建或主机测试均不代替完整实机验收。
 6. 只可提升无 `-dev`/`-rc` 后缀的既有 preview。从 **main** 手工运行 `Promote hardware-accepted stable release`，输入原标签，在 `release-stable` 审阅同一包和真实验收记录。流程下载原离线包、**绝不重建镜像**；只签 stable 通道，原子部署后才把 GitHub Release 改为 stable。序号不能伪增以规避设备反回滚。
-   **单次例外（仅 0.8.39）**：维护者决定此版免去实机验收。公开记录须写明 `hardware_tested: false`，并与固定的版本、源提交和应用 SHA-256 全部匹配。免测不代表实机通过，不替代候选包签名、镜像校验或 GitHub 环境审批，也不适用于后续版本。
+   **指定镜像免测**：维护者已分别决定 0.8.39、0.8.40 免去实机验收。每次公开记录须写明 `hardware_tested: false`，并与该次固定的版本、源提交和应用 SHA-256 全部匹配。免测不代表实机通过，不替代候选包签名、镜像校验或 GitHub 环境审批；后续版本仍需自己的验收记录或明确免测决定，不能自动沿用。
 7. 若不可变 Release 已成功而 Pages 后续失败，从 main 运行[恢复工作流](<workflows/recover-release.yml>)并输入原标签，恢复原签名字节；不重新签名、不重建、不覆盖资产。若权威状态与线上快照不一致，按明确的失败信息人工核对，不能把错误当成首次空站点。
 
 普通 main push 和 pull request 的实际入口是[Checks](<workflows/check.yml>)：PR 不部署、不拿生产签名 secret；main 检查通过后更新当前网站并保留旧固件与通道。详细签名协议、单调序号、四段写入限制和完整验收项见[发布与在线更新](<../docs/发布与在线更新.md>)。
