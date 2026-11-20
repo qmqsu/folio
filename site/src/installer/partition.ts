@@ -40,8 +40,14 @@ export const SPIFFS_PARTITIONS = Object.freeze({
   nvs: [1, 2, 0x9000, 0x5000], phy_init: [1, 1, 0xe000, 0x1000],
   factory: [0, 0, 0x10000, 0x200000], spiffs: [1, 0x82, 0x210000, 0x500000],
 });
+export const THINGSOS_PARTITIONS = Object.freeze({
+  nvs: [1, 2, 0x9000, 0x6000], otadata: [1, 0, 0xf000, 0x2000],
+  phy_init: [1, 1, 0x11000, 0x1000], rescue: [0, 0, 0x20000, 0x200000],
+  ota_0: [0, 0x10, 0x220000, 0xae0000], system_font: [1, 0x40, 0xd00000, 0x300000],
+});
 export type LayoutAssessment = { compatible: boolean; label: string } & (
-  { migration: false } | { migration: true; blankFrom: 0x210000 | 0x910000 }
+  { migration: false } |
+  { migration: true; blankFrom?: 0x210000 | 0x910000; replaceExisting?: boolean }
 );
 export function assessInstalledLayout(table: Uint8Array): LayoutAssessment {
   if (table.length === 4096) {
@@ -49,6 +55,7 @@ export function assessInstalledLayout(table: Uint8Array): LayoutAssessment {
       [EXPECTED_PARTITIONS, { compatible: true, label: 'Folio 16MiB factory/storage/OTA v2', migration: false }],
       [OFFICIAL_PARTITIONS, { compatible: true, label: '官方 6a247cc：4 MiB factory + FAT 四分区（需独立授权迁移）', migration: true, blankFrom: 0x910000 }],
       [SPIFFS_PARTITIONS, { compatible: true, label: '官方 28e7e13：2 MiB factory + SPIFFS 四分区（原 SPIFFS 与新版 factory/storage 重叠，需独立授权迁移）', migration: true, blankFrom: 0x210000 }],
+      [THINGSOS_PARTITIONS, { compatible: true, label: 'ThingsOS 0.3.9：rescue/OTA/system_font 布局（须完整备份并确认替换旧系统）', migration: true, replaceExisting: true }],
     ] as const;
     for (const [entries, assessment] of candidates) {
       try { validatePartitionTable(table, entries); return assessment; } catch { /* not an exact match */ }

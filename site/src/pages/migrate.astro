@@ -12,7 +12,7 @@ import '../styles/global.css';
 <body><main class="wrap wizard">
   <a href="/folio/#flash">← 返回刷机首页</a>
   <h1>旧四分区备份与迁移</h1>
-  <p>适用于 RDP-G01-W 的已知原厂四分区。连接和备份不会改写 Flash。4 MiB factory + FAT 布局须确认新增 OTA 区间全空；更早的 2 MiB factory + SPIFFS 布局与新版 factory/storage 重叠，从旧 SPIFFS 起到新 OTA 槽末尾都必须为空。发现任何已有数据就只允许备份。TF 卡请另行备份。</p>
+  <p>适用于 RDP-G01-W 的已知原厂四分区及 ThingsOS 0.3.9。连接和备份不会改写 Flash。原厂迁移要求新增区域为擦除态；ThingsOS 与新版分区重叠，必须保存完整备份并明确确认替换旧系统后才能写入。未知布局只备份。TF 卡请另行备份。</p>
   <p id="browser-support">需要启用 JavaScript 的桌面 Chrome 或 Edge。</p>
   <section><h2>1 · 检查稳定版固件</h2>
     <button id="check-release" disabled>检查签名清单</button> <span id="release-badge"></span><p id="release-info"></p>
@@ -27,7 +27,7 @@ import '../styles/global.css';
     <button id="save-backup">下载 16 MiB 备份</button> <button id="save-evidence">下载 SHA-256 证据</button>
     <label><input type="checkbox" id="backup-saved" disabled /> 已在电脑中找到完整备份和证据</label>
     <label><input type="checkbox" id="factory-confirm" disabled /> 同意重写启动程序、factory 应用及启动选择，下次从 factory 启动</label>
-    <label id="migration-field" hidden><input type="checkbox" id="migration-confirm" disabled /> 另行同意将上方已识别的原厂四分区改为 Folio 七分区；若为旧 SPIFFS 布局，将重新划分已确认全空的原 SPIFFS 区间</label>
+    <label id="migration-field" hidden><input type="checkbox" id="migration-confirm" disabled /> 另行同意将上方已识别的旧系统/原厂布局改为 Folio 七分区；旧系统数据只存在于我保存的备份中</label>
     <button id="install-button" disabled>开始写入固件</button>
   </section>
   <section><h2>操作状态</h2><p id="install-status" role="status" aria-live="polite">尚未连接设备。</p>

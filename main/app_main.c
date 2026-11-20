@@ -305,6 +305,12 @@ static void load_system_font(void) {
     const char* desired = s_settings.font_path[0] ? s_settings.font_path : FOLIO_FONT_BUILTIN_PATH;
     if (!open_active_font(desired) && strcmp(desired, FOLIO_FONT_BUILTIN_PATH))
         (void)open_active_font(FOLIO_FONT_BUILTIN_PATH);
+    // A missing/corrupt primary resource must not hide the other verified
+    // built-in faces, including the TF-card fallback in /folio-fonts.
+    if (!s_font) {
+        for (unsigned i = 1; i < FOLIO_FONT_BUILTIN_COUNT; ++i)
+            if (open_active_font(folio_font_builtin_path(i))) break;
+    }
     if (!s_font && s_card_ready)
         s_font = folio_font_open_first_on_card(s_settings.font_size, s_active_font, sizeof(s_active_font));
     ESP_LOGI(TAG, "System font: %s", !s_font ? "unavailable" :

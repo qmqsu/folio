@@ -78,7 +78,8 @@ export class Installer {
       signal.throwIfAborted();
       const digest = await sha256(backup);
       signal.throwIfAborted();
-      if (this.#layout.migration && !backup.subarray(this.#layout.blankFrom, MIGRATION_END).every(b => b === 0xff)) {
+      if (this.#layout.migration && this.#layout.blankFrom !== undefined &&
+          !backup.subarray(this.#layout.blankFrom, MIGRATION_END).every(b => b === 0xff)) {
         this.#layout = { ...this.#layout, compatible: false, label: `${this.#layout.label}。迁移涉及的区间已有数据：仅允许备份，禁止迁移。` };
       }
       this.#backup = backup;
@@ -102,11 +103,14 @@ export class Installer {
       for (let i = 0; i < this.release.parts.length; i++) await validateImage(this.release.parts[i], this.#images[i], this.release);
       const table = await this.device.read(0x8000, 4096, signal, () => {});
       if (!table.every((b, i) => b === this.#backup![0x8000 + i]) || table.length !== 4096) throw new Error('分区表变化，请重新完整备份。');
-      if (this.#layout?.migration) {
+      if (this.#layout?.migration && this.#layout.blankFrom !== undefined) {
         this.#status('verifying', '写入前重新确认迁移涉及的区间全部为空。');
         const start = this.#layout.blankFrom;
         const expected = hex(md5(this.#backup!.subarray(start, MIGRATION_END)));
         if (await this.device.md5(start, MIGRATION_END - start, signal) !== expected) throw new Error('迁移区间与已确认全 FF 的完整备份不符，禁止迁移。');
+      } else if (this.#layout?.migration && this.#layout.replaceExisting) {
+        this.#status('verifying', '写入前确认设备仍与已保存的完整备份一致。');
+        if (await this.device.md5(0, FLASH_SIZE, signal) !== hex(md5(this.#backup!))) throw new Error('设备内容在备份后发生变化，请重新备份，禁止迁移。');
       }
       for (let i = 0; i < this.release.parts.length; i++) {
         const part = this.release.parts[i]; signal.throwIfAborted();

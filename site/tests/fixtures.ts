@@ -1,11 +1,11 @@
 import { md5 } from '@noble/hashes/legacy.js';
-import { EXPECTED_PARTITIONS, OFFICIAL_PARTITIONS } from '../src/installer/partition';
+import { EXPECTED_PARTITIONS, OFFICIAL_PARTITIONS, THINGSOS_PARTITIONS } from '../src/installer/partition';
 import { FLASH_SIZE, KEY_ID, LAYOUT, hex, sha256, verifyEnvelope, type Release } from '../src/installer/manifest';
 import { SUPPORTED_FLASH_ID, type SerialDevice, type DeviceInfo } from '../src/installer/controller';
 
-export function table(official: boolean | 'spiffs' = false, length = 4096): Uint8Array {
+export function table(official: boolean | 'spiffs' | 'thingsos' = false, length = 4096): Uint8Array {
   // Independent fixture from upstream's initial partition CSV (28e7e13).
-  const entries = Object.entries(official === 'spiffs' ? { nvs: [1, 2, 0x9000, 0x5000], phy_init: [1, 1, 0xe000, 0x1000], factory: [0, 0, 0x10000, 0x200000], spiffs: [1, 0x82, 0x210000, 0x500000] } : official ? OFFICIAL_PARTITIONS : EXPECTED_PARTITIONS);
+  const entries = Object.entries(official === 'thingsos' ? THINGSOS_PARTITIONS : official === 'spiffs' ? { nvs: [1, 2, 0x9000, 0x5000], phy_init: [1, 1, 0xe000, 0x1000], factory: [0, 0, 0x10000, 0x200000], spiffs: [1, 0x82, 0x210000, 0x500000] } : official ? OFFICIAL_PARTITIONS : EXPECTED_PARTITIONS);
   const bytes = new Uint8Array(length).fill(255), view = new DataView(bytes.buffer);
   for (let i = 0; i < entries.length; i++) {
     const [name, [type, subtype, offset, size]] = entries[i], at = i * 32;
@@ -48,7 +48,7 @@ export class FakeDevice implements SerialDevice {
   info: DeviceInfo = { chip: 'ESP32-S3', flashSize: FLASH_SIZE, flashId: SUPPORTED_FLASH_ID, securitySafe: true };
   writes: number[] = []; closed = 0; connected = 0; resets = 0; shortBackup = false; corruptReadback = false;
   writeFailure = false; closeFailure = false; onRead?: (offset: number, size: number) => void; onMd5?: (offset: number, size: number) => void;
-  constructor(official: boolean | 'spiffs' = false) { this.memory = new Uint8Array(FLASH_SIZE).fill(0xa5); this.memory.set(table(official), 0x8000); }
+  constructor(official: boolean | 'spiffs' | 'thingsos' = false) { this.memory = new Uint8Array(FLASH_SIZE).fill(0xa5); this.memory.set(table(official), 0x8000); }
   async connect(signal: AbortSignal): Promise<DeviceInfo> { signal.throwIfAborted(); this.connected++; return this.info; }
   async read(offset: number, size: number, signal: AbortSignal, progress: (bytes: number) => void): Promise<Uint8Array> {
     this.onRead?.(offset, size); signal.throwIfAborted(); progress(size);

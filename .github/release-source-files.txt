@@ -166,6 +166,7 @@ components/sy7636a/sy7636a.c
 dependencies.lock
 docs/UI设计规范.md
 docs/公开分发核查.md
+docs/0.8.40反馈修复.md
 docs/刷机说明.md
 docs/发布与在线更新.md
 keys/firmware-release-public.json

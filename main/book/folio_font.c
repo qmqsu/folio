@@ -33,7 +33,10 @@
 #endif
 
 static void* font_raster_alloc(size_t size, void* context) {
+    // Scratch bitmaps must not make an otherwise usable face disappear when
+    // PSRAM is fragmented or occupied by a book. Small allocations may use IRAM.
     void* p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (!p) p = malloc(size);
     if (!p && context) *(bool*)context = true;
     return p;
 }

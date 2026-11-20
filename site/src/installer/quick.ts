@@ -64,7 +64,7 @@ export class QuickFlash {
       }
       const layout = assessInstalledLayout(table);
       if (!layout.compatible || layout.migration) {
-        throw new Error(layout.migration ? '检测到原厂四分区。请使用下方「原厂旧四分区：备份与迁移」；一键刷不会自动迁移。' : '分区布局不认识，一键刷不写。');
+        throw new Error(layout.migration ? '检测到需要备份迁移的旧/第三方布局。请使用下方「备份与迁移」；一键刷不会自动迁移。' : '分区布局不认识，一键刷不写。请先备份并使用迁移向导，不要强行刷写。');
       }
       signal.throwIfAborted();
 

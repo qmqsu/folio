@@ -3,7 +3,7 @@ import { Installer, type Update } from '../src/installer/controller';
 import { FLASH_SIZE } from '../src/installer/manifest';
 import { FakeDevice, fixture } from './fixtures';
 
-async function setup(official: boolean | 'spiffs' = false) {
+async function setup(official: boolean | 'spiffs' | 'thingsos' = false) {
   const f = await fixture(), device = new FakeDevice(official), updates: Update[] = [];
   const installer = new Installer(f.release, device, update => updates.push(update), f.download);
   const save = () => installer.confirmBackupSaved(installer.evidence!.sha256, true, true, true);
@@ -99,6 +99,22 @@ describe('destructive-operation safety state machine (simulated device only)', (
     await installer.prepare(true); save();
     device.onMd5 = offset => { if (offset === 0x410000 && device.writes.length) device.memory[0x90ffff] ^= 1; };
     await installer.install(true); expect(installer.stage).toBe('failed');
+  });
+  it('migrates the known ThingsOS layout only after full backup and explicit replacement consent', async () => {
+    const { installer, device, save } = await setup('thingsos');
+    await installer.prepare(true); save();
+    expect(installer.migration).toBe(true); expect(installer.compatible).toBe(true);
+    await expect(installer.install(true)).rejects.toThrow('迁移');
+    expect(device.writes).toEqual([]);
+    const ranges: number[][] = []; device.onMd5 = (at, n) => ranges.push([at, n]);
+    await installer.install(true, true);
+    expect(installer.stage).toBe('success'); expect(ranges).toContainEqual([0, FLASH_SIZE]);
+    expect(device.writes).toEqual([0, 0x8000, 0x10000, 0x910000]);
+  });
+  it('blocks ThingsOS migration if the device changes after the saved backup', async () => {
+    const { installer, device, save } = await setup('thingsos');
+    await installer.prepare(true); save(); device.memory[0xd00000] ^= 1;
+    await installer.install(true, true); expect(installer.stage).toBe('failed'); expect(device.writes).toEqual([]);
   });
   it('allows backup but never writes unknown layout or unvalidated 16MiB flash vendor', async () => {
     for (const unknown of ['layout', 'vendor']) {

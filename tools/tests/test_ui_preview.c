@@ -2073,6 +2073,14 @@ static void test_native_font_selection(const char* directory) {
     assert(!strcmp(persisted_settings.font_path, ids[2]));
     fail_all_fonts = false; load_card(false, false); assert_font_identity(ids[2], ids[2]);
 
+    // If both the remembered face and Songti are unavailable, try the other
+    // verified built-in resources before declaring the system font missing.
+    fail_font_paths[0] = ids[0];
+    snprintf(s_settings.font_path, sizeof(s_settings.font_path), "%s", FOLIO_SD_ROOT "/fonts/missing.ttf");
+    load_card(false, false); assert_font_identity(ids[1], FOLIO_SD_ROOT "/fonts/missing.ttf");
+    fail_font_paths[0] = NULL;
+    snprintf(s_settings.font_path, sizeof(s_settings.font_path), "%s", ids[0]);
+
     snprintf(s_settings.font_path, sizeof(s_settings.font_path), "%s", fixture_font_paths[0]);
     load_card(false, false); assert_font_identity(ids[0], fixture_font_paths[0]);
     mock_card_unmounted = false; load_card(false, false);

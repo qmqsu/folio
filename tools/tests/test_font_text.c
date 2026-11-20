@@ -1,5 +1,6 @@
 // Bounded parser regression cases run under AddressSanitizer/UndefinedBehaviorSanitizer.
 #include <assert.h>
+#include <stdbool.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -7,6 +8,8 @@
 #include <string.h>
 #include <unistd.h>
 
+static bool fail_psram;
+#define folio_test_psram_exhausted() (fail_psram)
 #include "esp_heap_caps.h"
 static size_t allocation_countdown;
 static void* fault_caps_malloc(size_t size, unsigned caps) {
@@ -14,7 +17,11 @@ static void* fault_caps_malloc(size_t size, unsigned caps) {
     return heap_caps_malloc(size, caps);
 }
 #define heap_caps_malloc fault_caps_malloc
+static bool fail_malloc;
+static void* fault_malloc(size_t size) { return fail_malloc ? NULL : malloc(size); }
+#define malloc fault_malloc
 #include "../../main/book/folio_font.c"
+#undef malloc
 #undef heap_caps_malloc
 
 static unsigned draw_count;
@@ -192,8 +199,9 @@ static void bitmap_budget_regressions(void) {
         put16(glyph+20, 3000); put16(glyph+24, (uint16_t)-3000); put16(glyph+30, 3000);
     }
     char path[128]; folio_font_t* font = open_fixture(&f, path); assert(font);
-    allocation_countdown = 2; // First raster scratch allocation, after bitmap allocation.
+    allocation_countdown = 1; fail_malloc = true; // Both heaps are unavailable.
     assert(!glyph_get(font, 'A') && font->cache_bytes == 0);
+    fail_malloc = false;
     assert(glyph_get(font, 'A') && font->cache_bytes > 0);
     for (int size = 135; size <= 144; ++size) {
         assert(folio_font_set_size(font, size));
@@ -417,9 +425,14 @@ int main(int argc, char** argv) {
         folio_font_t* font = folio_font_open(argv[i], 34);
         if (font == NULL) { fprintf(stderr, "font rejected: %s\n", argv[i]); return 1; }
         assert(folio_font_validate_file(argv[i]));
+        uint8_t framebuffer[1] = {0};
+        // A full PSRAM heap must not turn a valid built-in/card face into a
+        // blank page when the ordinary heap can still hold raster scratch.
+        fail_psram = true;
+        assert(folio_font_draw_glyph(font, framebuffer, 10, 100, 'A'));
+        fail_psram = false;
         if (font->card) printf("paged face: metadata=%zu bytes, initial tree=%zu bytes, glyphs=%d\n",
                                font->length, font->card->capacity, font->info.numGlyphs);
-        uint8_t framebuffer[1] = {0};
         for (uint32_t cp = 32; cp < 256; ++cp) {
             assert(folio_font_advance(font, cp, 0) >= 0);
             (void)folio_font_draw_glyph(font, framebuffer, 10, 100, cp);
