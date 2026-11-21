@@ -134,14 +134,8 @@ static void apply_scan(int pclk_mhz, read_pico_epd_scan_profile_t profile) {
     read_pico_epd_scan_t scan;
     read_pico_epd_scan(pclk_mhz, profile, &scan);
     apply_lcd(&scan);
-    // 每相开扫前的预填行数决定帧间隙。FULL 档一行 16us，喂线程余量大，32 行实测无欠载，
-    // 帧间隙从约 1ms 归零；FAST 档一行只有 10us，32 行会欠载（EPD_DRAW_EMPTY_LINE_QUEUE，
-    // 后续帧直接不输出），48/64 实测都没欠载，取 64 留余量。
-    // / Prefill lines before each phase set the frame gap. FULL is 16 µs/line,
-    // so 32 lines has slack and drops the ~1 ms gap to zero. FAST is 10 µs/line;
-    // 32 underruns (EPD_DRAW_EMPTY_LINE_QUEUE, later frames go silent). 48/64
-    // both hold; use 64.
-    epd_lcd_set_prefill_lines(profile == READ_PICO_EPD_SCAN_FULL ? 32 : 64);
+    // Leave headroom for Wi-Fi interrupts during a full-screen refresh.
+    epd_lcd_set_prefill_lines(64);
     s_pclk_mhz = scan.pclk_mhz;
     s_profile = profile;
     ESP_LOGI(
