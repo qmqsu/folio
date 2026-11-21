@@ -79,7 +79,7 @@ static bool valid_settings(const folio_settings_t* value) {
            value->auto_resume <= 1 && (value->keep_page_on_lock & 0xf0u) == 0 && FOLIO_LOCK_STYLE(value)<=2 && FOLIO_OFF_STYLE(value)<=2 && value->library_list <= 1 &&
            value->home_chart <= 1 && value->footer_hidden <= 1 &&
            value->progress_chapter <= 1 && value->underline <= 2 && value->underline_shade <= 2 &&
-           value->auto_shutdown_enabled <= 1 && valid_auto_shutdown_minutes(value->auto_shutdown_minutes) &&
+           value->weight_step >= -2 && value->weight_step <= 2 && value->auto_shutdown_enabled <= 1 && valid_auto_shutdown_minutes(value->auto_shutdown_minutes) &&
            memchr(value->font_path, '\0', sizeof(value->font_path)) != NULL;
 }
 
@@ -130,11 +130,12 @@ bool folio_settings_load(folio_settings_t* settings) {
             if (loaded.progress_chapter) loaded.reserved[0] &= (uint8_t)~0x60u;
         }
     } else {
-        if (record.version != 4 || size != sizeof(record) ||
+        if ((record.version != 4 && record.version != 5) || size != sizeof(record) ||
             record.checksum != checksum(&record, offsetof(settings_record_t, checksum))) return false;
         loaded = record.settings;
     }
     // Verify the original bytes above before migrating, without resetting other preferences.
+    if (record.version < 5) loaded.weight_step = 0;
     loaded.auto_shutdown_minutes = migrate_auto_shutdown_minutes(loaded.auto_shutdown_minutes);
     loaded.idle_minutes = migrate_idle_minutes(loaded.idle_minutes);
     if (!valid_settings(&loaded)) return false;
@@ -146,7 +147,7 @@ bool folio_settings_save(const folio_settings_t* settings) {
     if (!s_nvs_ready || settings == NULL || !valid_settings(settings)) return false;
     settings_record_t record = {0};
     record.magic = SETTINGS_MAGIC;
-    record.version = 4;
+    record.version = 5;
     record.settings = *settings;
     record.checksum = checksum(&record, offsetof(settings_record_t, checksum));
     nvs_handle_t handle;

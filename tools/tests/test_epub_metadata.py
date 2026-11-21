@@ -46,6 +46,8 @@ def main():
         def package(text): return '<package><metadata>' + text + '</metadata></package>'
         run(make('unicode', package('<dc:title> 城南旧事 </dc:title><dc:creator> 林海音 </dc:creator>')), '城南旧事', '林海音')
         run(make('entities', package('<title>A &amp; B</title><creator> Jane\n Austen </creator>')), 'A & B', 'Jane Austen')
+        run(make('legacy-dc', package('<dc-metadata><dc:title>书</dc:title><dc:creator>作者</dc:creator></dc-metadata>')), '书','作者')
+        run(make('empty-first', package('<creator> </creator><creator>南派三叔</creator>')), '', '南派三叔')
         run(make('first', package('<title>First</title><title>Second</title><creator>A</creator><creator>B</creator>')), 'First', 'A')
         run(make('missing-author', package('<title>Book</title>')), 'Book')
         run(make('missing-metadata', '<package><manifest/><spine/></package>'))

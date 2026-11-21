@@ -10,6 +10,8 @@
 
 #include "esp_heap_caps.h"
 #include "folio_epub.h"
+#include "folio_pdf.h"
+#include "folio_weread_paths.h"
 #include "folio_weread_cache.h"
 #include "folio_text.h"
 #include "freertos/FreeRTOS.h"
@@ -19,7 +21,7 @@
 #define FOLIO_SD_ROOT "/sdcard"
 #endif
 #define CATALOG_MAGIC UINT32_C(0x31434c46)
-#define CATALOG_VERSION 2u
+#define CATALOG_VERSION 3u
 #define CATALOG_HEADER_SIZE 24u
 #define CATALOG_RECORD_SIZE 560u
 #define CATALOG_KEY_CAP (FOLIO_BOOK_PATH_CAP * 2 + 1)
@@ -130,13 +132,14 @@ static catalog_slot_status_t read_catalog(unsigned slot, folio_catalog_t* catalo
     uint8_t bytes[CATALOG_RECORD_SIZE]; uint32_t hash = HASH_START;
     size_t record_size=CATALOG_RECORD_SIZE;
     bool okay = fread(bytes, 1, CATALOG_HEADER_SIZE, file) == CATALOG_HEADER_SIZE;
+    uint32_t version = 0;
     if (okay) {
         hash = hash_bytes(hash, bytes, CATALOG_HEADER_SIZE);
         catalog->sequence = read32(bytes + 8); catalog->count = read32(bytes + 12);
         catalog->order = read64(bytes + 16);
-        uint32_t version=read32(bytes+4);
+        version=read32(bytes+4);
         if(version==1)record_size=552;
-        okay = read32(bytes) == CATALOG_MAGIC && (version==1 || version==CATALOG_VERSION) &&
+        okay = read32(bytes) == CATALOG_MAGIC && (version>=1 && version<=CATALOG_VERSION) &&
             catalog->count <= FOLIO_CATALOG_LIMIT;
     }
     for (size_t i = 0; okay && i < catalog->count; ++i) {
@@ -145,6 +148,7 @@ static catalog_slot_status_t read_catalog(unsigned slot, folio_catalog_t* catalo
         if (!okay) break;
         hash = hash_bytes(hash, bytes, record_size);
         okay = decode_entry(&catalog->entries[i], bytes, catalog->order);
+        if (version < 3 && !catalog->entries[i].metadata.author[0]) catalog->entries[i].mtime = -1;
         for (size_t j = 0; okay && j < i; ++j)
             if (!strcmp(catalog->entries[i].path, catalog->entries[j].path)) okay = false;
     }
@@ -217,6 +221,30 @@ static bool valid_books(const folio_book_t* books, size_t count) {
     }
     return true;
 }
+// Only explicit bylines count as authors in plain text.
+static void text_byline(const char* path, char* author, size_t cap) {
+    FILE* file = fopen(path, "rb");
+    if (!file) return;
+    char line[512];
+    size_t used = 0;
+    while (used < 4096 && fgets(line, sizeof(line), file)) {
+        used += strlen(line);
+        char* p = line;
+        if (!strncmp(p, "\xef\xbb\xbf", 3)) p += 3;
+        p += strspn(p, " \t");
+        const char* labels[] = {"作者：", "作者:", "Author:"};
+        for (size_t i = 0; i < sizeof(labels)/sizeof(*labels); ++i) {
+            if (strncasecmp(p, labels[i], strlen(labels[i]))) continue;
+            p += strlen(labels[i]); p += strspn(p, " \t");
+            p[strcspn(p, "\r\n")] = 0;
+            copy_text(author, cap, p);
+            break;
+        }
+        if (*author) break;
+    }
+    fclose(file);
+}
+
 bool folio_catalog_sync(folio_catalog_t* catalog, const folio_book_t* books,
                         size_t count, uint32_t utc, bool refresh_metadata) {
     if (!catalog || !valid_books(books, count) || catalog->order > UINT64_MAX - count) {
@@ -253,13 +281,20 @@ bool folio_catalog_sync(folio_catalog_t* catalog, const folio_book_t* books,
         if (changed || refresh_metadata) {
             char title[FOLIO_BOOK_TITLE_CAP] = {0}, author[FOLIO_CATALOG_AUTHOR_CAP] = {0}, error[160] = {0};
             const char* extension = strrchr(book->path, '.');
-            if (extension && !strcasecmp(extension, ".epub") &&
+            char id[64];
+            bool native = folio_wr_path_id(book->path, id, sizeof(id)) &&
+                folio_weread_cache_metadata(book->path,title,sizeof(title),author,sizeof(author),error,sizeof(error));
+
+            if (!native && extension && !strcasecmp(extension, ".epub") &&
                 !folio_epub_metadata(book->path, title, sizeof(title), author, sizeof(author), error, sizeof(error))) {
                 catalog_error(catalog, "部分 EPUB 元数据未能读取，暂时使用文件名。"); okay = false;
-            } else if(extension && !strcasecmp(extension,".wrb") &&
+            } else if(!native && extension && !strcasecmp(extension,".wrb") &&
                 !folio_weread_cache_metadata(book->path,title,sizeof(title),author,sizeof(author),error,sizeof(error))) {
                 catalog_error(catalog,"部分微信读书缓存信息未能读取，暂时使用文件名。");okay=false;
             }
+            if (!native && extension && !strcasecmp(extension,".pdf"))
+                folio_pdf_metadata(book->path,title,sizeof(title),author,sizeof(author));
+            if (extension && !strcasecmp(extension,".txt")) text_byline(book->path,author,sizeof(author));
             if (!*title) copy_text(title, sizeof(title), book->title);
             if (changed || strcmp(entry->metadata.title, title) || strcmp(entry->metadata.author, author)) catalog->dirty = true;
             copy_text(entry->metadata.title, sizeof(entry->metadata.title), title);

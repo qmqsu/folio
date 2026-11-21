@@ -14,6 +14,8 @@ typedef struct {
 typedef struct {
     char title[FOLIO_EPUB_TITLE_CAP];
     char text_path[256];
+    uint64_t source_hash;
+    uint32_t source_size;
     size_t chapter_count;
     folio_epub_chapter_t* chapters;
 } folio_epub_t;

@@ -29,8 +29,8 @@ static EpdRect library_tool(unsigned i) { return (EpdRect){348+(int)i*96,112,96,
 static EpdRect done_rect(void) { return (EpdRect){48, 1096, 588, 96}; }
 static EpdRect tool_rect(unsigned i) { return (EpdRect){56+(int)(i%3)*196, 640+(int)(i/3)*144, 180, 128}; }
 static EpdRect setting_step(int row, int direction) {
-    int top=s_settings_tab ? 336+row*112 : 524+row*112;
-    return (EpdRect){direction<0 ? 332 : 540, top, 96, 96};
+    int top=s_settings_tab ? 336+row*112 : 504+row*92;
+    return (EpdRect){direction<0 ? 332 : 540, top, 96, s_settings_tab ? 96 : 76};
 }
 static const uint16_t auto_shutdown_minutes[] = {30,180,360};
 #define AUTO_SHUTDOWN_CHOICES (sizeof(auto_shutdown_minutes)/sizeof(auto_shutdown_minutes[0]))
@@ -358,15 +358,17 @@ static void draw_library(void) {
         const char* title=metadata && *metadata->title ? metadata->title : book->title;
         bool current=strcmp(book->path,s_current_book)==0;
         char meta[56]; snprintf(meta,sizeof(meta),"%s  ·  %lu KB",book_format(book),(unsigned long)((book->size+1023)/1024));
+        const char* byline=metadata && metadata->author[0] ? metadata->author : NULL;
+        const char* detail=byline ? byline : current ? "上次阅读" : meta;
         if(list) {
             cover((EpdRect){r.x,r.y+12,48,72},book->path,title,book_format(book),current);
             label(r.x+72,baseline_for_center_y(32,title,r.y+32),r.x+r.width-16,32,INK,title);
-            label(r.x+72,baseline_for_center_y(22,current?"上次阅读":meta,r.y+72),r.x+r.width-16,22,current?INK:MUTED,current?"上次阅读":meta);
+            label(r.x+72,baseline_for_center_y(22,detail,r.y+72),r.x+r.width-16,22,current?INK:MUTED,detail);
             if(row+1<LIBRARY_PAGE_SIZE && i+1<s_shelf_count)rule_at(r.x+72,r.y+103,r.width-72,RULE);
         } else {
             cover((EpdRect){r.x+6,r.y,160,240},book->path,title,book_format(book),current);
             centered_in((EpdRect){r.x+6,r.y+256,160,40},28,INK,title);
-            centered_in((EpdRect){r.x+6,r.y+304,160,30},22,current?INK:MUTED,current?"上次阅读":book_format(book));
+            centered_in((EpdRect){r.x+6,r.y+304,160,30},22,current?INK:MUTED,byline ? byline : current ? "上次阅读" : book_format(book));
         }
     }
     if(!s_shelf_count) {
@@ -495,6 +497,13 @@ static void draw_tools(void) {
 static void draw_contents(bool bookmarks) {
     size_t count=bookmarks?folio_reader_bookmark_count(s_reader):folio_reader_chapter_count(s_reader);
     page_header("阅读",bookmarks?"书签":"目录",folio_reader_title(s_reader));
+    if(!bookmarks){
+        uint32_t words;
+        char value[48];
+        if(folio_reader_word_count(s_reader,&words)) snprintf(value,sizeof(value),"全书 %lu 字",(unsigned long)words);
+        else snprintf(value,sizeof(value),"扫描版 · 无文字层");
+        right_label(636,152,26,MUTED,value);
+    }
     for(size_t row=0;row<list_rows();++row) {
         size_t i=s_list_page*list_rows()+row; if(i>=count)break;
         int y=LIST_TOP+(int)row*LIST_ROW;
@@ -522,19 +531,28 @@ static void draw_settings(void) {
     const char* tabs[]={"排版","偏好","阅读显示"};
     for(unsigned i=0;i<3;++i)action((EpdRect){48+(int)i*200,216,188,96},tabs[i],s_settings_tab==i);
     if(!s_settings_tab) {
-        panel((EpdRect){48,320,588,188});
+        panel((EpdRect){48,328,588,160});
         label(64,baseline_for_center_y(22,"字体与预览",346),540,22,MUTED,"字体与预览"); icon((EpdRect){592,332,28,28},FOLIO_ICON_CHEVRON_RIGHT,INK);
-        paragraph(72,410,612,s_settings.font_size,s_settings.font_size+s_settings.line_gap,2,INK,"慢慢读，读到字里行间。\n书页之间，自有天地。");
+        paragraph(72,422,612,s_settings.font_size,s_settings.font_size+s_settings.line_gap,1,INK,"慢慢读，读到字里行间。\n书页之间，自有天地。");
         const char* names[]={"字号","行距","段距","页边距"};
         unsigned values[]={s_settings.font_size,s_settings.line_gap,s_settings.paragraph_gap,s_settings.margin};
         const unsigned minimum[]={24,0,0,24}, maximum[]={56,24,32,80}, step[]={2,2,4,8};
         for(int i=0;i<4;++i) {
-            int y=524+i*112; panel((EpdRect){48,y,588,96}); label(64,baseline_for_center_y(32,names[i],y+48),306,32,INK,names[i]);
-            char value[24]; snprintf(value,sizeof(value),"%u",values[i]); centered_in((EpdRect){436,y,96,96},30,INK,value);
-            icon((EpdRect){364,y+32,32,32},FOLIO_ICON_MINUS,values[i]>=minimum[i]+step[i]?INK:RULE);
-            icon((EpdRect){572,y+32,32,32},FOLIO_ICON_PLUS,values[i]+step[i]<=maximum[i]?INK:RULE);
+            int y=setting_step(i,-1).y; panel((EpdRect){48,y,588,76}); label(72,baseline_for_center_y(30,names[i],y+38),306,32,INK,names[i]);
+            char value[24]; snprintf(value,sizeof(value),"%u",values[i]); centered_in((EpdRect){436,y,96,76},30,INK,value);
+            icon((EpdRect){364,y+22,32,32},FOLIO_ICON_MINUS,values[i]>=minimum[i]+step[i]?INK:RULE);
+            icon((EpdRect){572,y+22,32,32},FOLIO_ICON_PLUS,values[i]+step[i]<=maximum[i]?INK:RULE);
         }
-        label(64,baseline_for_center_y(32,"首行缩进",1016),280,32,INK,"首行缩进");
+        int weight_y=setting_step(4,-1).y;
+        panel((EpdRect){48,weight_y,588,76});
+        label(72,baseline_for_center_y(30,"字重",weight_y+38),306,30,INK,"字重");
+        if(folio_font_has_weight(s_font)){
+            const char* weights[]={"细","偏细","默认","偏粗","粗"};
+            centered_in((EpdRect){428,weight_y,112,76},28,INK,weights[s_settings.weight_step+2]);
+            icon((EpdRect){364,weight_y+22,32,32},FOLIO_ICON_MINUS,s_settings.weight_step>-2?INK:RULE);
+            icon((EpdRect){572,weight_y+22,32,32},FOLIO_ICON_PLUS,s_settings.weight_step<2?INK:RULE);
+        }else right_label(612,weight_y+48,24,MUTED,"当前字体固定");
+        label(72,baseline_for_center_y(32,"首行缩进",1016),280,32,INK,"首行缩进");
         action((EpdRect){308,968,156,96},"关闭",!FOLIO_FIRST_LINE_INDENT(&s_settings));
         action((EpdRect){480,968,156,96},"开启",FOLIO_FIRST_LINE_INDENT(&s_settings));
     } else if(s_settings_tab==1) {
@@ -588,7 +606,7 @@ static void draw_fonts(void) {
     const char* back=s_fonts_return==VIEW_SETTINGS?"排版":s_fonts_return==VIEW_HOME_SETTINGS?"个性化":s_fonts_return==VIEW_SYSTEM?"设置":"阅读";
     const char* desired=s_settings.font_path[0]?s_settings.font_path:FOLIO_FONT_BUILTIN_PATH;
     bool fallback=strcmp(desired,s_active_font)!=0;
-    page_header(back,"字体",fallback?"暂用其他字体 · 已保留原选择":"四款内置字体 · 也可使用 TF 卡字体");
+    page_header(back,"字体",fallback?"暂用其他字体 · 已保留原选择":"宋体随固件提供 · 其他字库可从刷机页下载");
     for(size_t row=0;row<list_rows();++row) {
         size_t i=s_list_page*list_rows()+row; if(i>=s_font_count)break;
         const char* name=folio_font_builtin_label(s_fonts[i]);
@@ -596,7 +614,7 @@ static void draw_fonts(void) {
         int y=LIST_TOP+(int)row*LIST_ROW; bool current=strcmp(s_fonts[i],s_active_font)==0;
         bool remembered=strcmp(s_fonts[i],desired)==0;
         const char* state=current?(fallback?"当前使用 · 临时回退":"当前使用"):
-            remembered?"已记住 · 暂未加载":folio_font_is_builtin_path(s_fonts[i])?"设备内置":"TF 卡字体";
+            remembered?"已记住 · 暂未加载":!strcmp(s_fonts[i],FOLIO_FONT_BUILTIN_PATH)?"设备内置":folio_font_is_builtin_path(s_fonts[i])?"配套字库":"TF 卡字体";
         selected_panel((EpdRect){48,y,588,96},current);
         label(64,baseline_for_center_y(32,name,y+32),558,32,INK,name);
         label(64,baseline_for_center_y(22,state,y+72),558,22,MUTED,state);

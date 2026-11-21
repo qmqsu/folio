@@ -248,6 +248,7 @@ main/book/folio_cover.h
 main/book/folio_epub.c
 main/book/folio_epub.h
 main/book/folio_font.c
+main/book/folio_gvar.inc
 main/book/folio_font.h
 main/book/folio_font_pack.c
 main/book/folio_font_pack.h
@@ -368,6 +369,7 @@ site/public/licenses/esp-flasher-stub-MIT.txt
 site/public/licenses/stub-provenance.txt
 site/public/third-party-licenses.txt
 site/scripts/collect-licenses.mjs
+site/scripts/package-fonts.py
 site/src/installer/controller.ts
 site/src/installer/manifest.ts
 site/src/installer/partition.ts

@@ -244,10 +244,12 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
     if (buffer == NULL) { reason = "Not enough memory for EPUB fingerprint"; goto failed; }
     if (fseek(zip->file, 0, SEEK_SET) != 0) { free(buffer); goto failed; }
     uint32_t remaining = zip->source_size;
+    zip->source_hash = UINT64_C(14695981039346656037);
     while (remaining > 0) {
         if (folio_epub_cancelled()) { free(buffer); goto failed; }
         size_t n = remaining > ZIP_INPUT_BYTES ? ZIP_INPUT_BYTES : remaining;
         if (fread(buffer, 1, n, zip->file) != n) { free(buffer); goto failed; }
+        for (size_t i = 0; i < n; ++i) zip->source_hash = (zip->source_hash ^ buffer[i]) * UINT64_C(1099511628211);
         zip->source_crc = folio_epub_crc32(zip->source_crc, buffer, n);
         remaining -= (uint32_t)n;
         if ((remaining & 0xFFFFu) < ZIP_INPUT_BYTES) folio_epub_yield();

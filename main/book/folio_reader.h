@@ -59,6 +59,7 @@ uint32_t folio_reader_position(const folio_reader_t* reader);
 bool folio_reader_seek(folio_reader_t* reader, uint32_t byte_offset);
 bool folio_reader_seek_percent(folio_reader_t* reader, unsigned percent);
 
+bool folio_reader_word_count(const folio_reader_t* reader, uint32_t* count);
 size_t folio_reader_chapter_count(const folio_reader_t* reader);
 const char* folio_reader_chapter_title(const folio_reader_t* reader, size_t index);
 // Display-only context for unambiguous numbered subsections; source titles stay intact.

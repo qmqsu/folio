@@ -298,6 +298,7 @@ static bool open_active_font(const char* path) {
     s_active_font[0] = '\0';
     if (!path || !*path || (!folio_font_is_builtin_path(path) && !s_card_ready)) return false;
     s_font = folio_font_open(path, s_settings.font_size);
+    folio_font_set_weight(s_font,s_settings.weight_step);
     if (s_font) snprintf(s_active_font, sizeof(s_active_font), "%s", path);
     return s_font != NULL;
 }
@@ -502,10 +503,16 @@ static void change_setting(int row, int direction) {
         case 15:
             if(!s_settings.auto_shutdown_enabled || direction<0 || (unsigned)direction>=AUTO_SHUTDOWN_CHOICES)return;
             s_settings.auto_shutdown_minutes=auto_shutdown_minutes[direction];break;
+        case 16:
+            value = s_settings.weight_step + direction;
+            if (!folio_font_has_weight(s_font) || value < -2 || value > 2) return;
+            s_settings.weight_step = (int8_t)value;
+            folio_font_set_weight(s_font,value);
+            break;
         default: return;
     }
     if (memcmp(&previous, &s_settings, sizeof(previous)) == 0) return;
-    if(row==6 || row>=14) {
+    if(row==6 || row==14 || row==15) {
         if(!folio_settings_save(&s_settings)) {
             s_settings=previous;
             show_error(row==6?"空闲锁屏设置未能保存，已恢复之前的选择。":"自动关机设置未能保存，已恢复之前的选择。",VIEW_SETTINGS);
@@ -920,7 +927,11 @@ static void handle_tap(int x,int y) {
             unsigned tab=(unsigned)(x-48)/200; if(tab>2)tab=2; if(tab!=s_settings_tab){s_settings_tab=tab;show_view(VIEW_SETTINGS,true);}return;
         }
         if(!s_settings_tab) {
-            if(hit((EpdRect){48,320,588,188},x,y)){enter_fonts();return;}
+            if(hit((EpdRect){48,328,588,160},x,y)){enter_fonts();return;}
+            if (folio_font_has_weight(s_font)) {
+                if(hit(setting_step(4,-1),x,y)){change_setting(16,-1);return;}
+                if(hit(setting_step(4,1),x,y)){change_setting(16,1);return;}
+            }
             for(int i=0;i<4;++i) {
                 if(hit(setting_step(i,-1),x,y)){change_setting(i,-1);return;}
                 if(hit(setting_step(i,1),x,y)){change_setting(i,1);return;}

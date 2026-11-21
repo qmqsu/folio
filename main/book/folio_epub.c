@@ -579,11 +579,13 @@ static bool metadata_token(void* userdata, const folio_xml_token_t* token) {
             parser->package_found = true;
         }
         if (token->depth == 1 && folio_xml_name(token->name, "metadata")) parser->metadata_depth = 1;
-        else if (parser->metadata_depth == 1 && token->depth == 2) {
+        else if (parser->metadata_depth == 1 && token->depth == 2 &&
+                 folio_xml_name(token->name,"dc-metadata")) parser->metadata_depth=2;
+        else if (parser->metadata_depth >= 1 && (int)token->depth == parser->metadata_depth+1) {
             if (!parser->title_seen && folio_xml_name(token->name, "title")) {
-                parser->title_seen = true; parser->author_active = false; parser->value_depth = 2;
+                parser->title_seen = true; parser->author_active = false; parser->value_depth = (int)token->depth;
             } else if (!parser->author_seen && folio_xml_name(token->name, "creator")) {
-                parser->author_seen = true; parser->author_active = true; parser->value_depth = 2;
+                parser->author_seen = true; parser->author_active = true; parser->value_depth = (int)token->depth;
             }
         }
     } else if (token->kind == FOLIO_XML_TEXT && parser->value_depth >= 0) {
@@ -591,8 +593,16 @@ static bool metadata_token(void* userdata, const folio_xml_token_t* token) {
             parser->author_active ? parser->author : parser->title,
             parser->author_active ? parser->author_cap : parser->title_cap);
     } else if (token->kind == FOLIO_XML_END) {
-        if ((int)token->depth == parser->value_depth) parser->value_depth = -1;
-        if ((int)token->depth == parser->metadata_depth) parser->metadata_depth = -1;
+        if ((int)token->depth == parser->value_depth) {
+            char* value=parser->author_active ? parser->author : parser->title;
+            trim_label(value);
+            if (!*value) {
+                if (parser->author_active) parser->author_seen=false;
+                else parser->title_seen=false;
+            }
+            parser->value_depth=-1;
+        }
+        if ((int)token->depth == parser->metadata_depth) parser->metadata_depth = parser->metadata_depth==2 ? 1 : -1;
     }
     return true;
 }
@@ -902,6 +912,8 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     char temporary[272] = {0};
     bool okay = false;
     if (!folio_zip_open(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
+    result->source_hash = book->zip.source_hash;
+    result->source_size = book->zip.source_size;
     const folio_zip_entry_t* mimetype = folio_zip_find(&book->zip, "mimetype");
     if (mimetype == NULL || mimetype->method != 0 || mimetype->size > 22) {
         failure(book, "Missing EPUB mimetype"); goto cleanup;

@@ -103,7 +103,7 @@ static void test_v3_compatibility(void) {
     assert(memcmp(&loaded, &old.settings, sizeof(old.settings)) == 0);
     assert(!loaded.auto_shutdown_enabled && loaded.auto_shutdown_minutes == 30);
     assert(folio_settings_save(&loaded));
-    assert(persisted_size == 296 && persisted[4] == 4);
+    assert(persisted_size == 296 && persisted[4] == 5);
     assert(folio_settings_load(&loaded) && memcmp(&loaded, &old.settings, sizeof(old.settings)) == 0);
     // Damaged or shortened legacy blobs must not silently import, or erase NVS.
     for (unsigned version = 2; version <= 3; ++version) {
@@ -163,7 +163,7 @@ static void test_v4_compatibility(void) {
             assert(folio_settings_save(&loaded));
             settings_record_t saved;
             memcpy(&saved, persisted, sizeof(saved));
-            assert(persisted_size == 296 && saved.magic == original.magic && saved.version == 4);
+            assert(persisted_size == 296 && saved.magic == original.magic && saved.version == 5);
             assert(saved.checksum == checksum(&saved, offsetof(settings_record_t, checksum)));
             assert(folio_settings_load(&loaded) && memcmp(&loaded, &expected, sizeof(expected)) == 0);
 

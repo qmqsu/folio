@@ -35,6 +35,7 @@ typedef struct {
     uint8_t underline_shade; // 0=light, 1=medium, 2=dark
     // v4 extension. Disabling preserves the selected duration.
     uint8_t auto_shutdown_enabled; // 0=off (default), 1=on; only while locked.
+    int8_t weight_step; // -2..2 relative to the variable font default.
     uint16_t auto_shutdown_minutes; // 30 (default), 180, or 360. Known old choices migrate on load.
 
 } folio_settings_t;

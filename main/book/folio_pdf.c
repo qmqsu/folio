@@ -39,6 +39,27 @@ static bool pdf_error(pdfio_file_t *pdf, const char *message, void *data) {
     return false;
 }
 
+static bool read_metadata(const char* path, char* title, size_t title_cap, char* author, size_t author_cap) {
+    bool failed = false;
+    pdfio_file_t* pdf = pdfioFileOpen(path,NULL,NULL,pdf_error,&failed);
+    if (!pdf) return false;
+    const char* values[] = {pdfioFileGetTitle(pdf),pdfioFileGetAuthor(pdf)};
+    char* outputs[] = {title,author};
+    size_t caps[] = {title_cap,author_cap};
+    for (unsigned i=0; i<2; ++i) {
+        if (!values[i] || !caps[i]) continue;
+        size_t n = strlen(values[i]);
+        if (n >= caps[i]) {
+            n = caps[i]-1;
+            while (n && ((unsigned char)values[i][n] & 0xc0)==0x80) --n;
+        }
+        memcpy(outputs[i],values[i],n);
+        outputs[i][n]=0;
+    }
+    pdfioFileClose(pdf);
+    return !failed;
+}
+
 static int hex_value(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     c = (char)tolower((unsigned char)c);
@@ -282,6 +303,8 @@ static pdfio_obj_t *scan_image(pdfio_obj_t *page) {
 typedef struct {
     const char *path;
     FILE *output;
+    char *title,*author;
+    size_t title_cap,author_cap;
     unsigned page, max_w, max_h;
     folio_pdf_scan_t *scan;
     atomic_bool cancel;
@@ -327,10 +350,14 @@ static bool scan_page(pdf_job_t *job) {
     job->scan->count=(unsigned)count;
     return true;
 }
+static bool execute_job(pdf_job_t* job) {
+    if (job->title) return read_metadata(job->path,job->title,job->title_cap,job->author,job->author_cap);
+    return job->scan ? scan_page(job) : extract(job->path,job->output,&job->cancel);
+}
 #ifdef ESP_PLATFORM
 static void worker(void *arg) {
     pdf_job_t *job=arg;
-    job->result=job->scan ? scan_page(job) : extract(job->path,job->output,&job->cancel);
+    job->result=execute_job(job);
     xSemaphoreGive(job->done);
     vTaskDeleteWithCaps(NULL);
 }
@@ -347,8 +374,13 @@ static bool run_job(pdf_job_t *job) {
     vSemaphoreDelete(job->done);
     return job->result;
 #else
-    return job->scan ? scan_page(job) : extract(job->path,job->output,&job->cancel);
+    return execute_job(job);
 #endif
+}
+
+void folio_pdf_metadata(const char* path,char* title,size_t title_cap,char* author,size_t author_cap) {
+    pdf_job_t job={.path=path,.title=title,.author=author,.title_cap=title_cap,.author_cap=author_cap};
+    (void)run_job(&job);
 }
 
 bool folio_pdf_extract(const char *path, FILE *output) {

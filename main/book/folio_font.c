@@ -91,6 +91,11 @@ typedef struct {
 typedef struct {
     FILE* file;
     uint32_t glyf_offset, glyf_length;
+    uint32_t var_offsets, var_data, var_length;
+    uint16_t tuple_count, tuple_peaks[64*8];
+    unsigned axis_count, weight_axis;
+    float coords[5];
+    bool wide_offsets;
     uint8_t* tree;
     size_t capacity;
     uint16_t ids[CARD_TREE_N];
@@ -101,6 +106,7 @@ typedef struct {
 
 struct folio_font {
     card_face_t* card;
+    int weight_step;
     size_t cache_bytes;
     uint8_t* bytes;
     size_t length;
@@ -583,6 +589,19 @@ static void store_be32(uint8_t* p, uint32_t value) {
     p[0] = value >> 24; p[1] = value >> 16; p[2] = value >> 8; p[3] = value;
 }
 
+#include "folio_gvar.inc"
+
+static bool grow_glyph_tree(card_face_t* card,size_t used,size_t size) {
+    if (size>CARD_TREE_LIMIT-used) return false;
+    if (used+size<=card->capacity) return true;
+    size_t cap=card->capacity?card->capacity:4096;
+    while(cap<used+size) cap*=2;
+    uint8_t* tree=font_alloc(cap);
+    if (!tree) return false;
+    if (card->tree) memcpy(tree,card->tree,used);
+    free(card->tree);card->tree=tree;card->capacity=cap;
+    return true;
+}
 // Construct a private glyph snapshot. Never pass mutable SD data to stb before
 // validating the exact bytes it will render (including referenced components).
 static bool card_glyph(folio_font_t* font, uint16_t gid, stbtt_fontinfo* info) {
@@ -598,14 +617,7 @@ static bool card_glyph(folio_font_t* font, uint16_t gid, stbtt_fontinfo* info) {
         uint32_t end = wide ? be32(loc + id*4 + 4) : be16(loc + id*2 + 2)*2u;
         if (end < start || end > card->glyf_length || end-start > CARD_TREE_LIMIT-used) return false;
         size_t size = end-start;
-        if (used + size > card->capacity) {
-            size_t cap = card->capacity ? card->capacity : 4096;
-            while (cap < used + size) cap *= 2;
-            uint8_t* tree = font_alloc(cap);
-            if (!tree) return false;
-            if (card->tree) memcpy(tree, card->tree, used);
-            free(card->tree); card->tree = tree; card->capacity = cap;
-        }
+        if (!grow_glyph_tree(card,used,size)) return false;
         store_be32(card->tree + i*4, used-CARD_LOCA_BYTES);
         uint8_t* glyph = card->tree + used;
         used += size;
@@ -616,6 +628,18 @@ static bool card_glyph(folio_font_t* font, uint16_t gid, stbtt_fontinfo* info) {
         int16_t contours = (int16_t)be16(glyph);
         if (contours >= 0) {
             if (!validate_simple_glyph(glyph, size, contours)) return false;
+            if (font->weight_step && card->var_data) {
+                uint8_t* varied=NULL;
+                size_t new_size=0;
+                if (!var_simple(card,id,font->weight_step,glyph,contours,&varied,&new_size)) return false;
+                if (varied) {
+                    used-=size;
+                    bool ok=grow_glyph_tree(card,used,new_size) && validate_simple_glyph(varied,new_size,contours);
+                    if (ok) {memcpy(card->tree+used,varied,new_size);used+=new_size;}
+                    free(varied);
+                    if (!ok) return false;
+                }
+            }
         } else {
             if (!validate_composite_glyph(glyph, size, font->info.numGlyphs)) return false;
             unsigned pos = 10, flags;
@@ -649,6 +673,15 @@ static void evict_bitmap(folio_font_t* font, glyph_cache_entry_t* entry) {
         free(entry->pixels);
     }
     memset(entry, 0, sizeof(*entry));
+}
+
+bool folio_font_has_weight(const folio_font_t* font) {
+    return font && font->card && font->card->var_data;
+}
+void folio_font_set_weight(folio_font_t* font,int step) {
+    if (!folio_font_has_weight(font) || step < -2 || step > 2 || font->weight_step==step) return;
+    font->weight_step=step;
+    for (unsigned i=0;i<FOLIO_GLYPH_CACHE_N;++i) evict_bitmap(font,&font->cache[i]);
 }
 
 static glyph_cache_entry_t* glyph_get(folio_font_t* font, uint32_t cp) {
@@ -934,6 +967,69 @@ folio_font_t* folio_font_open_builtin(int pixel_height) {
 }
 // Owns file on entry, including every failure path. Keep large outlines on SD;
 // only the small layout tables are needed when measuring or paginating a book.
+static void load_weight_axis(card_face_t* card,const uint8_t* dir,unsigned count,unsigned glyphs) {
+    table_view_t f={0},g={0},avar={0};
+    for(unsigned i=0;i<count;++i) {
+        const uint8_t* t=dir+16*i;
+        table_view_t v={NULL,be32(t+12),be32(t+8)};
+        if(has_tag(t,"fvar")) f=v;
+        if(has_tag(t,"gvar")) g=v;
+        if(has_tag(t,"avar")) avar=v;
+    }
+    uint8_t h[20],axis[20];
+    if(f.length<16 || g.length<20 || !card_read(card->file,f.offset,h,16) || be32(h)!=0x10000) return;
+    unsigned axes=be16(h+8),step=be16(h+10),start=be16(h+4),weight=axes;
+    if(!axes || axes>8 || step<20 || !contains_range(f.length,start,axes*step)) return;
+    for(unsigned i=0;i<axes;++i) {
+        if(!card_read(card->file,f.offset+start+i*step,axis,20)) return;
+        if(!has_tag(axis,"wght")) continue;
+        if(weight!=axes) return;
+        int32_t min=(int32_t)be32(axis+4),def=(int32_t)be32(axis+8),max=(int32_t)be32(axis+12);
+        if(min>def || def>max || min==max) return;
+        weight=i;
+        for(int j=-2;j<=2;++j) card->coords[j+2]=(j<0 && min==def)||(j>0 && max==def) ? 0 : j*8192;
+    }
+    if(weight==axes) return;
+    if(avar.length) {
+        if(avar.length<8 || !card_read(card->file,avar.offset,h,8) || be32(h)!=0x10000 || be16(h+6)!=axes) return;
+        uint32_t pos=8;
+        for(unsigned i=0;i<axes;++i) {
+            if(!contains_range(avar.length,pos,2) || !card_read(card->file,avar.offset+pos,h,2)) return;
+            unsigned pairs=be16(h);pos+=2;
+            if(pairs<3 || pairs>256 || !contains_range(avar.length,pos,4*pairs)) return;
+            if(i==weight) {
+                float mapped[5]={0};
+                int from=-16385,to=-16384;
+                for(unsigned k=0;k<pairs;++k) {
+                    if(!card_read(card->file,avar.offset+pos+4*k,h,4)) return;
+                    int x=(int16_t)be16(h),y=(int16_t)be16(h+2);
+                    if(x<=from || x>16384 || y < -16384 || y>16384 ||
+                       (!k && (x!=-16384 || y!=-16384)) || (k+1==pairs && (x!=16384 || y!=16384))) return;
+                    for(unsigned j=0;j<5;++j) if(card->coords[j]>from && card->coords[j]<=x)
+                        mapped[j]=to+(card->coords[j]-from)*(y-to)/(x-from);
+                    from=x;to=y;
+                }
+                memcpy(card->coords,mapped,sizeof(mapped));
+            }
+            pos+=pairs*4;
+        }
+    }
+    if(!card_read(card->file,g.offset,h,20) || be32(h)!=0x10000 || be16(h+4)!=axes ||
+       be16(h+12)!=glyphs || be16(h+6)>64 || be16(h+14)>1) return;
+    unsigned shared=be16(h+6),stride=be16(h+14)?4:2;
+    uint32_t begin=be32(h+16),peaks=be32(h+8);
+    if (!contains_range(g.length,20,(glyphs+1)*stride) || begin<20+(glyphs+1)*stride ||
+        begin>=g.length || !contains_range(g.length,peaks,2*shared*axes)) return;
+    for(unsigned i=0;i<shared;++i) {
+        uint8_t values[16];
+        if(!card_read(card->file,g.offset+peaks+2*i*axes,values,2*axes)) return;
+        for(unsigned j=0;j<axes;++j) card->tuple_peaks[i*axes+j]=be16(values+2*j);
+    }
+    card->axis_count=axes; card->weight_axis=weight;
+    card->tuple_count=shared; card->wide_offsets=stride==4;card->var_offsets=g.offset+20;
+    card->var_data=g.offset+begin;card->var_length=g.length-begin;
+}
+
 static folio_font_t* open_card_face(FILE* file, uint32_t length, int pixel_height) {
     enum { HEAD, MAXP, HHEA, HMTX, LOCA, CMAP, GLYF, TABLES };
     static const char tags[TABLES][5] = {"head", "maxp", "hhea", "hmtx", "loca", "cmap", "glyf"};
@@ -960,7 +1056,6 @@ static folio_font_t* open_card_face(FILE* file, uint32_t length, int pixel_heigh
             tables[j].length = size; tables[j].offset = offset;
         }
     }
-    free(directory); directory = NULL;
     for (unsigned i = 0; i < GLYF; ++i) {
         if (!tables[i].length) goto fail;
         if (tables[i].length > caps[i]) {
@@ -983,6 +1078,8 @@ static folio_font_t* open_card_face(FILE* file, uint32_t length, int pixel_heigh
     font->info = (stbtt_fontinfo){.data=font->bytes, .numGlyphs=be16(tables[MAXP].data+4),
         .index_map=(int)cmap, .hhea=(int)tables[HHEA].offset, .hmtx=(int)tables[HMTX].offset,
         .loca=(int)tables[LOCA].offset, .indexToLocFormat=be16(tables[HEAD].data+50)};
+    load_weight_axis(font->card,directory,count,font->info.numGlyphs);
+    free(directory); directory=NULL;
     font->card->glyf_offset = tables[GLYF].offset;
     font->card->glyf_length = tables[GLYF].length;
     // Opening/repagination must not scan megabytes of outlines. Check the
@@ -1023,6 +1120,13 @@ folio_font_t* folio_font_open(const char* path, int pixel_height) {
     const char* bundled = FOLIO_BUILTIN_FONT_PATH;
     if (bundled && !strcmp(path, bundled)) paged = false;
 #endif
+    if (!paged) {
+        uint8_t sfnt[12],entry[16];
+        if (fread(sfnt,1,12,file)==12 && be16(sfnt+4)<=64)
+            for(unsigned i=0;i<be16(sfnt+4) && fread(entry,1,16,file)==16;++i)
+                if(has_tag(entry,"gvar")) {paged=true;break;}
+        rewind(file);
+    }
     if (paged) return open_card_face(file, (uint32_t)length, pixel_height);
     if ((unsigned long)length > FOLIO_FONT_MAX_BYTES) { fclose(file); return NULL; }
     folio_font_t* font = font_alloc_state();

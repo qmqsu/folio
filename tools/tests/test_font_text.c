@@ -425,6 +425,22 @@ int main(int argc, char** argv) {
         folio_font_t* font = folio_font_open(argv[i], 34);
         if (font == NULL) { fprintf(stderr, "font rejected: %s\n", argv[i]); return 1; }
         assert(folio_font_validate_file(argv[i]));
+        if (folio_font_has_weight(font)) {
+            unsigned ink[5] = {0};
+            for(int step=-2;step<=2;++step) {
+                folio_font_set_weight(font,step);
+                const uint32_t sample[]={0x4e2d,0x9605,0x8bfb,'A'};
+                for(unsigned j=0;j<4;++j) {
+                    glyph_cache_entry_t* g=glyph_get(font,sample[j]);
+                    assert(g && g->width>0 && g->height>0);
+                    for(int k=0;k<g->width*g->height;++k) ink[step+2]+=g->pixels[k];
+                }
+            }
+            for(unsigned j=1;j<5;++j) assert(ink[j]>ink[j-1]);
+            printf("Variable outline coverage at five weights: %u %u %u %u %u\n",
+                   ink[0],ink[1],ink[2],ink[3],ink[4]);
+            folio_font_set_weight(font,0);
+        }
         uint8_t framebuffer[1] = {0};
         // A full PSRAM heap must not turn a valid built-in/card face into a
         // blank page when the ordinary heap can still hold raster scratch.

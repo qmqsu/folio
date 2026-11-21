@@ -217,9 +217,14 @@ static void test_bom_gbk_and_punctuation(void) {
     const unsigned char gbk[] = {0xD6, 0xD0, 0xCE, 0xC4};
     book = write_book("gbk.txt", gbk, sizeof(gbk));
     reader = open_book(&book);
+    uint32_t words;
+    assert(folio_reader_word_count(reader,&words) && words==2);
     assert(strcmp(folio_reader_encoding(reader), "GBK") == 0);
     assert(reader->page->placements[0].codepoint == 0x4E2D);
     folio_reader_close(reader);
+    const char mixed[]="中文， hello world! 123";
+    book=write_book("words.txt",mixed,strlen(mixed));reader=open_book(&book);
+    assert(folio_reader_word_count(reader,&words) && words==5);folio_reader_close(reader);
     const char* punctuation = "甲乙丙（丁戊），己庚。甲乙丙（丁戊），己庚。甲乙丙（丁戊），己庚。";
     book = write_book("punctuation.txt", punctuation, strlen(punctuation));
     reader = open_book(&book);
@@ -469,6 +474,7 @@ int main(void) {
     assert(!folio_reader_open(&book,&font));
     snprintf(book.path,sizeof(book.path),BOOK_DIR "/Scan.pdf");
     pdf = open_book(&book);
+    uint32_t unknown; assert(!folio_reader_word_count(pdf,&unknown));
     assert(pdf->scan.count == 2 && pdf->scan.pixels && !pdf->file);
     assert(folio_reader_next(pdf) && !folio_reader_next(pdf));
     folio_reader_close(pdf);

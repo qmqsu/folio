@@ -35,6 +35,9 @@ bool folio_weread_cache_metadata(const char* path,char* title,size_t title_cap,
     if(strstr(path,"broken")){snprintf(error,error_cap,"damaged pointer");return false;}
     snprintf(title,title_cap,"云端书名");snprintf(author,author_cap,"林舟");return true;
 }
+void folio_pdf_metadata(const char* path,char* title,size_t title_cap,char* author,size_t author_cap) {
+    (void)path;(void)title;(void)title_cap;(void)author;(void)author_cap;
+}
 bool folio_epub_metadata(const char* path, char* title, size_t title_cap,
                          char* author, size_t author_cap, char* error, size_t error_cap) {
     ++metadata_reads; title[0] = author[0] = error[0] = 0;

@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+void folio_pdf_metadata(const char* path, char* title, size_t title_cap, char* author, size_t author_cap);
 bool folio_pdf_extract(const char *path, FILE *output);
 
 typedef struct {

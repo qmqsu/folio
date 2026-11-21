@@ -25,6 +25,8 @@ void folio_font_close(folio_font_t* font);
 // Changes size without reloading the TTF. The bounded bitmap cache keeps sizes separate.
 bool folio_font_set_size(folio_font_t* font, int pixel_height);
 
+bool folio_font_has_weight(const folio_font_t* font);
+void folio_font_set_weight(folio_font_t* font, int step);
 int folio_font_ascent(const folio_font_t* font);
 int folio_font_line_height(const folio_font_t* font);
 int folio_font_pixel_height(const folio_font_t* font);

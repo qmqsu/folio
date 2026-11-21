@@ -70,7 +70,7 @@ struct folio_reader {
     char title[FOLIO_BOOK_TITLE_CAP], path[FOLIO_BOOK_PATH_CAP];
     char progress_path[sizeof(PROGRESS_DIR) + 32], error[128];
     uint64_t path_hash, source_hash, text_hash;
-    uint32_t source_size, file_size, content_start, generation;
+    uint32_t source_size, file_size, content_start, generation, word_count;
     int active_slot;
     int layout_font_size;
     folio_encoding_t encoding;
@@ -153,14 +153,27 @@ size_t folio_library_scan(folio_book_t* books, size_t capacity) {
 
 // Full content identity prevents reuse after same-size replacements. Streaming
 // UTF-8 validation and periodic yields keep memory and watchdog time bounded.
+typedef struct { uint32_t total; bool in_word; } word_counter_t;
+
+static void count_scalar(word_counter_t* counter, uint32_t cp) {
+    bool latin = (cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') ||
+                 (cp >= '0' && cp <= '9') || (cp >= 0xc0 && cp <= 0x2af && cp != 0xd7 && cp != 0xf7);
+    bool ideograph = (cp >= 0x3400 && cp <= 0x9fff) || (cp >= 0xf900 && cp <= 0xfaff) ||
+                     (cp >= 0x20000 && cp <= 0x323af) || (cp >= 0x3041 && cp <= 0x30fa) ||
+                     (cp >= 0xac00 && cp <= 0xd7a3);
+    if (ideograph || (latin && !counter->in_word)) ++counter->total;
+    counter->in_word = latin;
+}
+
 static bool inspect_file(FILE* file, uint64_t* hash_out, uint32_t* size_out,
-                         folio_encoding_t* encoding_out, uint32_t* start_out) {
+                         folio_encoding_t* encoding_out, uint32_t* start_out, uint32_t* words) {
     if (fseek(file, 0, SEEK_SET) != 0) return false;
     uint8_t buffer[2048], first[4] = {0};
     uint64_t hash = UINT64_C(14695981039346656037);
     uint32_t total = 0, scalar = 0, minimum = 0;
     unsigned continuation = 0, batches = 0;
     bool valid_utf8 = true;
+    word_counter_t counter = {0};
     size_t count;
     while ((count = fread(buffer, 1, sizeof(buffer), file)) != 0) {
         if (count > INT32_MAX - total) return false;
@@ -177,7 +190,9 @@ static bool inspect_file(FILE* file, uint64_t* hash_out, uint32_t* size_out,
                         valid_utf8 = false;
                         break;
                     }
+                    if (!continuation && words) count_scalar(&counter, scalar);
                 } else if (byte < 0x80) {
+                    if (words) count_scalar(&counter, byte);
                     continue;
                 } else if (byte >= 0xC2 && byte <= 0xDF) {
                     continuation = 1; scalar = byte & 0x1F; minimum = 0x80;
@@ -189,7 +204,7 @@ static bool inspect_file(FILE* file, uint64_t* hash_out, uint32_t* size_out,
             }
         }
         total += (uint32_t)count;
-        if (++batches % 8 == 0) vTaskDelay(1);
+        if (++batches % 32 == 0) vTaskDelay(1);
     }
     if (ferror(file)) return false;
     if (continuation) valid_utf8 = false;
@@ -200,6 +215,14 @@ static bool inspect_file(FILE* file, uint64_t* hash_out, uint32_t* size_out,
         if (total >= 4 && first[0] == 0 && first[1] == 0 && first[2] == 0xFE && first[3] == 0xFF) return false;
         *encoding_out = (bom || valid_utf8) ? FOLIO_ENCODING_UTF8 : FOLIO_ENCODING_GBK;
     }
+    if (words && !valid_utf8) {
+        if (fseek(file, bom ? 3 : 0, SEEK_SET)) return false;
+        counter = (word_counter_t){0};
+        uint32_t cp;
+        while (folio_text_next(file, *encoding_out, &cp)) count_scalar(&counter, cp);
+        if (ferror(file)) return false;
+    }
+    if (words) *words = counter.total;
     *hash_out = hash;
     *size_out = total;
     if (start_out != NULL) *start_out = bom ? 3 : 0;
@@ -543,7 +566,7 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
     reader->is_epub = is_weread || (extension != NULL && strcasecmp(extension, ".epub") == 0);
     reader->is_pdf = extension && !strcasecmp(extension, ".pdf");
     if (reader->is_pdf) {
-        bool inspected = inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL);
+        bool inspected = inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL, NULL);
         fclose(source);
         if (!inspected || !ensure_directory(STATE_DIR)) {
             set_error(reader, "无法读取 PDF 或创建文本缓存"); goto fail;
@@ -573,18 +596,22 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
             reader->file = fopen(cache,"rb");
         }
         if (!reader->scan.count && (!reader->file || !inspect_file(reader->file,&reader->text_hash,&reader->file_size,
-                                            &reader->encoding,&reader->content_start))) {
+                                            &reader->encoding,&reader->content_start, &reader->word_count))) {
             set_error(reader,"无法读取 PDF 文本缓存"); goto fail;
         }
     } else if (reader->is_epub) {
-        bool inspected = inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL);
+        bool inspected = !is_weread || inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL, NULL);
         fclose(source);
         if (!inspected) { set_error(reader, "无法读取 EPUB 文件"); goto fail; }
         if (is_weread ? !folio_weread_cache_prepare(reader->path, &reader->epub, reader->error, sizeof(reader->error)) :
                        !folio_epub_prepare(reader->path, &reader->epub, reader->error, sizeof(reader->error))) goto fail;
+        if (!is_weread) {
+            reader->source_hash = reader->epub.source_hash;
+            reader->source_size = reader->epub.source_size;
+        }
         reader->file = fopen(reader->epub.text_path, "rb");
         if (reader->file == NULL || !inspect_file(reader->file, &reader->text_hash, &reader->file_size,
-                                                &reader->encoding, &reader->content_start)) {
+                                                &reader->encoding, &reader->content_start, &reader->word_count)) {
             set_error(reader, "无法读取 EPUB 文本缓存"); goto fail;
         }
         if (reader->encoding != FOLIO_ENCODING_UTF8) { set_error(reader, "EPUB 文本编码无效"); goto fail; }
@@ -600,7 +627,7 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
         if (reader->epub.title[0]) copy_utf8(reader->title, sizeof(reader->title), reader->epub.title, strlen(reader->epub.title));
     } else {
         reader->file = source;
-        if (!inspect_file(source, &reader->source_hash, &reader->source_size, &reader->encoding, &reader->content_start)) {
+        if (!inspect_file(source, &reader->source_hash, &reader->source_size, &reader->encoding, &reader->content_start, &reader->word_count)) {
             set_error(reader, "TXT 读取失败，仅支持 UTF-8 或 GBK 编码"); goto fail;
         }
         reader->text_hash = reader->source_hash; reader->file_size = reader->source_size;
@@ -726,6 +753,11 @@ void folio_reader_draw(folio_reader_t* reader, uint8_t* framebuffer) {
             if (line->justify && i + 1 < line->count) added += base_gap + ((int)i < remainder ? 1 : 0);
         }
     }
+}
+bool folio_reader_word_count(const folio_reader_t* reader, uint32_t* count) {
+    if (!reader || !count || reader->scan.count) return false;
+    *count = reader->word_count;
+    return true;
 }
 size_t folio_reader_chapter_count(const folio_reader_t* reader) { return reader != NULL && reader->is_epub ? reader->epub.chapter_count : 0; }
 const char* folio_reader_chapter_title(const folio_reader_t* reader, size_t index) {

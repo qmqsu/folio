@@ -24,6 +24,7 @@ typedef struct {
     folio_zip_entry_t* entries;
     char* names;
     size_t count;
+    uint64_t source_hash;
     uint32_t source_crc; // Full archive CRC from folio_zip_open; zero for directory-only open.
     uint32_t source_size;
 } folio_zip_t;
