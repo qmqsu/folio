@@ -7,7 +7,7 @@ export const EXPECTED_PARTITIONS: Readonly<Record<string, readonly number[]>> = 
 });
 export const OFFICIAL_LAYOUT_SOURCE = 'https://github.com/MindReset/read_pico_firmware/blob/6a247cc94420b85c650b32a6b2c063a360070eee/partitions_16M.csv';
 export const OFFICIAL_PARTITIONS = Object.freeze(Object.fromEntries(Object.entries(EXPECTED_PARTITIONS).slice(0, 4)));
-export function validatePartitionTable(data: Uint8Array, expectedLayout = EXPECTED_PARTITIONS): void {
+function readPartitionEntries(data: Uint8Array, allowReadOnly = false): Map<string, number[]> {
   if (!data.length || data.length > 4096 || data.length % 32) throw new Error('分区表长度无效。');
   const entries = new Map<string, number[]>();
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -22,14 +22,38 @@ export function validatePartitionTable(data: Uint8Array, expectedLayout = EXPECT
       if (hasDigest || !entry.subarray(2, 16).every(b => b === 255) || !md5(data.subarray(0, at)).every((b, i) => b === entry[16 + i])) throw new Error('分区表 MD5 不符。');
       hasDigest = true; continue;
     }
-    if (hasDigest || view.getUint16(at, true) !== 0x50aa || view.getUint32(at + 28, true) !== 0) throw new Error('分区表记录无效或加密。');
-    const nameBytes = entry.subarray(12, 28), zero = nameBytes.indexOf(0);
+    const flags = view.getUint32(at + 28, true);
+    if (hasDigest || view.getUint16(at, true) !== 0x50aa || (flags !== 0 && !(allowReadOnly && flags === 2))) throw new Error('分区表记录无效或加密。');
+    const nameBytes = entry.subarray(12, 28), terminator = nameBytes.indexOf(0);
+    const zero = terminator === -1 ? 16 : terminator;
     if (zero <= 0 || nameBytes.subarray(zero).some(b => b !== 0) || nameBytes.subarray(0, zero).some(b => b > 127)) throw new Error('分区名无效。');
     const name = new TextDecoder().decode(nameBytes.subarray(0, zero));
     if (entries.has(name)) throw new Error('分区重复。');
     entries.set(name, [entry[2], entry[3], view.getUint32(at + 4, true), view.getUint32(at + 8, true)]);
   }
-  if (!hasDigest || entries.size !== Object.keys(expectedLayout).length) throw new Error('不是已支持的分区布局。');
+  if (!hasDigest) throw new Error('分区表缺少 MD5。');
+  return entries;
+}
+export function supportsReplacement(table: Uint8Array): boolean {
+  if (table.length !== 4096) return false;
+  try {
+    const entries = [...readPartitionEntries(table, true).values()].sort((a,b) => a[2] - b[2]);
+    let end = 0x9000;
+    let application = false;
+    for (const [type, , offset, size] of entries) {
+      if (offset < end || offset % 4096 || !size || size % 4096 || offset + size > 0x1000000) return false;
+      if (type === 0) {
+        if (offset % 65536) return false;
+        application = true;
+      }
+      end = offset + size;
+    }
+    return application;
+  } catch { return false; }
+}
+export function validatePartitionTable(data: Uint8Array, expectedLayout = EXPECTED_PARTITIONS): void {
+  const entries = readPartitionEntries(data);
+  if (entries.size !== Object.keys(expectedLayout).length) throw new Error('不是已支持的分区布局。');
   for (const [name, expected] of Object.entries(expectedLayout)) {
     const actual = entries.get(name);
     if (!actual || actual.some((v, i) => v !== expected[i])) throw new Error(`分区 ${name} 不符合已支持布局。`);

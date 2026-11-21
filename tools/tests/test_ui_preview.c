@@ -258,6 +258,8 @@ bool folio_transfer_start(const folio_transfer_config_t* config,char* error,size
 bool folio_transfer_stop(void){if(fail_transfer_stop)return false;mock_transfer.running=false;mock_transfer.busy=false;return true;}
 void folio_transfer_get_status(folio_transfer_status_t* out){*out=mock_transfer;}
 bool folio_transfer_forget_wifi(void){return true;}
+uint32_t esp_random(void) { static uint32_t nonce; return ++nonce; }
+bool folio_update_validate_image(const char* path, char* error, size_t cap) { (void)path; (void)error; (void)cap; return false; }
 bool folio_update_available(void){return true;}
 bool folio_update_inspect(folio_update_info_t* out,char* error,size_t cap) {
     (void)error;(void)cap;memset(out,0,sizeof(*out));snprintf(out->version,sizeof(out->version),"0.7.1-test");out->size=1024*1024;
@@ -2315,8 +2317,8 @@ int main(int argc, char** argv) {
     open_tools();tap_rect(tool_rect(4));handle_tap(540,260);handle_tap(550,384);handle_tap(140,780);handle_tap(350,608);
     assert(!s_settings.footer_hidden && !s_settings.underline && !s_settings.progress_chapter);
     handle_key(2,false);assert(s_settings_tab==0);
-    handle_tap(380, 996); assert(!s_settings.justify);
-    handle_tap(558, 996); assert(s_settings.justify);
+    handle_tap(380, 996); assert(!FOLIO_FIRST_LINE_INDENT(&s_settings));
+    handle_tap(558, 996); assert(FOLIO_FIRST_LINE_INDENT(&s_settings));
     tap_rect(done_rect()); assert(s_view == VIEW_TOOLS);
     tap_rect(done_rect()); assert(s_view == VIEW_READING); save_pgm(argv[2], "12-reflowed-reading");
     handle_key(1, true); assert(s_view == VIEW_READING && s_turns_since_full == 0);

@@ -79,6 +79,13 @@ static void test_continuation_and_eof(void) {
     folio_book_t book = write_book("continuation.txt", content, 1200);
     folio_reader_t* reader = open_book(&book);
     assert(reader->page->placements[0].x == reader->options.margin + 2 * font.height);
+    folio_reader_options_t options = reader->options;
+    options.disable_indent = true;
+    assert(folio_reader_set_options(reader, &options));
+    assert(reader->page->placements[0].x == options.margin);
+    options.disable_indent = false;
+    assert(folio_reader_set_options(reader, &options));
+    assert(reader->page->placements[0].x == options.margin + 2 * font.height);
     size_t rendered = 0;
     do {
         for (unsigned i = 0; i < reader->page->placement_count; ++i) {

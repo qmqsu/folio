@@ -169,7 +169,13 @@ class Device:
 
     # -- verbs ------------------------------------------------------------
     def status(self):
-        return self.command('STATUS')[1]
+        # ESP diagnostic output can interrupt a STATUS line during Wi-Fi I/O.
+        for attempt in range(3):
+            try:
+                return self.command('STATUS')[1]
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                if attempt == 2:
+                    raise
 
     def import_asset(self, path):
         """Import a font or wallpaper while the device is on the library screen."""

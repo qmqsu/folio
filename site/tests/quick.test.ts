@@ -78,6 +78,32 @@ describe('one-click flash (simulated device only)', () => {
     }
   });
 
+  it('backs up a foreign layout before replacing it, and honours cancellation and later changes', async () => {
+    for (const outcome of ['install', 'cancel', 'changed']) {
+      const { flash, device } = await setup('spiffs');
+      await flash.run(async backup => {
+        expect(backup.length).toBe(FLASH_SIZE);
+        expect(backup.every((byte, i) => byte === device.memory[i])).toBe(true);
+        expect(device.writes).toEqual([]);
+        if (outcome === 'changed') device.memory[0x9000] ^= 1;
+        return outcome !== 'cancel';
+      });
+      expect(flash.stage).toBe(outcome === 'install' ? 'success' : 'failed');
+      expect(device.writes.length).toBe(outcome === 'install' ? 4 : 0);
+    }
+  });
+
+  it('reconnects once before writing when the initial partition read fails', async () => {
+    const { flash, device } = await setup();
+    vi.spyOn(device, 'read').mockRejectedValueOnce(new Error('serial read failed'));
+    const second = new FakeDevice(false);
+    await flash.run(undefined, () => second);
+    expect(device.writes).toEqual([]);
+    expect(device.closed).toBe(1);
+    expect(second.writes).toEqual([0, 0x8000, 0x10000, 0x910000]);
+    expect(flash.stage).toBe('success');
+  });
+
   it('stops when the device MD5 does not match the signed image', async () => {
     const { flash, device } = await setup();
     device.corruptReadback = true;

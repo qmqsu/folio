@@ -479,6 +479,63 @@ static bool existing_cache_matches(const char* path, uint32_t length, uint32_t c
     fclose(file); return okay;
 }
 
+// Cache only fixed-size metadata; all filesystem paths are derived from the source.
+typedef struct {
+    uint32_t magic, source_crc, source_size, text_size, text_crc, count;
+    char title[FOLIO_EPUB_TITLE_CAP];
+} contents_header_t;
+
+static bool load_contents(const char* index_path, const folio_zip_t* zip, folio_epub_t* result) {
+    FILE* index = fopen(index_path, "rb");
+    if (!index) return false;
+    contents_header_t h;
+    uint32_t expected_crc;
+    bool okay = fread(&h, sizeof(h), 1, index) == 1 && h.magic == 0x31434f54 &&
+        h.source_crc == zip->source_crc && h.source_size == zip->source_size &&
+        h.count <= EPUB_TOC_LIMIT && h.text_size > 0 && h.text_size <= EPUB_TEXT_LIMIT &&
+        memchr(h.title, 0, sizeof(h.title)) != NULL;
+    folio_epub_chapter_t* chapters = NULL;
+    if (okay && h.count) {
+        chapters = folio_epub_alloc(h.count * sizeof(*chapters));
+        okay = chapters && fread(chapters, sizeof(*chapters), h.count, index) == h.count;
+    }
+    if (okay) {
+        uint32_t crc = folio_epub_crc32(0, &h, sizeof(h));
+        crc = folio_epub_crc32(crc, chapters, h.count * sizeof(*chapters));
+        okay = fread(&expected_crc, sizeof(expected_crc), 1, index) == 1 &&
+            expected_crc == crc && fgetc(index) == EOF && !ferror(index);
+    }
+    fclose(index);
+    for (size_t i = 0; okay && i < h.count; ++i) {
+        okay = chapters[i].offset < h.text_size && (!i || chapters[i].offset >= chapters[i-1].offset) &&
+            memchr(chapters[i].title, 0, sizeof(chapters[i].title)) != NULL;
+    }
+    if (!okay || !existing_cache_matches(result->text_path, h.text_size, h.text_crc)) {
+        free(chapters);
+        return false;
+    }
+    result->chapters = chapters;
+    result->chapter_count = h.count;
+    memcpy(result->title, h.title, sizeof(result->title));
+    return true;
+}
+
+static void save_contents(const char* path, const epub_context_t* book, const folio_epub_t* result) {
+    contents_header_t h = { .magic = 0x31434f54, .source_crc = book->zip.source_crc,
+        .source_size = book->zip.source_size, .text_size = book->written,
+        .text_crc = book->text_crc, .count = (uint32_t)result->chapter_count };
+    memcpy(h.title, result->title, sizeof(h.title));
+    uint32_t crc = folio_epub_crc32(0, &h, sizeof(h));
+    crc = folio_epub_crc32(crc, result->chapters, h.count * sizeof(*result->chapters));
+    // A torn index will fail its checksum and be regenerated from the EPUB.
+    FILE* index = fopen(path, "wb");
+    if (!index) return;
+    bool okay = fwrite(&h, sizeof(h), 1, index) == 1 &&
+        fwrite(result->chapters, sizeof(*result->chapters), h.count, index) == h.count &&
+        fwrite(&crc, sizeof(crc), 1, index) == 1;
+    if (fclose(index) || !okay) (void)remove(path);
+}
+
 static int chapter_compare(const void* left, const void* right) {
     const folio_epub_chapter_t* a = left;
     const folio_epub_chapter_t* b = right;
@@ -858,6 +915,15 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     if (folio_zip_find(&book->zip, "META-INF/encryption.xml") != NULL) {
         failure(book, "Encrypted or font-obfuscated EPUB is unsupported"); goto cleanup;
     }
+    uint32_t path_crc = folio_epub_crc32(0, path, strlen(path));
+    int n = snprintf(result->text_path, sizeof(result->text_path), EPUB_CACHE_ROOT "/%08lx-%08lx.txt",
+                     (unsigned long)path_crc, (unsigned long)book->zip.source_crc);
+    if (n < 0 || (size_t)n >= sizeof(result->text_path)) { failure(book, "EPUB cache path is too long"); goto cleanup; }
+    char index_path[272];
+    n = snprintf(index_path, sizeof(index_path), "%s.toc", result->text_path);
+    if (n < 0 || (size_t)n >= sizeof(index_path)) goto cleanup;
+    if (load_contents(index_path, &book->zip, result)) { okay = true; goto cleanup; }
+    if (folio_epub_cancelled()) goto cleanup;
     if (!parse_resource(book, "META-INF/container.xml", container_token, book) || !book->package_path[0]) goto cleanup;
     book->spine = folio_epub_alloc(EPUB_ITEM_LIMIT * sizeof(*book->spine));
     if (book->spine == NULL) {
@@ -888,10 +954,6 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     if (!make_directory(FOLIO_SD_ROOT "/.folio") || !make_directory(EPUB_CACHE_ROOT)) {
         failure(book, "Cannot create EPUB cache directory"); goto cleanup;
     }
-    uint32_t path_crc = folio_epub_crc32(0, path, strlen(path));
-    int n = snprintf(result->text_path, sizeof(result->text_path), EPUB_CACHE_ROOT "/%08lx-%08lx.txt",
-                     (unsigned long)path_crc, (unsigned long)book->zip.source_crc);
-    if (n < 0 || (size_t)n >= sizeof(result->text_path)) { failure(book, "EPUB cache path is too long"); goto cleanup; }
     n = snprintf(temporary, sizeof(temporary), "%s.tmp", result->text_path);
     if (n < 0 || (size_t)n >= sizeof(temporary)) goto cleanup;
     book->output = fopen(temporary, "wb");
@@ -946,7 +1008,9 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
         if (remove(result->text_path) != 0 && errno != ENOENT) { failure(book, "Cannot replace EPUB cache"); goto cleanup; }
         if (rename(temporary, result->text_path) != 0) { failure(book, "Cannot commit EPUB text cache"); goto cleanup; }
     }
-    temporary[0] = '\0'; okay = true;
+    temporary[0] = '\0';
+    save_contents(index_path, book, result);
+    okay = true;
 cleanup:
     if (book->output != NULL) fclose(book->output);
     if (temporary[0]) (void)remove(temporary);

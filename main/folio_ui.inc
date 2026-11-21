@@ -18,6 +18,7 @@ static uint8_t* fb(void) { return s_hw.framebuffer; }
 static folio_reader_options_t reader_options(void) {
     return (folio_reader_options_t){.margin=s_settings.margin, .line_gap=s_settings.line_gap,
         .paragraph_gap=s_settings.paragraph_gap, .justify=s_settings.justify != 0,
+        .disable_indent=!FOLIO_FIRST_LINE_INDENT(&s_settings),
         .hide_footer=s_settings.footer_hidden!=0, .underline=s_settings.underline, .underline_shade=s_settings.underline_shade};
 }
 static bool hit(EpdRect r, int x, int y) {
@@ -533,9 +534,9 @@ static void draw_settings(void) {
             icon((EpdRect){364,y+32,32,32},FOLIO_ICON_MINUS,values[i]>=minimum[i]+step[i]?INK:RULE);
             icon((EpdRect){572,y+32,32,32},FOLIO_ICON_PLUS,values[i]+step[i]<=maximum[i]?INK:RULE);
         }
-        label(64,baseline_for_center_y(32,"对齐",1016),280,32,INK,"对齐");
-        action((EpdRect){308,968,156,96},"左对齐",!s_settings.justify);
-        action((EpdRect){480,968,156,96},"两端",s_settings.justify);
+        label(64,baseline_for_center_y(32,"首行缩进",1016),280,32,INK,"首行缩进");
+        action((EpdRect){308,968,156,96},"关闭",!FOLIO_FIRST_LINE_INDENT(&s_settings));
+        action((EpdRect){480,968,156,96},"开启",FOLIO_FIRST_LINE_INDENT(&s_settings));
     } else if(s_settings_tab==1) {
         const char* names[]={"全刷间隔","空闲锁屏"};
         for(int i=0;i<2;++i) {

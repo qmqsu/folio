@@ -59,7 +59,32 @@ if (button && status) {
       const port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a, usbProductId: 0x1001 }] });
       const device = new BrowserSerialDevice(port, 'default_reset');
       flash = new QuickFlash(release, device, update => { say(update.message); showProgress(update); });
-      await flash.run();
+      await flash.run(async bytes => {
+        say('切换系统会覆盖原固件，原系统的字体等内部资源也可能被覆盖。请确认机身型号为 RDP-G01-W，保存完整备份后继续。');
+        const save = document.createElement('button');
+        const cancel = document.createElement('button');
+        save.textContent = '确认机型并保存备份'; cancel.textContent = '取消';
+        status.after(save, cancel);
+        save.focus();
+        try {
+          return await new Promise<boolean>((resolve, reject) => {
+            cancel.onclick = () => resolve(false);
+            save.onclick = async () => {
+              save.disabled = true; cancel.disabled = true;
+              try {
+                const picker = window as Window & { showSaveFilePicker?(options: { suggestedName: string }): Promise<FileSystemFileHandle> };
+                if (!picker.showSaveFilePicker) throw new Error("当前浏览器无法保存并校验备份，请用桌面 Chrome 或 Edge。");
+                const file = await picker.showSaveFilePicker({ suggestedName: 'folio-original-16MiB.bin' });
+                const stream = await file.createWritable();
+                await stream.write(new Uint8Array(bytes)); await stream.close();
+                const stored = new Uint8Array(await (await file.getFile()).arrayBuffer());
+                if (stored.length !== bytes.length || !bytes.every((byte,i) => byte === stored[i])) throw new Error('备份文件回读不一致。');
+                resolve(window.confirm('完整备份已保存。现在替换原系统并安装 Folio？'));
+              } catch (error) { reject(error); }
+            };
+          });
+        } finally { save.remove(); cancel.remove(); }
+      }, () => new BrowserSerialDevice(port, 'usb_reset'));
     } catch (error) {
       say(error instanceof Error ? `没开始：${error.message}` : '没开始。');
     } finally {

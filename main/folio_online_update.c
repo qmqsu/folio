@@ -32,6 +32,7 @@
 #define ONLINE_MANIFEST_BUDGET_US INT64_C(30000000)
 // Room for a slow primary attempt plus one CDN retry at that same rate.
 #define ONLINE_IMAGE_BUDGET_US INT64_C(300000000)
+#define ONLINE_SOURCE_BUDGET_US INT64_C(900000000)
 #define ONLINE_STAGE_ROOT FOLIO_SD_ROOT "/.folio/online-update"
 
 typedef enum { JOB_CHECK, JOB_DOWNLOAD, JOB_INSTALL } job_t;
@@ -425,9 +426,11 @@ static folio_online_state_t download_image(char* error, size_t cap) {
     unsigned resumes = 0, stalled = 0;
     // Each source gets its own budget: the primary used to consume the whole
     // deadline, so the CDN fallback never got a turn.
+    int64_t source_deadline = esp_timer_get_time() + ONLINE_SOURCE_BUDGET_US;
     int64_t deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
     for (;;) {
         const uint32_t resume_at = written;
+        uint32_t skip = 0;
         retryable = false;
         if (!within_budget(deadline, error, cap)) break;
         okay = http_begin(primary, mirror, use_mirror, resume_at, &status, &length, deadline, error, cap);
@@ -435,10 +438,9 @@ static folio_online_state_t download_image(char* error, size_t cap) {
         if (okay && length < -1) { error_text(error, cap, "服务器文件长度无效。"); okay = false; }
         if (okay && resume_at) {
             if (status == 200) {
-                // Range was ignored, so the body starts at zero and cannot be
-                // appended: force a clean attempt instead of corrupting the file.
-                error_text(error, cap, "更新服务器未按断点返回，正在重新下载。");
-                okay = false; retryable = true;
+                // Some mirrors return the full body. Consume its prefix without
+                // appending it twice. The signed hash covers the assembled file.
+                skip = resume_at;
             } else if (status != 206 || length < 0 || (uint64_t)length != (uint64_t)total - resume_at) {
                 error_text(error, cap, "断点续传响应与已签名清单不一致。"); okay = false;
             }
@@ -446,7 +448,7 @@ static folio_online_state_t download_image(char* error, size_t cap) {
             retryable = status >= 500 && status <= 599;
             okay = response_ok(status, error, cap);
         }
-        if (okay && !resume_at && status == 200 && length >= 0 && (uint64_t)length != total) {
+        if (okay && status == 200 && length >= 0 && (uint64_t)length != total) {
             error_text(error, cap, "服务器固件长度与已签名清单不一致。"); okay = false;
         }
         // Resolve/connect/headers finish before creating even an empty attempt.
@@ -463,7 +465,11 @@ static folio_online_state_t download_image(char* error, size_t cap) {
             }
             size_t remaining = ONLINE_WRITE_BATCH - filled;
             size_t capacity = remaining < ONLINE_CHUNK ? remaining : ONLINE_CHUNK;
+            if (skip && capacity > skip) capacity = skip;
             int n = s_transport.read(s_transport.context, batch + filled, capacity);
+            if (esp_timer_get_time() >= deadline) {
+                error_text(error, cap, "本次下载连接超时。"); okay = false; retryable = true; break;
+            }
             if (n < 0 || (size_t)n > capacity) {
                 error_text(error, cap, "固件下载中断，当前固件保留。"); okay = false; retryable = true; break;
             }
@@ -471,6 +477,10 @@ static folio_online_state_t download_image(char* error, size_t cap) {
                 okay = s_transport.complete(s_transport.context) && written + filled == total;
                 if (!okay) { error_text(error, cap, "固件下载不完整，当前固件保留。"); retryable = true; }
                 break;
+            }
+            if (skip) {
+                skip -= (uint32_t)n;
+                continue;
             }
             if ((uint32_t)n > total - (written + filled)) {
                 error_text(error, cap, "下载数据超过已签名的固件大小。"); okay = false; break;
@@ -496,9 +506,11 @@ static folio_online_state_t download_image(char* error, size_t cap) {
         if (!retryable) break;
         // Continue the same file when this attempt actually delivered bytes.
         const bool resumable = stage_exists && got > 0 && got < total &&
-            s_transport.seek && resumes < ONLINE_MAX_RESUMES && stalled == 0 && esp_timer_get_time() < deadline;
+            s_transport.seek && resumes < ONLINE_MAX_RESUMES && stalled == 0 && esp_timer_get_time() < source_deadline;
         if (resumable) {
             ++resumes;
+            deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
+            if (deadline > source_deadline) deadline = source_deadline;
             if (error && cap) *error = 0;
             continue;
         }
@@ -509,6 +521,7 @@ static folio_online_state_t download_image(char* error, size_t cap) {
         if (stage_exists && !create_stage(error, cap)) break;
         written = 0; filled = 0; use_mirror = true;
         resumes = 0; stalled = 0;
+        source_deadline = esp_timer_get_time() + ONLINE_SOURCE_BUDGET_US;
         deadline = esp_timer_get_time() + ONLINE_IMAGE_BUDGET_US;
         if (error && cap) *error = 0;
     }

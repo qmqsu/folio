@@ -105,8 +105,12 @@ def main() -> None:
         assert [label for _, label in toc] == ['第一章', '片段', '第二章']
         assert cache.read_bytes()[toc[1][0]:].startswith('片段正文'.encode())
         assert cache.read_bytes()[toc[2][0]:].startswith('完结。'.encode())
-        cache2, _, _ = run(good)
-        assert cache2 == cache
+        index = Path(str(cache) + '.toc')
+        before = index.stat().st_mtime_ns
+        assert run(good) == (cache, title, toc)
+        assert index.stat().st_mtime_ns == before
+        index.write_bytes(index.read_bytes()[:-1])
+        assert run(good) == (cache, title, toc)
         cache.write_text('damaged cache')
         repaired, _, _ = run(good)
         assert repaired is not None and repaired.read_text() == content

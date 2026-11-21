@@ -32,7 +32,8 @@ compile_ui() {
         "-DFOLIO_FONT_PACK_PATH=\"$folio_project/main/assets/folio_fonts.bin\"" \
         -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all \
         -Wall -Wextra -Werror -Wno-unused-function "$@" \
-        -Itools/tests/ui_stubs -Imain -Imain/book tools/tests/test_ui_preview.c \
+        -DFOLIO_EPUB_HOST_TEST -Itools/tests/ui_stubs -Imain -Imain/book -Imain/net -idirafter tools/tests/online_update_stubs tools/tests/test_ui_preview.c \
+        main/net/folio_upload.c main/net/folio_transfer_validate.c main/book/folio_xml.c main/book/folio_zip.c \
         main/folio_gfx.c main/folio_activity.c main/folio_storage.c main/book/folio_catalog.c main/book/folio_weread_cache.c \
         main/vendor/qrcodegen/qrcodegen.c main/book/folio_cover.c main/book/folio_wallpaper.c main/book/folio_font.c main/book/folio_reader.c \
         main/book/folio_text.c main/book/folio_gbk_table.c main/book/folio_font_pack.c "$folio_tmp/pdf/libfolio_pdf.a" -lm -lz -o "$folio_tmp/ui_preview"

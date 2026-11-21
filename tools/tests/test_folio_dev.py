@@ -38,6 +38,14 @@ class DeviceCloseTests(unittest.TestCase):
             for operation in forbidden:
                 operation.assert_not_called()
 
+    def test_status_retries_an_interleaved_diagnostic(self):
+        device = folio_dev.Device.__new__(folio_dev.Device)
+        device.command = mock.Mock(side_effect=[
+            folio_dev.json.JSONDecodeError('interleaved log', '', 0),
+            ('STATUS', {'view_name': 'HOME'})])
+        self.assertEqual(device.status()['view_name'], 'HOME')
+        self.assertEqual(device.command.call_args_list, [mock.call('STATUS')] * 2)
+
     def test_normal_close_is_idempotent(self):
         self.assert_close_once()
 

@@ -299,7 +299,7 @@ static bool build_page(folio_reader_t* reader, uint32_t offset, bool paragraph_s
     int bottom = height - (reader->options.hide_footer ? 24 : BOTTOM_MARGIN);
     int font_height = folio_font_line_height(reader->font);
     int line_height = font_height + (reader->options.underline && reader->options.line_gap<6 ? 6 : reader->options.line_gap);
-    int ascent = folio_font_ascent(reader->font), indent = folio_font_pixel_height(reader->font) * 2;
+    int ascent = folio_font_ascent(reader->font), indent = reader->options.disable_indent ? 0 : folio_font_pixel_height(reader->font) * 2;
     int baseline = TOP_MARGIN + ascent;
     if (line_height <= 0 || font_height <= 0 || right - left < indent + folio_font_pixel_height(reader->font) * 2 ||
         baseline + font_height - ascent > bottom) return false;
@@ -673,6 +673,7 @@ bool folio_reader_set_options(folio_reader_t* reader, const folio_reader_options
     if(previous.margin==options->margin && previous.line_gap==options->line_gap &&
         (previous.underline!=0 || previous.line_gap>=6)==(options->underline!=0 || options->line_gap>=6) &&
         previous.paragraph_gap==options->paragraph_gap && previous.justify==options->justify &&
+        previous.disable_indent==options->disable_indent &&
         previous.hide_footer==options->hide_footer && reader->layout_font_size==folio_font_pixel_height(reader->font))return true;
     reader->layout_font_size=folio_font_pixel_height(reader->font);
     clear_checkpoints(reader);

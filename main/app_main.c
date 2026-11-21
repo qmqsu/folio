@@ -485,7 +485,7 @@ static void change_setting(int row, int direction) {
         case 1: value = s_settings.line_gap + direction * 2; if (value >= 0 && value <= 24) s_settings.line_gap = value; break;
         case 2: value = s_settings.paragraph_gap + direction * 4; if (value >= 0 && value <= 32) s_settings.paragraph_gap = value; break;
         case 3: value = s_settings.margin + direction * 8; if (value >= 24 && value <= 80) s_settings.margin = value; break;
-        case 4: s_settings.justify = !s_settings.justify; break;
+        case 4: s_settings.reserved[0] ^= 0x80u; break;
         case 5: value = s_settings.refresh_every + direction; if (value >= 1 && value <= 32) s_settings.refresh_every = value; break;
         case 6:
             value = s_settings.idle_minutes + direction * FOLIO_IDLE_MINUTES_STEP;
@@ -925,8 +925,8 @@ static void handle_tap(int x,int y) {
                 if(hit(setting_step(i,-1),x,y)){change_setting(i,-1);return;}
                 if(hit(setting_step(i,1),x,y)){change_setting(i,1);return;}
             }
-            if(hit((EpdRect){308,968,156,96},x,y) && s_settings.justify)change_setting(4,-1);
-            else if(hit((EpdRect){480,968,156,96},x,y) && !s_settings.justify)change_setting(4,1);
+            if(hit((EpdRect){308,968,156,96},x,y) && FOLIO_FIRST_LINE_INDENT(&s_settings))change_setting(4,-1);
+            else if(hit((EpdRect){480,968,156,96},x,y) && !FOLIO_FIRST_LINE_INDENT(&s_settings))change_setting(4,1);
         } else if(s_settings_tab==1) {
             for(int i=0;i<2;++i) {
                 if(hit(setting_step(i,-1),x,y)){change_setting(5+i,-1);return;}

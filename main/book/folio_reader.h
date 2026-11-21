@@ -23,6 +23,7 @@ typedef struct {
     int line_gap;
     int paragraph_gap;
     bool justify;
+    bool disable_indent;
     bool hide_footer;
     uint8_t underline; // off / solid / dashed
     uint8_t underline_shade;

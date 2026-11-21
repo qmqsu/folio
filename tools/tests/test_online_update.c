@@ -52,6 +52,7 @@ static int response_status = 200, active_status = 200;
 static int64_t length_delta, free_bytes = 10000000;
 static int64_t read_time_delta;
 static size_t fail_read_once_at;   // one mid-body read failure at/after this offset
+static bool expire_connection_once;
 static bool ignore_range;          // server answers a ranged request with 200 + full body
 static uint32_t resume_from;       // pending Range offset requested by seek
 static uint32_t open_offsets[64];
@@ -184,6 +185,7 @@ static int transport_read(void* ctx, uint8_t* bytes, size_t capacity) {
     (void)ctx; assert(tls_live && !storage_depth && folio_online_update_busy()); ++reads;
     atomic_fetch_add(&ticks, read_time_delta);
     if (fail_read_once_at && response_offset >= fail_read_once_at) {
+        if (expire_connection_once) { atomic_fetch_add(&ticks, 301000000); expire_connection_once = false; }
         fail_read_once_at = 0;
         return -1;
     }
@@ -477,14 +479,20 @@ static void test_cdn_fallback(void) {
     assert(open_offsets[1] == 0 && open_offsets[2] > 0 && open_offsets[2] < image_size);
     assert_candidate_image(ready.candidate_path);
 
-    // A server that ignores Range must never be appended to: the downloader drops
-    // the partial and takes a clean attempt, which the SHA still verifies.
+    // A slow but productive connection may reach its deadline mid-image.
+    setup(false); check_stable_good(); fail_read_once_at = image_size / 2; expire_connection_once = true;
+    assert(folio_online_update_start_download(error,sizeof(error))); ready = wait_for(FOLIO_ONLINE_READY);
+    assert(opens == 3 && open_offsets[2] > 0 && ready.received == image_size);
+    expect_open(2, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+    assert_candidate_image(ready.candidate_path);
+
+    // An ignored Range reuses the full response and appends only the missing suffix.
     setup(false); check_stable_good(); fail_read_once_at = (size_t)(image_size / 2);
     ignore_range = true;
     assert(folio_online_update_start_download(error,sizeof(error))); ready = wait_for(FOLIO_ONLINE_READY);
-    assert(opens == 4 && ready.received == image_size);
-    assert(open_offsets[2] > 0 && open_offsets[3] == 0);
-    expect_open(3, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
+    assert(opens == 3 && ready.received == image_size);
+    assert(open_offsets[2] > 0);
+    expect_open(2, FOLIO_REMOTE_ORIGIN "firmware/0.8.32-dev.1/folio.bin");
     assert_candidate_image(ready.candidate_path);
 
     // Resuming must not launder a corrupted prefix: the signed SHA still refuses.

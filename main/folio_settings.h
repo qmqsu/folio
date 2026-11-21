@@ -8,6 +8,7 @@
 #define FOLIO_OFF_STYLE(s) (((s)->keep_page_on_lock >> 2) & 3u)
 #define FOLIO_CLOCK_12H(s) (((s)->reserved[0] & 0x10u) != 0)
 #define FOLIO_READER_FOOTER(s) (((s)->reserved[0] >> 5) & 3u)
+#define FOLIO_FIRST_LINE_INDENT(s) (((s)->reserved[0] & 0x80u) == 0)
 #define FOLIO_IDLE_MINUTES_MIN 5
 #define FOLIO_IDLE_MINUTES_MAX 30
 #define FOLIO_IDLE_MINUTES_STEP 5
