@@ -3,6 +3,7 @@
 .github/release-acceptance/0.8.38.json
 .github/release-acceptance/0.8.39.json
 .github/release-acceptance/0.8.40.json
+.github/release-acceptance/0.8.45.json
 .github/release-legal.json
 .github/release-requirements.txt
 .github/release-source-files.txt
