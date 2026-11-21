@@ -103,7 +103,7 @@ static bool validate_epub(const char* path,char* error,size_t cap) {
     }
     size_t size=0;unsigned char* data=NULL;epub_check_t check={0};
     if(ok) {data=folio_zip_read(&zip,folio_zip_find(&zip,"mimetype"),64,&size,error,cap);
-        ok=data && size==20 && !memcmp(data,"application/epub+zip",20);free(data);}
+        ok=folio_epub_valid_mime(data,size);free(data);}
     if(ok) {data=folio_zip_read(&zip,folio_zip_find(&zip,"META-INF/container.xml"),FOLIO_EPUB_XML_LIMIT,&size,error,cap);
         ok=data && folio_xml_parse((char*)data,size,container_token,&check) && check.package[0];free(data);}
     if(ok) {data=folio_zip_read(&zip,folio_zip_find(&zip,check.package),FOLIO_EPUB_XML_LIMIT,&size,error,cap);
@@ -299,7 +299,7 @@ bool folio_transfer_validate(const char* path,folio_upload_kind_t kind,char* err
     bool ok=false;
     if(kind==FOLIO_UPLOAD_EPUB)ok=validate_epub(path,error,cap);
     else if(kind==FOLIO_UPLOAD_TTF)ok=folio_font_validate_file(path);
-    else if(folio_upload_saved_only(kind))ok=saved_file(path,kind);
+    else if(kind==FOLIO_UPLOAD_PDF || folio_upload_saved_only(kind))ok=saved_file(path,kind);
     else if(kind==FOLIO_UPLOAD_FIRMWARE)ok=folio_update_validate_image(path,error,cap);
     else if(kind==FOLIO_UPLOAD_SHA256) {
         FILE* file=fopen(path,"rb");char bytes[162]={0};size_t length=file?fread(bytes,1,161,file):0;

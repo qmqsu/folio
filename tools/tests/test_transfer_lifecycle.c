@@ -195,7 +195,7 @@ int main(void){
     response_used=0;assert(status_handler(&req)==ESP_OK && strstr(response_body,"\"recent_count\":5") && strstr(response_body,"\"saved_only\":true") && !strstr(response_body,s_token));
     request_directory=NULL;request_name="wire-short.txt";request_body="he";req.content_len=5;
     assert(upload_handler(&req)==ESP_FAIL);folio_transfer_get_status(&state);assert(state.recent[0].result==FOLIO_UPLOAD_TRUNCATED);
-    request_name="saved.PDF";request_body="hello";req.content_len=5;assert(upload_handler(&req)==ESP_OK && strstr(response_body,"\"saved_only\":true") && strstr(response_body,"暂不支持阅读"));
+    request_name="saved.MOBI";request_body="hello";req.content_len=5;assert(upload_handler(&req)==ESP_OK && strstr(response_body,"\"saved_only\":true") && strstr(response_body,"暂不支持阅读"));
     validation_ok=false;
     request_name="abort.txt";request_body="hello";req.content_len=5;stop_on_receive=true;receive_calls=0;
     assert(upload_handler(&req)==ESP_FAIL && receive_calls==1 && atomic_load(&s_stopping));stop_on_receive=false;

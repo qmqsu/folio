@@ -14,7 +14,7 @@ export class QuickFlash {
   #images: Uint8Array[] = [];
   #open = false;
   #wrote = false;
-  #closed = false;
+  #closing?: Promise<void>;
 
   constructor(private release: Release, private device: SerialDevice, private emit: (update: QuickUpdate) => void,
     private download = fetchWithMirror) {
@@ -96,7 +96,12 @@ export class QuickFlash {
 
       this.#status('verifying', '全部校验通过，正在重启设备');
       await this.device.reset(signal);
-      await this.#close();
+      try {
+        await this.#close();
+      } catch {
+        this.#status('success', '四段镜像与保护区校验通过，设备已重启。浏览器未确认串口关闭，请关闭此页后再连接。');
+        return;
+      }
       this.#status('success', '四段写入与设备端 MD5 校验全部通过，NVS/PHY 和字体资源区未变。已重启，等它亮屏后再拔线。');
     } catch (error) {
       await this.#fail(error);
@@ -109,23 +114,22 @@ export class QuickFlash {
   }
 
   async #close(): Promise<void> {
-    if (!this.#open || this.#closed) return;
-    this.#closed = true;
-    await this.device.close();
-    this.#open = false;
+    if (!this.#open) return;
+    this.#closing ??= this.device.close().then(() => { this.#open = false; });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.#closing,
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('串口关闭超时')), CLOSE_TIMEOUT_MS); }),
+      ]);
+    } finally { if (timer) clearTimeout(timer); }
   }
 
   async #fail(error: unknown): Promise<void> {
     const message = error instanceof Error ? error.message : '未知错误';
     let closeNote = '';
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        this.#close(),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('串口关闭超时')), CLOSE_TIMEOUT_MS); }),
-      ]);
-    } catch { closeNote = ' 串口没关掉，关掉这个页面再重连。'; }
-    finally { if (timer) clearTimeout(timer); }
+    try { await this.#close(); }
+    catch { closeNote = ' 串口没关掉，关掉这个页面再重连。'; }
     const cancelled = this.#abort.signal.aborted;
     this.#stage = cancelled ? 'cancelled' : 'failed';
     this.emit({

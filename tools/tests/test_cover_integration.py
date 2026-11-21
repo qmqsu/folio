@@ -35,7 +35,7 @@ def main():
             '-I', str(ROOT / 'tools/tests/cover_stubs'), '-I', str(ROOT / 'main/book'),
             str(ROOT / 'tools/tests/cover_integration_runner.c'),
             *(str(ROOT / 'main/book' / name) for name in (
-                'folio_cover.c', 'folio_epub.c', 'folio_zip.c', 'folio_xml.c', 'folio_text.c', 'folio_gbk_table.c')),
+                'folio_cover.c','folio_jpeg.c', 'folio_epub.c', 'folio_zip.c', 'folio_xml.c', 'folio_text.c', 'folio_gbk_table.c')),
             '-lz', '-lm', '-o', str(binary),
         ], check=True)
 

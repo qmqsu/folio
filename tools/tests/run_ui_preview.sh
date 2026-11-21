@@ -24,6 +24,7 @@ if [ -x "$folio_toolchain/clang" ] && [ -d "$folio_sdk" ]; then folio_cc=${CC:-$
 folio_python=${FOLIO_PYTHON:-python3}
 folio_version=$("$folio_python" -c 'import pathlib,re; print(re.search(r"set\(PROJECT_VER \"([^\"]+)\"\)",pathlib.Path("CMakeLists.txt").read_text()).group(1))')
 compile_ui() {
+    sh tools/tests/build_pdf_host.sh "$folio_tmp/pdf" "$folio_cc"
     "$folio_cc" -std=c11 -D_POSIX_C_SOURCE=200809L "-DFOLIO_SD_ROOT=\"$folio_tmp/card\"" \
         "-DFOLIO_TEST_FIXTURES=\"$folio_project/tools/tests/fixtures\"" \
         "-DFOLIO_TEST_APP_VERSION=\"$folio_version\"" \
@@ -34,7 +35,7 @@ compile_ui() {
         -Itools/tests/ui_stubs -Imain -Imain/book tools/tests/test_ui_preview.c \
         main/folio_gfx.c main/folio_activity.c main/folio_storage.c main/book/folio_catalog.c main/book/folio_weread_cache.c \
         main/vendor/qrcodegen/qrcodegen.c main/book/folio_cover.c main/book/folio_wallpaper.c main/book/folio_font.c main/book/folio_reader.c \
-        main/book/folio_text.c main/book/folio_gbk_table.c main/book/folio_font_pack.c -lm -lz -o "$folio_tmp/ui_preview"
+        main/book/folio_text.c main/book/folio_gbk_table.c main/book/folio_font_pack.c "$folio_tmp/pdf/libfolio_pdf.a" -lm -lz -o "$folio_tmp/ui_preview"
 }
 if [ -x "$folio_toolchain/clang" ] && [ -d "$folio_sdk" ]; then
     compile_ui -isysroot "$folio_sdk" -B"$folio_toolchain"

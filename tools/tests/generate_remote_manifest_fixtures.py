@@ -17,9 +17,9 @@ key = ec.derive_private_key(12345, ec.SECP256R1())
 public = key.public_key().public_bytes(serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint)
 (root / 'test_release_key.h').write_text('#pragma once\n#include <stdint.h>\n#define FOLIO_RELEASE_KEY_ID "folio-release-2026-3"\nstatic const uint8_t folio_release_public_key[65] = {' + ','.join(hex(b) for b in public) + '};\n')
 version = '0.8.32-dev.1'
-image = image_builder(version)
+image = image_builder(version, payload_size=150000)
 (root / 'online.bin').write_bytes(image)
-(root / 'different.bin').write_bytes(image_builder('0.8.32-dev.2'))
+(root / 'different.bin').write_bytes(image_builder('0.8.32-dev.2', payload_size=150000))
 (root / 'bad-chip.bin').write_bytes(image[:12] + b'\x05' + image[13:])
 base = dict(schema=1, kind='ota', project='Folio', chip='esp32s3', hardware='RDP-G01-W',
             layout='folio-16m-factory-storage-ota-v2', channel='preview', version=version,

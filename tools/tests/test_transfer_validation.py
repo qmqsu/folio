@@ -61,7 +61,7 @@ def main():
         toolchain=Path('/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin');sdk=Path('/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk')
         compiler=os.environ.get('CC',str(toolchain/'clang') if (toolchain/'clang').exists() else 'cc')
         flags=['-isysroot',str(sdk),'-B'+str(toolchain)] if sdk.exists() else []
-        sources=['tools/tests/test_transfer_validation.c','main/net/folio_upload.c','main/net/folio_transfer_validate.c','main/folio_update.c']+['main/book/'+f for f in ['folio_font.c','folio_text.c','folio_gbk_table.c','folio_epub.c','folio_zip.c','folio_xml.c','folio_cover.c']]
+        sources=['tools/tests/test_transfer_validation.c','main/net/folio_upload.c','main/net/folio_transfer_validate.c','main/folio_update.c']+['main/book/'+f for f in ['folio_font.c','folio_text.c','folio_gbk_table.c','folio_epub.c','folio_zip.c','folio_xml.c','folio_cover.c','folio_jpeg.c']]
         cmd=[compiler,'-std=c11','-D_POSIX_C_SOURCE=200809L','-DFOLIO_EPUB_HOST_TEST',f'-DFOLIO_SD_ROOT="{card}"','-Wall','-Wextra','-Werror','-g','-O1','-fno-omit-frame-pointer','-fsanitize=address,undefined','-fno-sanitize-recover=all',*flags,'-Itools/tests/cover_stubs','-Itools/tests/epub_integration_stubs','-Itools/tests/update_stubs','-Itools/tests/ui_stubs','-Imain','-Imain/book','-Imain/net',*sources,'-lz','-lm','-o',str(folder/'test')]
         subprocess.run(cmd,cwd=ROOT,check=True);subprocess.run([str(folder/'test'),str(card),str(fixtures)],cwd=ROOT,check=True,timeout=60)
 if __name__=='__main__':main()

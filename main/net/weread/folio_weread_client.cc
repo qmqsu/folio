@@ -4,6 +4,7 @@
 #include "folio_weread_crypto.h"
 #include "vendor/cjson/cJSON.h"
 #include <algorithm>
+#include <unordered_map>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -300,6 +301,7 @@ HttpResponse Client::Request(const char* method, const std::string& path, const 
     if(tokens || path.rfind("/web/book/chapter/",0)==0)q.timeout_ms=60000;
     q.timeout_ms=std::min(q.timeout_ms,budget_ms);
     q.max_response = path.find("/chapter/") != std::string::npos ? (kMaxChapterBytes + 2) / 3 * 4 + 128 : kMaxChapterBytes;
+    if (path == "/web/shelf/sync") q.max_response = kMaxShelfBytes;
     auto add = [&](const char* name, const char* value) { if (!*value) return; if (!q.cookie.empty()) q.cookie += "; "; q.cookie += name; q.cookie += '='; q.cookie += value; };
     add("wr_vid", auth_.vid); add("wr_skey", auth_.skey); add("wr_gid", auth_.gid); add("wr_rt", auth_.rt);
     transport_(q, &r, cancelled_, transport_context_);
@@ -352,25 +354,82 @@ bool Client::FetchShelf(std::vector<Book>* out, Error* e) noexcept { try {
     clear(e); if (!out) return fail(e, ErrorCode::InvalidArgument, "书架参数无效"); out->clear();
     if (!LoggedIn()) return fail(e, ErrorCode::NotLoggedIn, "请先扫码登录微信读书");
     auto r = Request("GET", "/web/shelf/sync", {}, kHost, e); if (!response_ok(r, e)) return false;
-    auto j = parse(r.body); if (!j) return fail(e, ErrorCode::Malformed, "书架响应无效"); if (!server_ok(j.get(), e)) return false;
-    cJSON* books = field(j.get(), "books");
-    if (!cJSON_IsArray(books)) return fail(e, ErrorCode::Malformed, "书架列表缺失");
-    if (cJSON_GetArraySize(books) > static_cast<int>(kMaxShelfBooks)) return fail(e, ErrorCode::Limit, "书架超过 128 本，暂不支持完整显示");
-    std::vector<Book> result; result.reserve(cJSON_GetArraySize(books)); cJSON* item;
-    cJSON_ArrayForEach(item, books) {
-        Book b; b.id = string(item, "bookId", 63); b.title = string(item, "title", 512);
-        b.author = string(item, "author", 512); b.cover = string(item, "cover", 2048);
-        if (!safe_id(b.id)) return fail(e, ErrorCode::Malformed, "书架包含无效书籍编号");
-        if (std::any_of(result.begin(), result.end(), [&](const Book& old) { return old.id == b.id; })) return fail(e, ErrorCode::Malformed, "书架包含重复书籍");
-        if(b.cover.rfind("http://",0)==0)b.cover.replace(0,7,"https://");
-        else if(b.cover.rfind("//",0)==0)b.cover="https:"+b.cover;
-        if (b.cover.rfind("https://", 0) != 0 || b.cover.find_first_of("\r\n") != std::string::npos) b.cover.clear();
-        result.push_back(std::move(b));
-    }
-    cJSON_ArrayForEach(item, field(j.get(), "bookProgress")) {
-        std::string id = string(item, "bookId", 63);
-        auto it = std::find_if(result.begin(), result.end(), [&](const Book& b) { return b.id == id; });
-        if (it != result.end()) progress(item, id, &it->progress);
+    // Keep only one JSON item alive. Large shelf replies contain substantial
+    // metadata in addition to the fields displayed by the reader.
+    if (!json_shape(r.body) || r.body.find("\\u0000") != std::string::npos)
+        return fail(e, ErrorCode::Malformed, "书架响应无效");
+    const char* cur = r.body.data();
+    const char* end = cur + r.body.size();
+    auto take = [&](char ch) {
+        while (cur < end && std::isspace(static_cast<unsigned char>(*cur))) ++cur;
+        if (cur == end || *cur != ch) return false;
+        ++cur;
+        return true;
+    };
+    auto value = [&]() {
+        const char* next = nullptr;
+        Json node(cJSON_ParseWithLengthOpts(cur, end - cur, &next, false));
+        if (node) cur = next;
+        return node;
+    };
+    std::unordered_map<std::string, size_t> indexes;
+    std::vector<Book> result;
+    const char* progress_start = nullptr;
+    bool have_books = false;
+    auto malformed = [&]() { return fail(e, ErrorCode::Malformed, "书架响应无效"); };
+    if (!take('{')) return malformed();
+    do {
+        Json key = value();
+        if (!cJSON_IsString(key.get()) || !take(':')) return malformed();
+        bool books = !strcmp(key->valuestring, "books");
+        bool positions = !strcmp(key->valuestring, "bookProgress");
+        if (take('[')) {
+            if (books && have_books) return malformed();
+            if (books) have_books = true;
+            if (positions) progress_start = cur;
+            if (!take(']')) {
+                do {
+                    if (cancelled_()) return fail(e, ErrorCode::Cancelled, "请求已取消");
+                    Json item = value();
+                    if (!item) return malformed();
+                    if (!books) continue;
+                    if (result.size() >= kMaxShelfBooks) return fail(e, ErrorCode::Limit, "书架超过设备容量");
+                    Book book;
+                    book.id = string(item.get(), "bookId", 63);
+                    book.title = string(item.get(), "title", 512);
+                    book.author = string(item.get(), "author", 512);
+                    book.cover = string(item.get(), "cover", 2048);
+                    if (!safe_id(book.id) || !indexes.emplace(book.id, result.size()).second) return malformed();
+                    if (book.cover.rfind("http://",0)==0) book.cover.replace(0,7,"https://");
+                    else if (book.cover.rfind("//",0)==0) book.cover="https:"+book.cover;
+                    if (book.cover.rfind("https://", 0) != 0 || book.cover.find_first_of("\r\n") != std::string::npos)
+                        book.cover.clear();
+                    result.push_back(std::move(book));
+                } while (take(','));
+                if (!take(']')) return malformed();
+            }
+        } else {
+            Json item = value();
+            if (!item || books) return malformed();
+            if (!strcmp(key->valuestring,"errcode") || !strcmp(key->valuestring,"errCode")) {
+                if (cJSON_IsNumber(item.get()) && item->valueint)
+                    return fail(e, item->valueint == -2012 ? ErrorCode::SessionExpired : ErrorCode::Permission,
+                                item->valueint == -2012 ? "登录已过期，请重新扫码" : "服务端拒绝访问", 0, item->valueint);
+            }
+        }
+    } while (take(','));
+    if (!take('}') || !have_books) return malformed();
+    while (cur < end && std::isspace(static_cast<unsigned char>(*cur))) ++cur;
+    if (cur != end) return malformed();
+    if (progress_start) {
+        cur = progress_start;
+        if (!take(']')) do {
+            Json item = value();
+            if (!item) return malformed();
+            std::string id = string(item.get(), "bookId", 63);
+            auto it = indexes.find(id);
+            if (it != indexes.end()) progress(item.get(), id, &result[it->second].progress);
+        } while (take(','));
     }
     std::stable_sort(result.begin(), result.end(), [](const Book& a, const Book& b) { return a.progress.update_time > b.progress.update_time; });
     *out = std::move(result); return true;

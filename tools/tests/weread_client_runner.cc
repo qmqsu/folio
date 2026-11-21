@@ -70,13 +70,14 @@ int main(int argc, char** argv) {
         assert(c.FetchShelf(&shelf,&e)&&shelf[0].cover=="https://img.qpic.cn/a.jpg");
     }
     m.reset({{"shelf/sync",load(dir+"/shelf128.json")}}); assert(c.FetchShelf(&shelf,&e)&&shelf.size()==128);
-    m.reset({{"shelf/sync",load(dir+"/shelf129.json")}}); assert(!c.FetchShelf(&shelf,&e)&&e.code==ErrorCode::Limit&&shelf.empty());
+    m.reset({{"shelf/sync",load(dir+"/shelf129.json")}}); assert(c.FetchShelf(&shelf,&e)&&shelf.size()==129);
+    m.reset({{"shelf/sync",load(dir+"/shelf1024.json")}}); assert(c.FetchShelf(&shelf,&e)&&shelf.size()==1024&&shelf.back().id=="b1023");
     for (auto invalid : {"{\"books\":[{\"bookId\":\"../x\"}]}","{\"books\":[{\"bookId\":\"x\"},{\"bookId\":\"x\"}]}","{}","[]","{\"books\":[]}junk"}) {
         m.reset({{"shelf/sync",invalid}}); assert(!c.FetchShelf(&shelf,&e));
     }
     m.reset({{"shelf/sync",std::string(40,'[')+std::string(40,']')}}); assert(!c.FetchShelf(&shelf,&e));
     m.reset({{"shelf/sync","{\"books\":[{\"bookId\":\"book1\\u0000evil\"}]}"}}); assert(!c.FetchShelf(&shelf,&e));
-    m.reset({{"shelf/sync",std::string(kMaxChapterBytes+1,'x')}}); assert(!c.FetchShelf(&shelf,&e)&&e.code==ErrorCode::Limit);
+    m.reset({{"shelf/sync",std::string(kMaxShelfBytes+1,'x')}}); assert(!c.FetchShelf(&shelf,&e)&&e.code==ErrorCode::Limit);
     std::vector<Chapter> chapters;
     m.reset({{"chapterInfos",load(dir+"/chapters512.json")}}); assert(c.FetchChapters("book1",&chapters,&e)&&chapters.size()==512);
     m.reset({{"chapterInfos",load(dir+"/chapters513.json")}}); assert(!c.FetchChapters("book1",&chapters,&e)&&e.code==ErrorCode::Limit&&chapters.empty());

@@ -1,3 +1,4 @@
+#include "folio_jpeg.h"
 #include "folio_cover.h"
 #include "folio_weread_paths.h"
 #include "folio_epub.h"
@@ -273,7 +274,9 @@ static uint8_t* cover_decode_target(const uint8_t* bytes, size_t size, unsigned*
     } else {
         if (!cover_jpeg_structure(bytes, size)) return NULL;
         int w = 0, h = 0, n = 0;
-        if (!stbi_info_from_memory(bytes, (int)size, &w, &h, &n) || w <= 0 || h <= 0 || !cover_dimensions((unsigned)w, (unsigned)h)) return NULL;
+        if (!stbi_info_from_memory(bytes, (int)size, &w, &h, &n) || w <= 0 || h <= 0) return NULL;
+        if (!cover_dimensions((unsigned)w,(unsigned)h))
+            return folio_jpeg_fit(bytes,size,max_w,max_h,width,height);
         sw = (unsigned)w; sh = (unsigned)h;
         jpeg = stbi_load_from_memory(bytes, (int)size, &w, &h, &n, 1);
         if (!jpeg || w != (int)sw || h != (int)sh || cover_cancelled()) { stbi_image_free(jpeg); return NULL; }
@@ -436,7 +439,7 @@ static bool cover_rect_valid(const char* path,uint8_t* framebuffer,EpdRect rect)
     return path && *path && strlen(path)<COVER_PATH && framebuffer && rect.width>0 && rect.height>0 && rect.x>=0 && rect.y>=0 &&
         (int64_t)rect.x+rect.width<=epd_rotated_display_width() && (int64_t)rect.y+rect.height<=epd_rotated_display_height();
 }
-static void cover_paint(const cover_image_t* image,uint8_t* framebuffer,EpdRect rect);
+static void cover_paint(const cover_image_t* image,uint8_t* framebuffer,EpdRect rect,bool fill);
 bool folio_cover_draw_image(const char* path,uint8_t* framebuffer,EpdRect rect) {
     if(!cover_rect_valid(path,framebuffer,rect))return false;
     const char* extension=strrchr(path,'.');
@@ -447,7 +450,7 @@ bool folio_cover_draw_image(const char* path,uint8_t* framebuffer,EpdRect rect) 
     free(source);
     if(!pixels)return false;
     cover_image_t image={.pixels=pixels,.width=w,.height=h};
-    cover_paint(&image,framebuffer,rect);free(pixels);return true;
+    cover_paint(&image,framebuffer,rect,true);free(pixels);return true;
 }
 bool folio_cover_draw(const char* path, uint8_t* framebuffer, EpdRect rect) {
     if(!cover_rect_valid(path,framebuffer,rect))return false;
@@ -468,12 +471,12 @@ bool folio_cover_draw(const char* path, uint8_t* framebuffer, EpdRect rect) {
     cover_image_t* image = book->image;
     if (!image) return false;
     image->age = s_age;
-    cover_paint(image,framebuffer,rect);
+    cover_paint(image,framebuffer,rect,false);
     return true;
 }
-static void cover_paint(const cover_image_t* image,uint8_t* framebuffer,EpdRect rect) {
+static void cover_paint(const cover_image_t* image,uint8_t* framebuffer,EpdRect rect,bool fill) {
     unsigned w = (unsigned)rect.width, h = (unsigned)((uint64_t)image->height * w / image->width);
-    if (h > (unsigned)rect.height) { h = (unsigned)rect.height; w = (unsigned)((uint64_t)image->width * h / image->height); }
+    if (fill ? h < (unsigned)rect.height : h > (unsigned)rect.height) { h = (unsigned)rect.height; w = (unsigned)((uint64_t)image->width * h / image->height); }
     if (!w) w = 1;
     if (!h) h = 1;
     int left = rect.x + (rect.width - (int)w) / 2, top = rect.y + (rect.height - (int)h) / 2;

@@ -84,7 +84,7 @@ bool folio_upload_is_image(folio_upload_kind_t kind) {
         (kind>=FOLIO_UPLOAD_BMP && kind<=FOLIO_UPLOAD_HEIF);
 }
 bool folio_upload_saved_only(folio_upload_kind_t kind) {
-    return folio_upload_is_image(kind) || kind==FOLIO_UPLOAD_PDF || kind==FOLIO_UPLOAD_MOBI || kind==FOLIO_UPLOAD_AZW3;
+    return folio_upload_is_image(kind) || kind==FOLIO_UPLOAD_MOBI || kind==FOLIO_UPLOAD_AZW3;
 }
 const char* folio_upload_canonical_directory(const char* directory) {
     return directory && !strcmp(directory,"wallpapers")?"picture":directory;

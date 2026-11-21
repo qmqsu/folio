@@ -60,7 +60,7 @@ def main():
         flags = ['-isysroot', str(sdk), '-B'+str(toolchain)] if sdk.exists() else []
         command = [compiler, '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-g', '-O1', '-fno-omit-frame-pointer',
                    '-fsanitize=address,undefined', '-fno-sanitize-recover=all', '-Wall', '-Wextra', '-Werror',
-                   *flags, '-Itools/tests/cover_stubs', '-Imain/book', 'tools/tests/test_cover.c', '-lm', '-o', str(folder/'test-cover')]
+                   *flags, '-Itools/tests/cover_stubs', '-Imain/book', 'tools/tests/test_cover.c','main/book/folio_jpeg.c', '-lm', '-o', str(folder/'test-cover')]
         subprocess.run(command, cwd=ROOT, check=True)
         subprocess.run([str(folder/'test-cover'), str(folder)], cwd=ROOT, check=True)
 

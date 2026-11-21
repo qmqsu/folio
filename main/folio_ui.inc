@@ -317,7 +317,7 @@ static void refresh_library(void) {
     if(s_shelf_page>=pages)s_shelf_page=pages-1;
 }
 static const char* book_format(const folio_book_t* book) {
-    const char* ext=strrchr(book->path,'.'); return ext && strcasecmp(ext,".epub")==0 ? "EPUB" : "TXT";
+    const char* ext=strrchr(book->path,'.'); return ext && !strcasecmp(ext,".pdf") ? "PDF" : ext && strcasecmp(ext,".epub")==0 ? "EPUB" : "TXT";
 }
 static void cover(EpdRect r,const char* path,const char* title,const char* format,bool current) {
     (void)current; // Reading state is text beside the cover, never an image overlay.
@@ -371,7 +371,7 @@ static void draw_library(void) {
     if(!s_shelf_count) {
         icon((EpdRect){302,404,80,80},FOLIO_ICON_BOOK,INK);
         centered(342,574,588,38,INK,s_book_count?"没有符合条件的书":"从第一本书开始");
-        centered(342,638,588,26,MUTED,s_book_count?"试试更短的书名、拼音或首字母":"将 TXT 或 EPUB 放进 TF 卡的 books 目录");
+        centered(342,638,588,26,MUTED,s_book_count?"试试更短的书名、拼音或首字母":"将 TXT、EPUB 或 PDF 放进 TF 卡的 books 目录");
         text_action((EpdRect){174,704,336,96},s_book_count?"修改筛选条件":"重新扫描书架");
     }
     size_t pages=(s_shelf_count+5)/6; if(!pages)pages=1;
@@ -710,7 +710,7 @@ static void draw_lock(bool shutdown) {
     }
     if(body_drawn){}
     else if(style==0 && path && folio_cover_draw(path,fb(),(EpdRect){70,96,544,936})){}
-    else if(shutdown && style==2 && draw_selected_wallpaper((EpdRect){32,32,620,1040})){}
+    else if(shutdown && style==2 && draw_selected_wallpaper((EpdRect){0,0,width(),height()}))return;
     else if(!shutdown && style==2)draw_lock_time();
     else draw_off_default();
     EpdRect badge={48,1104,588,80};epd_fill_rect(badge,PAPER,fb());panel(badge);

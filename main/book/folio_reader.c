@@ -12,6 +12,7 @@
 #include "epdiy.h"
 #include "esp_heap_caps.h"
 #include "folio_epub.h"
+#include "folio_pdf.h"
 #include "folio_text.h"
 #include "folio_weread_cache.h"
 #include "folio_weread_paths.h"
@@ -64,7 +65,8 @@ struct folio_reader {
     FILE* file;
     folio_font_t* font;
     folio_epub_t epub;
-    bool is_epub, is_weread, ready, dirty;
+    folio_pdf_scan_t scan;
+    bool is_pdf, is_epub, is_weread, ready, dirty;
     char title[FOLIO_BOOK_TITLE_CAP], path[FOLIO_BOOK_PATH_CAP];
     char progress_path[sizeof(PROGRESS_DIR) + 32], error[128];
     uint64_t path_hash, source_hash, text_hash;
@@ -131,7 +133,7 @@ size_t folio_library_scan(folio_book_t* books, size_t capacity) {
         if (item->d_name[0] == '.') continue;
         const char* extension = strrchr(item->d_name, '.');
         if (extension == NULL || (strcasecmp(extension, ".txt") != 0 && strcasecmp(extension, ".epub") != 0 &&
-                                  strcasecmp(extension, ".wrb") != 0)) continue;
+                                  strcasecmp(extension, ".pdf") != 0 && strcasecmp(extension, ".wrb") != 0)) continue;
         folio_book_t* book = &books[count];
         memset(book, 0, sizeof(*book));
         int path_len = snprintf(book->path, sizeof(book->path), "%s/%s", BOOK_DIR, item->d_name);
@@ -396,6 +398,23 @@ static void commit_page(folio_reader_t* reader) {
     reader->dirty = true;
 }
 static bool seek_internal(folio_reader_t* reader, uint32_t target, bool by_page) {
+    if (reader->scan.count) {
+        if (target>=reader->scan.count) target=reader->scan.count-1;
+        if (target!=reader->page->number) {
+            folio_pdf_scan_t next={.count=reader->scan.count};
+            if (!folio_pdf_scan_page(reader->path,target,epd_rotated_display_width(),epd_rotated_display_height()-BOTTOM_MARGIN,&next)) {
+                set_error(reader,"无法读取这页扫描图像，请检查文件及 TF 卡"); return false;
+            }
+            free(reader->scan.pixels);
+            reader->scan=next;
+        }
+        reader->page->number=reader->page->start=target;
+        reader->page->end=target+1;
+        reader->dirty=true;
+        reader->pagination_done=true;
+        reader->pagination_pages=reader->scan.count;
+        return true;
+    }
     if (!by_page) {
         if (target < reader->content_start) target = reader->content_start;
         if (target >= reader->file_size) target = reader->file_size - 1;
@@ -522,7 +541,42 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
     bool is_weread = native_cache || (extension != NULL && strcasecmp(extension, ".wrb") == 0);
     reader->is_weread = is_weread;
     reader->is_epub = is_weread || (extension != NULL && strcasecmp(extension, ".epub") == 0);
-    if (reader->is_epub) {
+    reader->is_pdf = extension && !strcasecmp(extension, ".pdf");
+    if (reader->is_pdf) {
+        bool inspected = inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL);
+        fclose(source);
+        if (!inspected || !ensure_directory(STATE_DIR)) {
+            set_error(reader, "无法读取 PDF 或创建文本缓存"); goto fail;
+        }
+        char cache[sizeof(STATE_DIR)+48];
+        snprintf(cache, sizeof(cache), STATE_DIR "/pdf1-%08lx%08lx.txt",
+                 (unsigned long)(uint32_t)(reader->source_hash>>32), (unsigned long)(uint32_t)reader->source_hash);
+        reader->file = fopen(cache, "rb");
+        if (!reader->file && folio_pdf_scan_page(source_path,0,epd_rotated_display_width(),
+                epd_rotated_display_height()-BOTTOM_MARGIN,&reader->scan)) {
+            reader->file_size=reader->scan.count;
+            reader->text_hash=reader->source_hash;
+        } else if (!reader->file) {
+            char temp[sizeof(cache)+8];
+            snprintf(temp,sizeof(temp),"%s.XXXXXX",cache);
+            int fd = mkstemp(temp);
+            FILE *output = fd >= 0 ? fdopen(fd,"wb") : NULL;
+            if (!output) {
+                if (fd >= 0) { close(fd); unlink(temp); }
+                set_error(reader,"无法创建 PDF 文本缓存，请检查 TF 卡"); goto fail;
+            }
+            bool ok = folio_pdf_extract(source_path,output);
+            if (fclose(output) || !ok || rename(temp,cache)) {
+                unlink(temp);
+                set_error(reader,"无法读取 PDF，请检查文档加密、页面格式和 TF 卡空间"); goto fail;
+            }
+            reader->file = fopen(cache,"rb");
+        }
+        if (!reader->scan.count && (!reader->file || !inspect_file(reader->file,&reader->text_hash,&reader->file_size,
+                                            &reader->encoding,&reader->content_start))) {
+            set_error(reader,"无法读取 PDF 文本缓存"); goto fail;
+        }
+    } else if (reader->is_epub) {
         bool inspected = inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL);
         fclose(source);
         if (!inspected) { set_error(reader, "无法读取 EPUB 文件"); goto fail; }
@@ -573,6 +627,7 @@ void folio_reader_close(folio_reader_t* reader) {
     if (reader->ready) (void)folio_reader_save(reader);
     if (reader->file != NULL) fclose(reader->file);
     folio_epub_free(&reader->epub);
+    free(reader->scan.pixels);
     free(reader->chapter_pages);
     free(reader->page); free(reader->scratch); free(reader);
 }
@@ -580,6 +635,7 @@ bool folio_reader_next(folio_reader_t* reader) {
     if (reader == NULL || !reader->ready) return false;
     reader->error[0] = '\0';
     if (reader->page->end >= reader->file_size) return false;
+    if (reader->scan.count) return folio_reader_seek(reader,reader->page->end);
     if (!build_page(reader, reader->page->end, reader->page->next_paragraph, reader->page->number + 1, reader->scratch)) {
         set_error(reader, "翻页失败，请检查 TF 卡"); return false;
     }
@@ -611,6 +667,7 @@ bool folio_reader_seek_percent(folio_reader_t* reader, unsigned percent) {
 bool folio_reader_set_options(folio_reader_t* reader, const folio_reader_options_t* options) {
     if (reader == NULL || !reader->ready || !options_valid(options)) return false;
     reader->error[0] = '\0';
+    if (reader->scan.count) { reader->options=*options; return true; }
     folio_reader_options_t previous = reader->options;
     reader->options = *options;
     if(previous.margin==options->margin && previous.line_gap==options->line_gap &&
@@ -629,6 +686,15 @@ bool folio_reader_set_options(folio_reader_t* reader, const folio_reader_options
 }
 void folio_reader_draw(folio_reader_t* reader, uint8_t* framebuffer) {
     if (reader == NULL || !reader->ready || framebuffer == NULL) return;
+    if (reader->scan.pixels) {
+        const folio_pdf_scan_t *scan=&reader->scan;
+        int left=(epd_rotated_display_width()-(int)scan->width)/2;
+        int top=(epd_rotated_display_height()-BOTTOM_MARGIN-(int)scan->height)/2;
+        for (unsigned y=0;y<scan->height;++y)
+            for (unsigned x=0;x<scan->width;++x)
+                epd_draw_pixel(left+(int)x,top+(int)y,scan->pixels[(size_t)y*scan->width+x],framebuffer);
+        return;
+    }
     const page_layout_t* page = reader->page;
     if(reader->options.underline && page->rule_count) {
         int start=reader->options.margin,end=epd_rotated_display_width()-reader->options.margin;
@@ -901,6 +967,7 @@ const char* folio_reader_title(const folio_reader_t* reader) { return reader != 
 const char* folio_reader_encoding(const folio_reader_t* reader) {
     if (reader == NULL) return "";
     if (reader->is_weread) return "微信读书";
+    if (reader->is_pdf) return "PDF";
     if (reader->is_epub) return "EPUB";
     return reader->encoding == FOLIO_ENCODING_GBK ? "GBK" : "UTF-8";
 }

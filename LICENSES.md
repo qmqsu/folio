@@ -12,6 +12,7 @@
 | TrueType 栅格化库 | Sean Barrett, `stb_truetype.h` v1.26 | MIT 或 Public Domain（Unlicense），二选一 | 本项目为分配失败分支添加了防御检查；原始双许可全文保留在 `main/book/vendor/stb_truetype.h` 文件末尾，并原样提取到 `licenses/stb_truetype.txt`。 |
 | JPEG 封面解码 | [nothings/stb](https://github.com/nothings/stb)，`stb_image.h` v2.30 | MIT 或 Public Domain（Unlicense），二选一 | 固定提交 `003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5`；只启用 JPEG；保留原始双许可，防御修改记录于 `main/book/vendor/COVER-SOURCES.md`。 |
 | JPEG 大图壁纸解码 | [Espressif esp_jpeg 1.3.1](https://components.espressif.com/components/espressif/esp_jpeg/versions/1.3.1/readme) 中的 ChaN TJpgDec R0.03 | ChaN宽松许可（保留版权、无担保） | 固定提交和归档哈希见[来源记录](<main/book/vendor/tjpgd/README.md>)；核心版权条款保留在源码及[独立许可副本](<licenses/TJpgDec.txt>)。未采用Espressif整图包装器；其Apache-2.0声明仍保留。主机与设备使用同一软件C核心。 |
+| PDF 文字提取 | [PDFio](https://github.com/michaelrsweet/pdfio) 1.7.0 | Apache-2.0 | 固定提交和嵌入式适配见 `components/pdfio/UPSTREAM.md`，组件目录随附 LICENSE 和 NOTICE。 |
 | PNG 流式封面／壁纸解码 | [kikuchan/pngle](https://github.com/kikuchan/pngle) | MIT | 固定提交 `b1c68193f1d3f8642b3e0e095d457a828038e6fb`；源码、修改说明及上游校验值在 `main/book/vendor/`。 |
 | PNG 私有解压器 | pngle 上游随附 miniz v1.15 | Public Domain | 保留原始声明；私有符号加前缀，不替换 ESP32 ROM 的 ZIP 解压器。 |
 | 二维码编码 | [Project Nayuki QR Code generator v1.8.0](https://github.com/nayuki/QR-Code-generator/tree/v1.8.0/c) | MIT | 完整 C 源码与固定版本记录位于 `main/vendor/qrcodegen/`，许可位于 `licenses/qrcodegen-MIT.txt`。 |

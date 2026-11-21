@@ -33,7 +33,8 @@ typedef struct {
     bool png, legacy, exif_seen, png_done, inflate_done;
     uint64_t inflate_remaining;
     folio_wallpaper_image_t image;
-    unsigned sw, sh, dw, dh, fit_w, fit_h, left, top, next_x, next_y;
+    unsigned sw, sh, dw, dh, crop_w, crop_h, left, top, next_x, next_y;
+    bool fill;
     uint64_t* horizontal;
     uint64_t* accumulated;
     uint8_t* stripe;
@@ -445,7 +446,19 @@ static void wall_fit(wall_context_t* c, unsigned sw, unsigned sh) {
     if (h > c->image.height) { h = c->image.height; w = (unsigned)((uint64_t)ow * h / oh); }
     if (!w) w = 1;
     if (!h) h = 1;
-    c->fit_w = w; c->fit_h = h;
+    c->crop_w = sw;
+    c->crop_h = sh;
+    if (c->fill) {
+        w = c->image.width;
+        h = c->image.height;
+        unsigned tw = rotated ? h : w, th = rotated ? w : h;
+        if ((uint64_t)sw * th > (uint64_t)sh * tw)
+            c->crop_w = (unsigned)((uint64_t)sh * tw / th);
+        else
+            c->crop_h = (unsigned)((uint64_t)sw * th / tw);
+        if (!c->crop_w) c->crop_w = 1;
+        if (!c->crop_h) c->crop_h = 1;
+    }
     c->left = (c->image.width - w) / 2; c->top = (c->image.height - h) / 2;
     c->dw = rotated ? h : w; c->dh = rotated ? w : h;
     c->sw = sw; c->sh = sh;
@@ -482,20 +495,24 @@ static bool wall_reduce_pixel(wall_context_t* c, unsigned x, unsigned y, unsigne
         return wall_fail(c, "[corrupt] 解码像素顺序或尺寸无效。");
     /* Dimensions are prebounded to 8192/1216: these grid coordinates fit
      * uint32, avoiding millions of software uint64 divisions on ESP32-S3. */
+    if (++c->next_x == c->sw) { c->next_x = 0; ++c->next_y; }
+    unsigned left = (c->sw - c->crop_w) / 2, top = (c->sh - c->crop_h) / 2;
+    if (x < left || x - left >= c->crop_w || y < top || y - top >= c->crop_h) return true;
+    x -= left;
+    y -= top;
     unsigned start = x * c->dw, end = start + c->dw;
     while (start < end) {
-        unsigned dx = start / c->sw;
-        unsigned stop = (dx + 1) * c->sw;
+        unsigned dx = start / c->crop_w;
+        unsigned stop = (dx + 1) * c->crop_w;
         if (stop > end) stop = end;
         c->horizontal[dx] += gray * (stop - start); start = stop;
     }
-    if (++c->next_x != c->sw) return true;
-    c->next_x = 0; ++c->next_y;
+    if (x + 1 < c->crop_w) return true;
     start = y * c->dh; end = start + c->dh;
     while (start < end) {
-        unsigned dy = start / c->sh;
-        unsigned bottom = (dy + 1) * c->sh, stop = bottom < end ? bottom : end;
-        uint64_t weight = stop - start, divisor = (uint64_t)c->sw * c->sh;
+        unsigned dy = start / c->crop_h;
+        unsigned bottom = (dy + 1) * c->crop_h, stop = bottom < end ? bottom : end;
+        uint64_t weight = stop - start, divisor = (uint64_t)c->crop_w * c->crop_h;
         for (unsigned dx = 0; dx < c->dw; ++dx) {
             c->accumulated[dx] += c->horizontal[dx] * weight;
             if (stop == bottom) {
@@ -668,12 +685,12 @@ static bool wall_open_identity(const struct stat* named, const struct stat* open
     return S_ISREG(named->st_mode) && S_ISREG(opened->st_mode) && named->st_size == opened->st_size &&
            (!WALL_FSTAT_FULL_IDENTITY || wall_same_path_metadata(named, opened));
 }
-bool folio_wallpaper_decode_file(const char* path, unsigned target_w, unsigned target_h,
+static bool decode_wallpaper(bool fill, const char* path, unsigned target_w, unsigned target_h,
                                  folio_wallpaper_image_t* image, char* error, size_t cap) {
     if (error && cap) error[0] = 0;
     if (!image) return false;
     memset(image, 0, sizeof(*image));
-    wall_context_t c = {.orientation = 1, .started = wall_now()};
+    wall_context_t c = {.fill = fill, .orientation = 1, .started = wall_now()};
     c.yielded = c.started;
     bool okay = false;
     if (s_wall_context || !path || !*path || !target_w || !target_h || target_w > FOLIO_WALLPAPER_TARGET_MAX_W || target_h > FOLIO_WALLPAPER_TARGET_MAX_H) {
@@ -699,6 +716,11 @@ bool folio_wallpaper_decode_file(const char* path, unsigned target_w, unsigned t
     if (c.png) { if (!wall_png_header(&c)) goto done; }
     else if (signature[0] == 255 && signature[1] == 216) { if (!wall_jpeg_header(&c)) goto done; }
     else { wall_fail(&c, "[format] 只能显示PNG或JPEG；原样上传不代表支持显示。"); goto done; }
+    if (fill && target_h > target_w &&
+        (c.orientation >= 5 ? c.source_h > c.source_w : c.source_w > c.source_h)) {
+        static const unsigned clockwise[] = {6,6,7,8,5,2,3,4,1};
+        c.orientation = clockwise[c.orientation];
+    }
     c.image.width = target_w; c.image.height = target_h; c.image.stride = (target_w + 1u) / 2u;
     c.image.pixels = wall_alloc(c.image.stride * target_h);
     if (!c.image.pixels) goto done;
@@ -727,6 +749,14 @@ done:
 #endif
     s_wall_context = NULL;
     return okay;
+}
+bool folio_wallpaper_decode_file(const char* path, unsigned target_w, unsigned target_h,
+                                 folio_wallpaper_image_t* image, char* error, size_t cap) {
+    return decode_wallpaper(false, path, target_w, target_h, image, error, cap);
+}
+bool folio_wallpaper_decode_cropped(const char* path, unsigned target_w, unsigned target_h,
+                                 folio_wallpaper_image_t* image, char* error, size_t cap) {
+    return decode_wallpaper(true, path, target_w, target_h, image, error, cap);
 }
 bool folio_wallpaper_draw_image(const folio_wallpaper_image_t* image, uint8_t* framebuffer, EpdRect rect) {
     if (!image || !image->pixels || !image->width || !image->height || image->width > FOLIO_WALLPAPER_TARGET_MAX_W || image->height > FOLIO_WALLPAPER_TARGET_MAX_H ||

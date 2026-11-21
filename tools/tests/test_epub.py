@@ -114,6 +114,26 @@ def main() -> None:
         changed, _, _ = run(good)
         assert changed != cache
         run(write_book('stored.epub', compression=zipfile.ZIP_STORED))
+        legacy = folder / 'legacy-585.epub'
+        with zipfile.ZipFile(legacy, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('mimetype', 'application/epub+zip\r\n', compress_type=zipfile.ZIP_STORED)
+            archive.writestr('META-INF/container.xml', CONTAINER)
+            items, spine = [], []
+            for i in range(585):
+                items.append(f'<item id="c{i}" href="{i}.xhtml" media-type="application/xhtml+xml"/>')
+                spine.append(f'<itemref idref="c{i}"/>')
+                archive.writestr(f'OPS/{i}.xhtml', f'<html><body><h1>Chapter {i+1}</h1></body></html>')
+            archive.writestr('OPS/book.opf', '<package><manifest>' + ''.join(items) +
+                             '</manifest><spine>' + ''.join(spine) + '</spine></package>')
+        with zipfile.ZipFile(legacy) as archive:
+            central = archive.start_dir
+        raw = bytearray(legacy.read_bytes())
+        raw[6] |= 16
+        raw[central + 8] |= 16
+        legacy.write_bytes(raw)
+        _, _, chapters = run(legacy)
+        assert len(chapters) == 585 and chapters[-1][1] == 'Chapter 585'
+
         class NonSeekable(io.BytesIO):
             def seek(self, *_args: object) -> int:
                 raise io.UnsupportedOperation('stream')

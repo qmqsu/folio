@@ -43,3 +43,6 @@ void folio_zip_close(folio_zip_t* zip);
 const folio_zip_entry_t* folio_zip_find(const folio_zip_t* zip, const char* name);
 uint8_t* folio_zip_read(const folio_zip_t* zip, const folio_zip_entry_t* entry,
                         size_t limit, size_t* size, char* error, size_t cap);
+
+/* Permit the optional line ending used by older EPUB builders. */
+bool folio_epub_valid_mime(const uint8_t* data, size_t size);

@@ -106,7 +106,7 @@ def main():
     flags=['-isysroot',str(sdk),'-B'+str(toolchain)] if sdk.exists() else []
     for suffix,defines in [('',[]),('-fatfs',['-DFOLIO_WALLPAPER_TEST_FATFS=1'])]:
         binary=OUT/('test-wallpaper'+suffix)
-        command=[cc,'-std=c11','-D_POSIX_C_SOURCE=200809L',*defines,'-g','-O1','-fno-omit-frame-pointer','-fsanitize=address,undefined','-fno-sanitize-recover=all','-Wall','-Wextra','-Werror',*flags,'-Itools/tests/cover_stubs','-Imain','-Imain/book','tools/tests/test_wallpaper.c','main/book/folio_cover.c','-lm','-o',str(binary)]
+        command=[cc,'-std=c11','-D_POSIX_C_SOURCE=200809L',*defines,'-g','-O1','-fno-omit-frame-pointer','-fsanitize=address,undefined','-fno-sanitize-recover=all','-Wall','-Wextra','-Werror',*flags,'-Itools/tests/cover_stubs','-Imain','-Imain/book','tools/tests/test_wallpaper.c','main/book/folio_cover.c','main/book/folio_jpeg.c','-lm','-o',str(binary)]
         subprocess.run(command,cwd=ROOT,check=True)
         subprocess.run([str(binary),str(f)],cwd=ROOT,check=True)
 if __name__=='__main__':main()

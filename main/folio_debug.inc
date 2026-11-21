@@ -5,6 +5,9 @@
 #include "driver/usb_serial_jtag.h"
 #include "driver/usb_serial_jtag_vfs.h"
 #include "folio_debug_protocol.h"
+#include "folio_upload.h"
+#include "folio_zip.h"
+#include "esp_random.h"
 static char s_debug_line[96];
 static size_t s_debug_used;
 static bool s_debug_overflow;
@@ -118,10 +121,62 @@ static void debug_execute(const folio_debug_command_t* c) {
     s_last_activity=esp_timer_get_time();
     printf("@FOLIO %u OK\n",c->id);
 }
+// The host waits for READY before sending binary data. Credit one block at
+// a time so binary payloads never pass through the line-oriented console.
+static bool debug_import(const char *line) {
+    unsigned id, length, checksum;
+    char name[64], extra;
+    if (sscanf(line, "@FOLIO %u IMPORT %u %x %63s %c", &id, &length, &checksum, name, &extra) != 4)
+        return false;
+    folio_upload_kind_t kind;
+    size_t limit;
+    if (s_view != VIEW_LIBRARY || !s_card_ready || !folio_upload_name(name, &kind, &limit) ||
+        (kind != FOLIO_UPLOAD_TTF && kind != FOLIO_UPLOAD_PNG && kind != FOLIO_UPLOAD_JPEG) ||
+        !length || length > limit || !folio_storage_lock(1000)) {
+        printf("@FOLIO %u ERROR import_unavailable\n", id);
+        return true;
+    }
+    char nonce[33], path[FOLIO_UPLOAD_PATH_CAP], error[128] = {0};
+    snprintf(nonce, sizeof(nonce), "%08lx%08lx%08lx%08lx", (unsigned long)esp_random(),
+             (unsigned long)esp_random(), (unsigned long)esp_random(), (unsigned long)esp_random());
+    snprintf(path, sizeof(path), FOLIO_SD_ROOT "/%s/%s", folio_upload_directory(kind), name);
+    folio_upload_t *upload = NULL;
+    folio_upload_result_t result = FOLIO_UPLOAD_IO;
+    if (folio_storage_validate_parent(path, error, sizeof(error)))
+        result = folio_upload_begin(FOLIO_SD_ROOT, name, length, nonce, folio_transfer_validate, &upload);
+    uint8_t *block = malloc(4096);
+    if (!block) result = FOLIO_UPLOAD_IO;
+    uint32_t crc = 0;
+    for (unsigned offset = 0; result == FOLIO_UPLOAD_OK && offset < length;) {
+        unsigned count = length - offset;
+        if (count > 4096) count = 4096;
+        printf("@FOLIO %u READY %u %u\n", id, offset, count);
+        fflush(stdout);
+        unsigned used = 0;
+        while (used < count) {
+            int n = usb_serial_jtag_read_bytes(block + used, count - used, pdMS_TO_TICKS(3000));
+            if (n <= 0) break;
+            used += (unsigned)n;
+        }
+        if (used != count) { result = FOLIO_UPLOAD_TRUNCATED; break; }
+        crc = folio_epub_crc32(crc, block, count);
+        result = folio_upload_write(upload, block, count);
+        offset += count;
+    }
+    free(block);
+    if (result == FOLIO_UPLOAD_OK && crc != checksum) result = FOLIO_UPLOAD_INVALID;
+    if (result == FOLIO_UPLOAD_OK) result = folio_upload_finish(&upload, error, sizeof(error));
+    else folio_upload_abort(&upload);
+    folio_storage_unlock();
+    s_last_activity = esp_timer_get_time();
+    if (result == FOLIO_UPLOAD_OK) printf("@FOLIO %u OK\n", id);
+    else printf("@FOLIO %u ERROR import_%d\n", id, (int)result);
+    return true;
+}
 static void folio_debug_init(void) {
     /* IDF's nonblocking VFS input queries the driver's RX ring buffer. Without
        installing it, bytes in the hardware FIFO never become readable. */
-    usb_serial_jtag_driver_config_t config={.tx_buffer_size=4096,.rx_buffer_size=512};
+    usb_serial_jtag_driver_config_t config={.tx_buffer_size=4096,.rx_buffer_size=8192};
     if(!usb_serial_jtag_is_driver_installed() && usb_serial_jtag_driver_install(&config)!=ESP_OK){
         ESP_LOGW(TAG,"USB debug driver unavailable");return;
     }
@@ -137,6 +192,7 @@ static void folio_debug_poll(void) {
         if(ch=='\n'){
             s_debug_line[s_debug_used]=0;folio_debug_command_t command;
             if(!s_debug_overflow && folio_debug_parse(s_debug_line,&command))debug_execute(&command);
+            else if(!s_debug_overflow && debug_import(s_debug_line)){}
             else if(s_debug_used)printf("@FOLIO 0 ERROR invalid_command\n");
             s_debug_used=0;s_debug_overflow=false;
         }else if((unsigned char)ch<32 || s_debug_used+1>=sizeof(s_debug_line))s_debug_overflow=true;

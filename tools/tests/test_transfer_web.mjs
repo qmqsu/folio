@@ -57,7 +57,7 @@ const server=http.createServer(async(req,res)=>{
   if(name.includes('停止')){delay(()=>json(200,{ok:true}),2500);return;}
   store[folder].push({name,bytes:body.length});
   if(name.includes('响应丢失')){res.writeHead(200,{'Content-Type':'application/json','Content-Length':'200'});res.write('{');delay(()=>req.socket.destroy(),25);return;}
-  delay(()=>json(200,{ok:true,saved_only:/\.(pdf|mobi|azw3|png|jpg|gif|heic)$/i.test(name),message:/\.pdf$/i.test(name)?'文件已原样保存；PDF 暂不能在设备阅读。':'文件已保存。'}),name.includes('慢校验')?900:100);return;
+  delay(()=>json(200,{ok:true,saved_only:/\.(mobi|azw3|png|jpg|gif|heic)$/i.test(name),message:/\.pdf$/i.test(name)?'文字 PDF 可从书架打开。':'文件已保存。'}),name.includes('慢校验')?900:100);return;
  }
  if(url.pathname==='/api/delete'){const form=new URLSearchParams(body.toString());const name=form.get('name'),kind=form.get('kind');deletes.push({name,kind});store[kind]=store[kind].filter(f=>f.name!==name);json(200,{ok:true});return;}
  json(404,{error:'Not found'});
@@ -90,7 +90,7 @@ try{
   assert.equal(uploads.length,5);assert.equal(uploads[4].folder,'picture');assert.equal(uploads[3].folder,'books');assert.equal(uploads.every(x=>x.token===token&&x.type==='application/octet-stream'),true);
   assert.match(await page.locator('.queue-item').nth(0).innerText(),/上传失败|不会覆盖/); // longName already exists
   assert.match(await page.locator('.queue-item').nth(1).innerText(),/EPUB 校验失败/);
-  assert.match(await page.locator('.queue-item').nth(3).innerText(),/仅保存|暂不能/);
+  assert.match(await page.locator('.queue-item').nth(3).innerText(),/可从书架打开/);
   await page.locator('#queue-scroll').evaluate(e=>e.scrollTop=0);await layout('results-'+width);await screenshot('results-'+width);
   check('responsive / long names / multi-file failure continuation / validating '+width);
  }

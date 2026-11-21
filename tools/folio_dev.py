@@ -171,6 +171,46 @@ class Device:
     def status(self):
         return self.command('STATUS')[1]
 
+    def import_asset(self, path):
+        """Import a font or wallpaper while the device is on the library screen."""
+        path = Path(path)
+        name = path.name.encode('utf-8')
+        if (not name or len(name) > 63 or any(c <= 32 for c in name)
+                or path.suffix.lower() not in {'.ttf', '.png', '.jpg', '.jpeg'}):
+            raise ValueError('Use a TTF, PNG or JPEG basename without spaces (up to 63 UTF-8 bytes)')
+        length = path.stat().st_size
+        if not 0 < length <= 32 * 1024 * 1024:
+            raise ValueError('Expected 1 byte to 32 MiB')
+        data = path.read_bytes()
+        if len(data) != length:
+            raise ValueError('Source file changed while reading')
+        marker = f'@FOLIO {secrets.randbelow(999998) + 1} '.encode()
+        os.write(self.fd, marker + f'IMPORT {length} {zlib.crc32(data):08x} '.encode() + name + b'\n')
+        sent = 0
+        deadline = time.monotonic() + self.timeout
+        while time.monotonic() < deadline:
+            for kind, line in self._pump(deadline):
+                if kind != 'frame' or marker not in line:
+                    continue
+                fields = line.split(marker, 1)[1].split()
+                if fields == [b'OK'] and sent == length:
+                    return {'name': path.name, 'bytes': sent}
+                if len(fields) != 3 or fields[0] != b'READY':
+                    raise RuntimeError(line.decode('utf-8', errors='replace'))
+                offset, count = map(int, fields[1:])
+                if offset != sent or not 0 < count <= min(4096, length - offset):
+                    raise ValueError('Unexpected import offset or block length')
+                end = offset + count
+                while sent < end:
+                    if not select.select([], [self.fd], [], 3)[1]:
+                        raise TimeoutError('USB write timed out')
+                    try:
+                        sent += os.write(self.fd, data[sent:end])
+                    except BlockingIOError:
+                        continue
+                deadline = time.monotonic() + (max(300, self.timeout) if sent == length else self.timeout)
+        raise TimeoutError(f'No import acknowledgement after {sent} bytes')
+
     def screen(self, path=None):
         _, packed = self.command('SCREEN', timeout=max(self.timeout, 60))
         target = Path(path) if path else Path('artifacts/live') / f'screen-{stamp()}.png'
@@ -350,6 +390,8 @@ def main():
     subs.add_parser('status')
     shot = subs.add_parser('shot')
     shot.add_argument('output', nargs='?')
+    asset = subs.add_parser('import-asset', help='debug builds only: import a font or wallpaper from LIBRARY')
+    asset.add_argument('path')
     tap = subs.add_parser('tap')
     tap.add_argument('x', type=int)
     tap.add_argument('y', type=int)
@@ -390,6 +432,8 @@ def main():
         elif args.command == 'shot':
             path = device.screen(args.output)
             print(json.dumps({'image': str(path), 'width': 684, 'height': 1216}))
+        elif args.command == 'import-asset':
+            print(json.dumps(device.import_asset(args.path), ensure_ascii=False))
         elif args.command == 'tap':
             print(json.dumps(device.tap(args.x, args.y)))
         elif args.command == 'key':

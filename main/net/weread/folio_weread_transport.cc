@@ -121,7 +121,7 @@ void EspTransport(const HttpRequest& q, HttpResponse* r, CancelCheck cancelled, 
         if (q.url.rfind(kHost, 0) != 0 || q.url.find_first_of("\r\n") != std::string::npos ||
             (!q.referer.empty() && q.referer != "https://weread.qq.com" && q.referer.rfind(kHost, 0) != 0) ||
             (q.method != "GET" && q.method != "POST") || q.body.size() > 8192 || q.cookie.size() > 2200 ||
-            q.max_response > 768 * 1024 || !q.timeout_ms || q.timeout_ms > 60000) {
+            q.max_response > (q.url == "https://weread.qq.com/web/shelf/sync" ? kMaxShelfBytes : 768u * 1024u) || !q.timeout_ms || q.timeout_ms > 60000) {
             r->failure = ErrorCode::InvalidArgument; return;
         }
         const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(q.timeout_ms) * 1000;

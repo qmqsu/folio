@@ -119,6 +119,20 @@ describe('ECDSA envelope and strict USB contract', () => {
     expect(calls).toEqual([primary, mirror]);
     expect(mirror).toContain('testingcf.jsdelivr.net/gh/qmqsu/folio@folio-release-assets/');
   });
+  it('tries the mirror on a stalled connection and bounds both attempts', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn((_url, { signal }) => new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason));
+      }));
+      vi.stubGlobal('fetch', fetch);
+      const url = 'https://qmqsu.github.io/folio/channels/stable-usb.json';
+      const result = expect(fetchWithMirror(url, 4096)).rejects.toThrow('下载超时');
+      await vi.advanceTimersByTimeAsync(60000);
+      await result;
+      expect(fetch.mock.calls.map(call => call[0])).toEqual([url, mirrorUrl(url)]);
+    } finally { vi.useRealTimers(); }
+  });
   it('does not mirror an unpublished 404 or an arbitrary origin', async () => {
     const primary = 'https://qmqsu.github.io/folio/channels/stable-usb.json';
     const calls: string[] = [];

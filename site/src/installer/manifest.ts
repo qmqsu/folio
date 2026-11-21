@@ -111,12 +111,30 @@ export function mirrorUrl(url: string): string | undefined {
   return `${MIRROR_ORIGIN}/${url.slice(`${ORIGIN}/folio/`.length)}`;
 }
 export async function fetchWithMirror(url: string, maximum: number, signal?: AbortSignal, progress?: (bytes: number) => void): Promise<Uint8Array> {
+  async function download(source: string): Promise<Uint8Array> {
+    const controller = new AbortController();
+    const cancel = () => controller.abort(signal?.reason);
+    signal?.throwIfAborted();
+    signal?.addEventListener('abort', cancel, { once: true });
+    const timeout = () => controller.abort(new TypeError('下载超时，请检查网络后重试。'));
+    let timer = setTimeout(timeout, 30000);
+    try {
+      return await fetchBounded(source, maximum, controller.signal, bytes => {
+        clearTimeout(timer);
+        timer = setTimeout(timeout, 30000);
+        progress?.(bytes);
+      });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+    }
+  }
   try {
-    return await fetchBounded(url, maximum, signal, progress);
+    return await download(url);
   } catch (error) {
     const mirror = mirrorUrl(url);
     if (!mirror || signal?.aborted || !(error instanceof TypeError) || (error instanceof Error && error.message.includes('未发布'))) throw error;
-    return fetchBounded(mirror, maximum, signal, progress);
+    return download(mirror);
   }
 }
 export async function fetchRelease(channel: 'preview' | 'stable', signal?: AbortSignal): Promise<Release> {

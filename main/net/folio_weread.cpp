@@ -37,7 +37,7 @@ using namespace folio::weread;
  * content retains its independent checksums and is verified when opened. */
 #define SHELF_MAGIC 0x31464c53u
 #define SHELF_FILE FOLIO_SD_ROOT "/.folio/weread/shelf.bin"
-#define SHELF_LIMIT 128
+
 struct StorageLock {
     bool held=folio_storage_lock(2000);
     ~StorageLock(){if(held)folio_storage_unlock();}
@@ -56,7 +56,7 @@ static bool shelf_load(std::vector<Book>* out) {
     StorageLock lock;uint8_t owner[32];if(!lock.held || !owner_digest(owner))return false;
     FILE* f=fopen(SHELF_FILE,"rb");if(!f)return false;
     shelf_header_t h{};bool okay=fread(&h,sizeof(h),1,f)==1 && h.magic==SHELF_MAGIC &&
-        h.version==2 && h.count<=SHELF_LIMIT && !memcmp(h.owner,owner,sizeof(owner));
+        h.version==2 && h.count<=kMaxShelfBooks && !memcmp(h.owner,owner,sizeof(owner));
     uint32_t expected=h.checksum;h.checksum=0;
     uint32_t sum=shelf_checksum(2166136261u,&h,sizeof(h));
     std::vector<Book> cached;
@@ -74,7 +74,7 @@ static bool shelf_load(std::vector<Book>* out) {
 }
 static void shelf_save(const std::vector<Book>& list) {
     StorageLock lock;shelf_header_t h{SHELF_MAGIC,2,0,0,{}};
-    if(!lock.held || !owner_digest(h.owner) || list.size()>SHELF_LIMIT)return;
+    if(!lock.held || !owner_digest(h.owner) || list.size()>kMaxShelfBooks)return;
     mkdir(FOLIO_SD_ROOT "/.folio",0777);mkdir(FOLIO_SD_ROOT "/.folio/weread",0777);
     FILE* f=fopen(SHELF_FILE ".tmp","wb");if(!f)return;
     h.count=(uint32_t)list.size();uint32_t sum=shelf_checksum(2166136261u,&h,sizeof(h));

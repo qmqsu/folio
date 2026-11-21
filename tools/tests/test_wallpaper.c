@@ -134,6 +134,18 @@ static void directions(void) {
         }
         folio_wallpaper_image_free(&image);
     }
+    for (unsigned orientation = 1; orientation <= 8; orientation++) {
+        char name[64], path[1400], error[256];
+        snprintf(name, sizeof(name), "exif-%u.jpg", orientation);
+        path_for(name, path, sizeof(path));
+        folio_wallpaper_image_t image = {0};
+        assert(folio_wallpaper_decode_cropped(path, 68, 122, &image, error, sizeof(error)));
+        static const unsigned corners[8][4] = {{10,0,15,5},{15,5,10,0},{5,15,0,10},{0,10,5,15},
+                                                {0,10,5,15},{10,0,15,5},{15,5,10,0},{5,15,0,10}};
+        for (unsigned i = 0; i < 4; i++)
+            assert(get_pixel(&image, i & 1 ? 60 : 7, i & 2 ? 114 : 7) == corners[orientation-1][i]);
+        folio_wallpaper_image_free(&image);
+    }
     folio_wallpaper_image_t big={0}, little={0};char error[256];
     assert(decode("exif-6.jpg",80,120,&big,error));assert(decode("exif-little.jpg",80,120,&little,error));
     assert(big.stride==little.stride && !memcmp(big.pixels,little.pixels,big.stride*big.height));

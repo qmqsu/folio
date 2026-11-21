@@ -64,6 +64,16 @@ static void reset(bool mounted) {
     if (mounted) { live_card = card = new_card(); cached_info.mounted = true; }
 }
 int main(void) {
+    read_pico_sd_info_t snapshot;
+    const esp_err_t errors[] = {ESP_FAIL, ESP_ERR_NO_MEM, ESP_ERR_TIMEOUT, ESP_ERR_INVALID_STATE};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(errors[0]); ++i) {
+        reset(false);
+        mount_status = errors[i];
+        probe_task(NULL);
+        assert(read_pico_sd_get_info(&snapshot) == mount_status);
+        assert(snapshot.present && !snapshot.mounted && snapshot.needs_format == (mount_status == ESP_FAIL));
+        assert(formats == 0);
+    }
     reset(true); assert(read_pico_sd_format() == ESP_OK);
     assert(formats == 1 && mounts == 0 && directories == 3 && cached_info.mounted);
     reset(false); assert(read_pico_sd_format() == ESP_OK);
@@ -83,6 +93,6 @@ int main(void) {
     reset(true); info_status = ESP_FAIL;
     assert(read_pico_sd_format() == ESP_FAIL && !cached_info.mounted && directories == 0);
     reset(false);
-    puts("SD format: 9 mocked driver states passed; no physical media operations");
+    puts("SD format: 13 mocked driver states passed; no physical media operations");
     return 0;
 }

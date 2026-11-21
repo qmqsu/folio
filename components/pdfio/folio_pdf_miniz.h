@@ -1,0 +1,40 @@
+#pragma once
+#define FOLIO_PDF_ZLIB
+#define mz_compress folio_pdf_mz_compress
+#define mz_compress2 folio_pdf_mz_compress2
+#define mz_compressBound folio_pdf_mz_compressBound
+#define mz_deflate folio_pdf_mz_deflate
+#define mz_deflateBound folio_pdf_mz_deflateBound
+#define mz_deflateEnd folio_pdf_mz_deflateEnd
+#define mz_deflateInit folio_pdf_mz_deflateInit
+#define mz_deflateInit2 folio_pdf_mz_deflateInit2
+#define mz_deflateReset folio_pdf_mz_deflateReset
+#define mz_error folio_pdf_mz_error
+#define mz_inflate folio_pdf_mz_inflate
+#define mz_inflateEnd folio_pdf_mz_inflateEnd
+#define mz_inflateInit folio_pdf_mz_inflateInit
+#define mz_inflateInit2 folio_pdf_mz_inflateInit2
+#define mz_uncompress folio_pdf_mz_uncompress
+#define mz_version folio_pdf_mz_version
+#define tdefl_compress folio_pdf_tdefl_compress
+#define tdefl_compress_buffer folio_pdf_tdefl_compress_buffer
+#define tdefl_compress_mem_to_heap folio_pdf_tdefl_compress_mem_to_heap
+#define tdefl_compress_mem_to_mem folio_pdf_tdefl_compress_mem_to_mem
+#define tdefl_compress_mem_to_output folio_pdf_tdefl_compress_mem_to_output
+#define tdefl_create_comp_flags_from_zip_params folio_pdf_tdefl_create_comp_flags_from_zip_params
+#define tdefl_get_adler32 folio_pdf_tdefl_get_adler32
+#define tdefl_get_prev_return_status folio_pdf_tdefl_get_prev_return_status
+#define tdefl_init folio_pdf_tdefl_init
+#define tdefl_write_image_to_png_file_in_memory folio_pdf_tdefl_write_image_to_png_file_in_memory
+#define tdefl_write_image_to_png_file_in_memory_ex folio_pdf_tdefl_write_image_to_png_file_in_memory_ex
+#define mz_crc32 folio_pdf_mz_crc32
+#define mz_adler32 folio_pdf_mz_adler32
+#define mz_free folio_pdf_mz_free
+#define tinfl_decompress folio_pdf_tinfl_decompress
+#define tinfl_decompress_mem_to_heap folio_pdf_tinfl_to_heap
+#define tinfl_decompress_mem_to_mem folio_pdf_tinfl_to_mem
+#define tinfl_decompress_mem_to_callback folio_pdf_tinfl_to_callback
+#ifndef FOLIO_PDF_ZLIB_IMPLEMENTATION
+#define MINIZ_HEADER_FILE_ONLY
+#endif
+#include "../../main/book/vendor/pngle/miniz.c"

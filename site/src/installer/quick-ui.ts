@@ -14,7 +14,7 @@ if (button && status) {
   let flash: QuickFlash | undefined;
 
   const say = (text: string): void => { status.textContent = text; };
-  const sync = (): void => { button.disabled = busy || !release || !support.supported; };
+  const sync = (): void => { button.disabled = busy || !!flash?.connected || !release || !support.supported; };
   const showProgress = (update: QuickUpdate): void => {
     if (!progress) return;
     if (update.total) {

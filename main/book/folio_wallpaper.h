@@ -18,6 +18,8 @@ typedef struct {
 
 bool folio_wallpaper_decode_file(const char* path, unsigned target_w, unsigned target_h,
                                  folio_wallpaper_image_t* image, char* error, size_t cap);
+bool folio_wallpaper_decode_cropped(const char* path, unsigned target_w, unsigned target_h,
+                                 folio_wallpaper_image_t* image, char* error, size_t cap);
 /* Frees only images returned by decode_file (private tracked allocation).
  * Externally loaded packed canvases may be drawn, but retain their own allocator. */
 void folio_wallpaper_image_free(folio_wallpaper_image_t* image);

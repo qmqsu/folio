@@ -179,7 +179,9 @@
 #define MINIZ_NO_ARCHIVE_WRITING_APIS
 
 // Define MINIZ_NO_ZLIB_APIS to remove all ZLIB-style compression/decompression API's.
+#ifndef FOLIO_PDF_ZLIB
 #define MINIZ_NO_ZLIB_APIS
+#endif
 
 // Define MINIZ_NO_ZLIB_COMPATIBLE_NAME to disable zlib names, to prevent conflicts against stock zlib.
 //#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
@@ -191,7 +193,9 @@
 //#define MINIZ_NO_MALLOC
 
 // 
+#ifndef FOLIO_PDF_ZLIB
 #define MINIZ_NO_COMPRESSION
+#endif
 
 
 #if defined(__TINYC__) && (defined(__linux) || defined(__linux__))

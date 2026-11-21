@@ -177,7 +177,7 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
         entry->flags = le16(c + 8); entry->method = le16(c + 10);
         entry->crc = le32(c + 16); entry->compressed = le32(c + 20);
         entry->size = le32(c + 24); entry->local_offset = le32(c + 42);
-        if ((entry->flags & ~0x080Eu) != 0 || (entry->method != 0 && entry->method != 8) ||
+        if ((entry->flags & ~0x081Eu) != 0 || (entry->method != 0 && entry->method != 8) ||
             (entry->method == 0 && entry->compressed != entry->size) ||
             entry->compressed > ZIP_MAX_MEMBER || entry->size > ZIP_MAX_MEMBER ||
             entry->local_offset > central_offset || central_offset - entry->local_offset < 30 ||
@@ -360,4 +360,10 @@ uint8_t* folio_zip_read(const folio_zip_t* zip, const folio_zip_entry_t* entry,
     output[entry->size] = '\0';
     if (size != NULL) *size = entry->size;
     return output;
+}
+
+bool folio_epub_valid_mime(const uint8_t* data, size_t size) {
+    return data && (size == 20 || (size == 21 && data[20] == '\n') ||
+        (size == 22 && data[20] == '\r' && data[21] == '\n')) &&
+        !memcmp(data,"application/epub+zip",20);
 }

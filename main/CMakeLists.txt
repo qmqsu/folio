@@ -28,6 +28,8 @@ idf_component_register(
         "book/folio_cover.c"
         "book/folio_wallpaper.c"
         "book/folio_reader.c"
+        "book/folio_pdf.c"
+        "book/folio_jpeg.c"
         "book/folio_epub.c"
         "book/folio_zip.c"
         "book/folio_xml.c"
@@ -36,6 +38,7 @@ idf_component_register(
     EMBED_FILES "assets/folio_builtin.deflate"
     INCLUDE_DIRS "." "book" "net"
     REQUIRES
+        pdfio
         read_pico
         epdiy
         e0470_epaper_waveform

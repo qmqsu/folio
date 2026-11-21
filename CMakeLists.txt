@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-set(PROJECT_VER "0.8.40")
+set(PROJECT_VER "0.8.42")
 include("${CMAKE_CURRENT_LIST_DIR}/tools/folio_release_version.cmake")
 folio_release_sequence("${PROJECT_VER}" FOLIO_RELEASE_SEQUENCE)
 file(WRITE "${CMAKE_BINARY_DIR}/folio-release-version.json"

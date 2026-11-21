@@ -213,6 +213,7 @@ static int transport_read(void* ctx, uint8_t* bytes, size_t capacity) {
         if (extra_byte && response_offset == response_size) { *bytes = 0; ++response_offset; return 1; }
         return 0;
     }
+    if (response_image && response_offset == 0 && capacity > 3000) capacity = 3000;
     size_t count = response_size - response_offset, offset = response_offset; if (count > capacity) count = capacity;
     memcpy(bytes, response + offset, count); response_offset += count;
     if (response_image && !response_mirror && corrupt_primary_prefix && offset == 0) bytes[0] ^= 1;
@@ -449,7 +450,7 @@ static void test_cdn_fallback(void) {
 
     setup(false); select_manifest("wrong-channel"); read_time_delta = 31000000;
     assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED);
-    assert(opens == 1); // The shared deadline expired before any CDN attempt.
+    assert(opens == 2); // Both the primary and mirror timed out independently.
 
     setup(false); fail_open_primary_once = cancel_open = true; select_manifest("wrong-channel");
     assert(folio_online_update_start_check("stable",error,sizeof(error))); wait_for(FOLIO_ONLINE_CANCELLED);
@@ -535,7 +536,15 @@ static void test_check_failures(void) {
     assert(!folio_online_update_start_check("beta",error,sizeof(error)) && *error);
     assert(!folio_online_update_start_download(error,sizeof(error)) && !folio_online_update_start_install(error,sizeof(error)));
     setup(false); response_status = 404; assert(folio_online_update_start_check("preview",error,sizeof(error))); wait_for(FOLIO_ONLINE_NO_RELEASE);
-    const char* invalid[] = {"bad-signature","foreign-key","wrong-chip","wrong-layout","duplicate-schema","equal-sequence","older-sequence","oversize-envelope"};
+    const char* up_to_date[] = {"equal-sequence", "older-sequence"};
+    for (size_t i = 0; i < 2; ++i) {
+        setup(false); select_manifest(up_to_date[i]);
+        assert(folio_online_update_start_check("preview", error, sizeof(error)));
+        wait_for(FOLIO_ONLINE_NO_RELEASE);
+        assert(!folio_online_update_start_download(error, sizeof(error)));
+        assert(!folio_online_update_start_install(error, sizeof(error)));
+    }
+    const char* invalid[] = {"bad-signature","foreign-key","wrong-chip","wrong-layout","duplicate-schema","oversize-envelope"};
     for (unsigned i=0;i<sizeof(invalid)/sizeof(invalid[0]);++i) {
         setup(false); select_manifest(invalid[i]); assert(folio_online_update_start_check("preview",error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED); assert(!begins && !boots);
     }
@@ -591,7 +600,7 @@ static void test_download_failures(void) {
         assert(folio_online_update_start_download(error,sizeof(error))); wait_for(FOLIO_ONLINE_FAILED); assert(!begins && !boots);
         // Transport failures now resume first (i=0, i=8) and only fall back to a
         // clean CDN attempt when the partial cannot be continued (i=9, i=12).
-        static const unsigned expected_opens[15] = {5, 2, 2, 2, 2, 2, 2, 2, 5, 3, 2, 2, 3, 2, 2};
+        static const unsigned expected_opens[15] = {5, 2, 2, 2, 2, 2, 2, 2, 5, 3, 3, 2, 3, 2, 2};
         assert(opens == expected_opens[i]); // Anything else never retries or writes another slot.
     }
     const char* signed_bad[]={"wrong-hash","signed-bad-chip-image","signed-wrong-version-image"};

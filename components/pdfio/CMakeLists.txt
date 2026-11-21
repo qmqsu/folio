@@ -1,0 +1,21 @@
+idf_component_register(SRCS
+    "folio_pdf_miniz.c"
+    "pdfio-aes.c"
+    "pdfio-array.c"
+    "pdfio-common.c"
+    "pdfio-crypto.c"
+    "pdfio-dict.c"
+    "pdfio-file.c"
+    "pdfio-lzw.c"
+    "pdfio-md5.c"
+    "pdfio-object.c"
+    "pdfio-page.c"
+    "pdfio-rc4.c"
+    "pdfio-sha256.c"
+    "pdfio-stream.c"
+    "pdfio-string.c"
+    "pdfio-token.c"
+    "pdfio-value.c"
+    INCLUDE_DIRS "."
+)
+target_compile_options(${COMPONENT_LIB} PRIVATE -Wno-format -Wno-error=type-limits -Wno-error=cast-function-type -Wno-error=implicit-fallthrough -Wno-error=misleading-indentation -Wno-error=unused-function)

@@ -172,7 +172,7 @@ static void refresh_setup(void);
 static void setup_time_received(bool saved);
 static bool card_needs_format(void) {
     read_pico_sd_info_t info={0};
-    return read_pico_sd_get_info(&info)==ESP_OK && info.present && info.needs_format;
+    return read_pico_sd_get_info(&info) == ESP_FAIL && info.present && info.needs_format;
 }
 static void catalog_select(void) {
     s_catalog_options.search=s_search;
@@ -329,6 +329,24 @@ static bool wait_card_ready(read_pico_sd_info_t* info) {
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
+static void migrate_wallpaper_size(void) {
+    if (FOLIO_OFF_STYLE(&s_settings) != 2 || !folio_storage_lock(500)) return;
+    uint8_t *cached = NULL;
+    unsigned w = 0, h = 0;
+    bool old_size = folio_storage_wallpaper_cache_load(&cached, &w, &h) &&
+                    (w != 684 || h != 1216);
+    free(cached);
+    char path[256], error[128];
+    folio_wallpaper_image_t image = {0};
+    if (old_size && folio_storage_wallpaper_load(path, sizeof(path)) &&
+        folio_storage_validate_parent(path, error, sizeof(error)) &&
+        folio_wallpaper_decode_cropped(path, 684, 1216, &image, error, sizeof(error))) {
+        (void)folio_storage_wallpaper_save_prepared(path, image.pixels, image.width, image.height,
+                                                    error, sizeof(error));
+    }
+    folio_wallpaper_image_free(&image);
+    folio_storage_unlock();
+}
 static void load_card(bool remount, bool resume) {
     if(!stop_transfer())return;
     if(folio_power_shutdown_pending()){emergency_shutdown();return;}
@@ -347,6 +365,7 @@ static void load_card(bool remount, bool resume) {
     s_book_count=s_shelf_count=0;
     s_activity_save_failed = s_activity_load_failed = false;
     if (s_card_ready) {
+        migrate_wallpaper_size();
         char wallpaper_error[128];
         if(!folio_storage_prepare_wallpapers(wallpaper_error,sizeof(wallpaper_error)))
             ESP_LOGW(TAG,"picture directory preparation: %s",wallpaper_error);
@@ -357,6 +376,7 @@ static void load_card(bool remount, bool resume) {
     // Internal resources and NVS preferences do not depend on a mounted TF card.
     // Recovery must never rewrite a remembered choice merely because loading fails.
     load_system_font();
+
     s_view = VIEW_HOME;
     if (s_font != NULL && s_card_ready) {
         refresh_library();
@@ -716,7 +736,7 @@ static void select_wallpaper(const char* path) {
         return;
     }
     bool ready = folio_storage_validate_parent(path, error, sizeof(error)) &&
-        folio_wallpaper_decode_file(path, 620, 1040, &image, error, sizeof(error));
+        folio_wallpaper_decode_cropped(path, 684, 1216, &image, error, sizeof(error));
     bool saved = ready && folio_storage_wallpaper_save_prepared(path, image.pixels,
         image.width, image.height, error, sizeof(error));
     folio_wallpaper_image_free(&image);

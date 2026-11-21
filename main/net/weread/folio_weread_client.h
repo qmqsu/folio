@@ -8,7 +8,8 @@
 
 namespace folio::weread {
 constexpr size_t kMaxChapterBytes = 512 * 1024;
-constexpr size_t kMaxShelfBooks = 128;
+constexpr size_t kMaxShelfBooks = 4096;
+constexpr size_t kMaxShelfBytes = 2 * 1024 * 1024;
 constexpr size_t kMaxChapters = 512;
 
 enum class ErrorCode : uint8_t {

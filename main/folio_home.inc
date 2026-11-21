@@ -68,7 +68,7 @@ static void home_day_label(int32_t day,char* text,size_t capacity) {
 
 static const char* home_book_format(const folio_recent_book_t* book) {
     const char* ext=strrchr(book->path,'.');
-    return ext && strcasecmp(ext,".epub")==0?"EPUB":"TXT";
+    return ext && !strcasecmp(ext,".pdf") ? "PDF" : ext && strcasecmp(ext,".epub")==0?"EPUB":"TXT";
 }
 
 static bool home_book_available(const folio_recent_book_t* book) {

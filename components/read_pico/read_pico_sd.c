@@ -58,11 +58,7 @@ static void fill_info(read_pico_sd_info_t* info, esp_err_t mount_err) {
     memset(info, 0, sizeof(*info));
     info->present = read_pico_sd_present();
     info->error = mount_err;
-    info->needs_format = info->present && !info->mounted
-        && mount_err != ESP_OK
-        && mount_err != ESP_ERR_TIMEOUT
-        && mount_err != ESP_ERR_NOT_FOUND
-        && mount_err != ESP_ERR_NOT_FINISHED;
+    info->needs_format = info->present && mount_err == ESP_FAIL;
     if (mount_err != ESP_OK || card == NULL) return;
 
     info->mounted = true;

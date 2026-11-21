@@ -44,7 +44,7 @@ def main():
         subprocess.run([cc, *flags, '-std=c11', '-Wno-deprecated-declarations', '-DCJSON_NESTING_LIMIT=32', '-c', str(SOURCE/'vendor/cjson/cJSON.c'), '-o', str(path/'json.o')], check=True)
         subprocess.run([cc+'++', *flags, '-std=c++17', '-Wno-deprecated-declarations', '-Wno-missing-field-initializers', '-DFOLIO_WEREAD_HOST_TEST', '-DFOLIO_WEREAD_TEST_CLOCK', '-I', str(SOURCE),
             str(ROOT/'tools/tests/weread_client_runner.cc'), *(str(SOURCE/n) for n in ['folio_weread_client.cc','folio_weread_crypto.cc','folio_weread_transport.cc']), str(path/'json.o'), '-o', str(path/'runner')], check=True)
-        for n in (128, 129):
+        for n in (128, 129, 1024):
             (path/f'shelf{n}.json').write_text(json.dumps({'books':[{'bookId':f'b{i}','title':f'Title {i}'} for i in range(n)]}))
         for n in (512, 513):
             (path/f'chapters{n}.json').write_text(json.dumps({'data':[{'bookId':'book1','updated':[{'chapterUid':f'c{i}','chapterIdx':i,'title':f'Chapter {i}'} for i in range(n)]}]}))

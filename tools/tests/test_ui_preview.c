@@ -46,7 +46,7 @@ bool folio_power_rtc_time(uint32_t* utc);
 #define folio_reader_open_with_options preview_reader_open
 #define folio_reader_save preview_reader_save
 #define folio_reader_seek preview_reader_seek
-#define folio_wallpaper_decode_file preview_wallpaper_decode
+#define folio_wallpaper_decode_cropped preview_wallpaper_decode
 #define folio_storage_wallpaper_cache_load preview_wallpaper_cache_load
 #define folio_wallpaper_draw_image preview_wallpaper_draw
 #define folio_cover_draw_image preview_legacy_wallpaper_draw
@@ -54,7 +54,7 @@ bool folio_power_rtc_time(uint32_t* utc);
 #undef folio_cover_draw_image
 #undef folio_wallpaper_draw_image
 #undef folio_storage_wallpaper_cache_load
-#undef folio_wallpaper_decode_file
+#undef folio_wallpaper_decode_cropped
 #undef folio_reader_seek
 #undef folio_reader_save
 #undef folio_reader_open_with_options
@@ -114,7 +114,7 @@ static void inject_wallpaper_shutdown(void) {
 static bool preview_wallpaper_decode(const char* path, unsigned width, unsigned height,
     folio_wallpaper_image_t* image, char* error, size_t cap) {
     ++wallpaper_decodes;
-    return folio_wallpaper_decode_file(path, width, height, image, error, cap);
+    return folio_wallpaper_decode_cropped(path, width, height, image, error, cap);
 }
 static bool preview_wallpaper_cache_load(uint8_t** pixels, unsigned* width, unsigned* height) {
     assert(!inside_wallpaper_cache); inside_wallpaper_cache = true; ++wallpaper_cache_reads;
@@ -334,7 +334,8 @@ esp_err_t read_pico_sd_get_info(read_pico_sd_info_t* info) {
         --card_probe_reads;info->mounted=false;info->error=ESP_ERR_NOT_FINISHED;
         return ESP_ERR_NOT_FINISHED;
     }
-    return ESP_OK;
+    info->error = mock_card_unformatted ? ESP_FAIL : ESP_OK;
+    return info->error;
 }
 esp_err_t read_pico_sd_remount(void) {
     ++card_remount_calls;mock_card_unmounted=false;return ESP_OK;
@@ -906,8 +907,8 @@ static void test_lock_personalization(const char* directory) {
     // Compare with the actual named legacy source instead, retaining all pixels
     // outside its rectangle (including the original shutdown badge).
     memcpy(wallpaper,screen,sizeof(screen));
-    epd_fill_rect((EpdRect){32,32,620,1040},PAPER,fb());
-    assert(folio_cover_draw_image(second,fb(),(EpdRect){32,32,620,1040}));
+    epd_fill_rect((EpdRect){0,0,684,1216},PAPER,fb());
+    assert(folio_cover_draw_image(second,fb(),(EpdRect){0,0,684,1216}));
     assert(!memcmp(wallpaper,screen,sizeof(screen)));
     assert(unlink(second) == 0); draw_lock(true);
     assert(!memcmp(fallback,screen,sizeof(screen)));
@@ -1013,8 +1014,8 @@ static unsigned wallpaper_active_slot(void) {
 static uint8_t* wallpaper_assert_cache(const uint8_t* expected) {
     uint8_t* pixels = NULL; unsigned width = 0, height = 0;
     assert(folio_storage_wallpaper_cache_load(&pixels, &width, &height));
-    assert(pixels && width == 620 && height == 1040);
-    if (expected) assert(!memcmp(pixels, expected, 310u * 1040u));
+    assert(pixels && width == 684 && height == 1216);
+    if (expected) assert(!memcmp(pixels, expected, 342u * 1216u));
     return pixels;
 }
 static void wallpaper_assert_selected(const char* expected, const folio_settings_t* settings) {
@@ -1097,9 +1098,9 @@ static void test_large_wallpaper_integration(const char* directory) {
     assert(!memcmp(&persisted_settings, &selected_settings, sizeof(selected_settings)));
     uint8_t* cached = wallpaper_assert_cache(NULL);
     assert(memcmp(fallback, screen, sizeof(screen))); memcpy(rendered, screen, sizeof(screen));
-    for (unsigned y = 0; y < 1040; ++y) for (unsigned x = 0; x < 620; ++x) {
-        uint8_t packed = cached[(size_t)y*310+x/2];
-        assert(screen[(size_t)(y+32)*SCREEN_W+x+32] == ((x&1) ? (packed&15) : (packed>>4))*17);
+    for (unsigned y = 0; y < 1216; ++y) for (unsigned x = 0; x < 684; ++x) {
+        uint8_t packed = cached[(size_t)y*342+x/2];
+        assert(screen[(size_t)y*SCREEN_W+x] == ((x&1) ? (packed&15) : (packed>>4))*17);
     }
     save_pgm(directory, "181-wallpaper-large-preview");
     decodes = wallpaper_decodes;
@@ -1155,7 +1156,7 @@ static void test_large_wallpaper_integration(const char* directory) {
     assert(strstr(s_error, "壁纸已选择，关机样式尚未保存") && settings_writes == writes+1);
     wallpaper_assert_selected(candidate, &old_settings);
     assert(!memcmp(&persisted_settings, &old_settings, sizeof(old_settings)));
-    uint8_t* partial = wallpaper_assert_cache(NULL); assert(memcmp(partial, cached, 310u*1040u)); free(partial);
+    uint8_t* partial = wallpaper_assert_cache(NULL); assert(memcmp(partial, cached, 342u*1216u)); free(partial);
     save_pgm(directory, "185-wallpaper-nvs-failure-sd-selected-style-unchanged");
     assert(folio_settings_save(&s_settings));
     assert(!memcmp(&persisted_settings, &old_settings, sizeof(old_settings))); // Later saves cannot leak style 2.

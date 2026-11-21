@@ -281,7 +281,6 @@ static folio_online_state_t check_manifest(char* error, size_t cap) {
     bool okay = false, retryable = false, use_mirror = false;
     size_t used = 0; uint8_t buffer[512];
     for (;;) {
-        if (use_mirror && !within_budget(deadline, error, cap)) { okay = false; break; }
         used = 0; retryable = false;
         okay = http_begin(primary, mirror, use_mirror, 0, &status, &length, deadline, error, cap);
         if (!okay) retryable = true;
@@ -298,7 +297,11 @@ static folio_online_state_t check_manifest(char* error, size_t cap) {
             error_text(error, cap, "发布清单大小无效或超过 4096 字节。"); okay = false;
         }
         while (okay) {
-            if (!within_budget(deadline, error, cap)) { okay = false; break; }
+            if (!within_budget(deadline, error, cap)) {
+                okay = false;
+                retryable = esp_timer_get_time() > deadline;
+                break;
+            }
             int n = s_transport.read(s_transport.context, buffer, sizeof(buffer));
             if (n < 0 || (size_t)n > sizeof(buffer)) {
                 error_text(error, cap, "发布清单下载中断。"); okay = false; retryable = true; break;
@@ -314,19 +317,26 @@ static folio_online_state_t check_manifest(char* error, size_t cap) {
             memcpy(s_work.envelope + used, buffer, (size_t)n); used += (size_t)n;
         }
         if (okay) break;
-        // One exact CDN retry shares the operation's original total deadline.
+        // Give the mirror its own bounded attempt after a primary timeout.
         if (!retryable || use_mirror || !can_mirror || cancelled(NULL)) break;
         close_connection();
         if (cancelled(NULL)) break;
         use_mirror = true;
+        deadline = esp_timer_get_time() + ONLINE_MANIFEST_BUDGET_US;
         if (error && cap) *error = 0;
     }
     close_connection();
     if (okay && !within_budget(deadline, error, cap)) okay = false;
     s_work.envelope_size = okay ? used : 0;
     // Signature/JSON validation is deliberately outside the retry loop.
-    if (okay) okay = verify_manifest(&s_work.manifest, error, cap);
-    if (!okay) return FOLIO_ONLINE_FAILED;
+    if (!okay || !folio_remote_manifest_verify(s_work.envelope, used, s_work.channel,
+        0, &s_work.manifest, error, cap)) return FOLIO_ONLINE_FAILED;
+    if (s_work.manifest.sequence <= FOLIO_RELEASE_SEQUENCE) {
+        memset(&s_work.manifest, 0, sizeof(s_work.manifest));
+        s_work.envelope_size = 0;
+        error_text(error, cap, "当前通道没有更高版本。");
+        return FOLIO_ONLINE_NO_RELEASE;
+    }
     portENTER_CRITICAL(&s_mux);
     s_snapshot.sequence = s_work.manifest.sequence;
     snprintf(s_snapshot.version, sizeof(s_snapshot.version), "%s", s_work.manifest.image.version);
@@ -403,12 +413,9 @@ static folio_online_state_t download_image(char* error, size_t cap) {
     char mirror[192];
     bool can_mirror = folio_remote_cdn_url(primary, s_work.manifest.image.version, mirror, sizeof(mirror));
     int status; int64_t length;
-    // One network chunk plus one card batch. Buffering here is what keeps a
-    // slow card from setting the download speed.
-    uint8_t* buffer = malloc(ONLINE_CHUNK);
+    // Read directly into the remaining space in the card write batch.
     uint8_t* batch = malloc(ONLINE_WRITE_BATCH);
-    if (!buffer || !batch) {
-        free(buffer); free(batch);
+    if (!batch) {
         error_text(error, cap, "下载缓冲内存不足。"); memset(&s_work.preview, 0, sizeof(s_work.preview));
         return FOLIO_ONLINE_FAILED;
     }
@@ -449,9 +456,15 @@ static folio_online_state_t download_image(char* error, size_t cap) {
             stage_exists = okay;
         }
         while (okay) {
-            if (!within_budget(deadline, error, cap)) { okay = false; break; }
-            int n = s_transport.read(s_transport.context, buffer, ONLINE_CHUNK);
-            if (n < 0 || n > (int)ONLINE_CHUNK) {
+            if (!within_budget(deadline, error, cap)) {
+                okay = false;
+                retryable = esp_timer_get_time() > deadline;
+                break;
+            }
+            size_t remaining = ONLINE_WRITE_BATCH - filled;
+            size_t capacity = remaining < ONLINE_CHUNK ? remaining : ONLINE_CHUNK;
+            int n = s_transport.read(s_transport.context, batch + filled, capacity);
+            if (n < 0 || (size_t)n > capacity) {
                 error_text(error, cap, "固件下载中断，当前固件保留。"); okay = false; retryable = true; break;
             }
             if (!n) {
@@ -462,7 +475,6 @@ static folio_online_state_t download_image(char* error, size_t cap) {
             if ((uint32_t)n > total - (written + filled)) {
                 error_text(error, cap, "下载数据超过已签名的固件大小。"); okay = false; break;
             }
-            memcpy(batch + filled, buffer, (size_t)n);
             filled += (uint32_t)n;
             if (filled == ONLINE_WRITE_BATCH) {
                 if (!stage_write(batch, filled, written, false, error, cap)) { okay = false; break; }
@@ -484,7 +496,7 @@ static folio_online_state_t download_image(char* error, size_t cap) {
         if (!retryable) break;
         // Continue the same file when this attempt actually delivered bytes.
         const bool resumable = stage_exists && got > 0 && got < total &&
-            s_transport.seek && resumes < ONLINE_MAX_RESUMES && stalled == 0;
+            s_transport.seek && resumes < ONLINE_MAX_RESUMES && stalled == 0 && esp_timer_get_time() < deadline;
         if (resumable) {
             ++resumes;
             if (error && cap) *error = 0;
@@ -506,7 +518,7 @@ static folio_online_state_t download_image(char* error, size_t cap) {
         okay = stage_write(batch, filled, written, false, error, cap);
         written += filled; filled = 0;
     }
-    free(buffer); free(batch);
+    free(batch);
     if (okay && !stage_write(NULL, 0, written, true, error, cap)) okay = false;
     if (okay && !within_budget(deadline, error, cap)) okay = false;
     // SHA256 and ESP image validation never trigger another network attempt.

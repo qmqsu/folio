@@ -126,6 +126,15 @@ describe('one-click flash (simulated device only)', () => {
     expect(device.writes).toEqual([]);
   });
 
+  it('reports verified installation when closing after reset stalls', async () => {
+    const { flash, device, updates } = await setup();
+    vi.spyOn(device, 'close').mockImplementation(() => new Promise<void>(() => {}));
+    await flash.run();
+    expect(device.resets).toBe(1);
+    expect(flash.stage).toBe('success');
+    expect(updates.at(-1)?.message).toContain('关闭此页');
+  }, 10000);
+
   it('reports a connection failure even when the browser close never settles', async () => {
     const { flash, device, updates } = await setup();
     vi.spyOn(device, 'connect').mockRejectedValue(new Error('连接设备超时'));

@@ -408,7 +408,7 @@ static folio_storage_category_t category(const char* path) {
     // Publication pointers are books and derived indexes are caches. Time
     // ledgers (.wrt.*), settings and history remain non-rebuildable "other".
     if(!strcmp(relative,"/.folio/catalog.a") || !strcmp(relative,"/.folio/catalog.b"))return FOLIO_STORAGE_CACHE;
-    if (suffix(path, ".epub") || suffix(path, ".txt") || suffix(path,".wrb")) return FOLIO_STORAGE_BOOK;
+    if (suffix(path, ".pdf") || suffix(path, ".epub") || suffix(path, ".txt") || suffix(path,".wrb")) return FOLIO_STORAGE_BOOK;
     if (suffix(path, ".ttf") || suffix(path, ".otf") || suffix(path, ".ttc")) return FOLIO_STORAGE_FONT;
     return FOLIO_STORAGE_OTHER;
 }
@@ -460,7 +460,7 @@ static bool visible_record(const record_t* record,const inventory_t* inventory) 
     for(size_t i=1;i<inventory->count;++i){
         const char* path=inventory->records[i].path;
         if(!inventory->records[i].directory && strlen(path)>stem && !strncmp(path,record->path,stem) &&
-            (!strcasecmp(path+stem,".txt") || !strcasecmp(path+stem,".epub") || !strcasecmp(path+stem,".wrb")))return false;
+            (!strcasecmp(path+stem,".pdf") || !strcasecmp(path+stem,".txt") || !strcasecmp(path+stem,".epub") || !strcasecmp(path+stem,".wrb")))return false;
     }
     return true;
 }

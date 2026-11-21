@@ -76,6 +76,7 @@ def main() -> None:
             z.writestr('book.opf', '<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>真实集成</dc:title></metadata><manifest>' + manifest + '</manifest><spine>' + spine + '</spine></package>')
             for i in range(3):
                 z.writestr(f'c{i}.xhtml', f'<html><body><h1>章节{i + 1}</h1>' + f'<p>{PARAGRAPH * 5}</p>' * 100 + '</body></html>')
+        subprocess.run(['sh', str(ROOT/'tools/tests/build_pdf_host.sh'), str(folder/'pdf'), compiler], check=True)
         binary = folder / 'integration'
         subprocess.run([
             compiler, *platform_args, '-std=c11', '-D_POSIX_C_SOURCE=200809L', '-DFOLIO_EPUB_HOST_TEST',
@@ -86,7 +87,7 @@ def main() -> None:
             str(ROOT / 'tools/tests/test_epub_integration.c'),
             *(str(ROOT / 'main/book' / name) for name in ('folio_font.c', 'folio_text.c', 'folio_gbk_table.c', 'folio_epub.c', 'folio_zip.c', 'folio_xml.c', 'folio_weread_cache.c')),
             str(ROOT / 'main/folio_storage.c'),
-            '-pthread', '-lz', '-lm', '-o', str(binary),
+            str(folder/'pdf/libfolio_pdf.a'), '-pthread', '-lz', '-lm', '-o', str(binary),
         ], check=True)
         subprocess.run([str(binary), str(epub), str(font_path)], check=True, timeout=60)
 

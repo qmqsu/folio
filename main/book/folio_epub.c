@@ -12,8 +12,8 @@
 #define FOLIO_SD_ROOT "/sdcard"
 #endif
 #define EPUB_CACHE_ROOT FOLIO_SD_ROOT "/.folio/cache"
-#define EPUB_ITEM_LIMIT 256
-#define EPUB_TOC_LIMIT 512
+#define EPUB_ITEM_LIMIT 2048
+#define EPUB_TOC_LIMIT 2048
 #define EPUB_TEXT_LIMIT (32u * 1024u * 1024u)
 #define EPUB_ID_CAP 96
 #define EPUB_FRAGMENT_CAP 128
@@ -71,7 +71,7 @@ static bool make_directory(const char* path) {
 }
 static bool reserve_items(epub_context_t* context) {
     if (context->item_count < context->item_capacity) return true;
-    if (context->item_count == EPUB_ITEM_LIMIT) return failure(context, "EPUB manifest exceeds 256 items");
+    if (context->item_count == EPUB_ITEM_LIMIT) return failure(context, "EPUB manifest exceeds 2048 items");
     size_t capacity = context->item_capacity ? context->item_capacity * 2 : 16;
     manifest_item_t* items = folio_epub_alloc(capacity * sizeof(*items));
     if (items == NULL) return failure(context, "Not enough memory for EPUB manifest");
@@ -82,7 +82,7 @@ static bool reserve_items(epub_context_t* context) {
 }
 static bool reserve_navigation(epub_context_t* context) {
     if (context->nav_count < context->nav_capacity) return true;
-    if (context->nav_count == EPUB_TOC_LIMIT) return failure(context, "EPUB table of contents exceeds 512 entries");
+    if (context->nav_count == EPUB_TOC_LIMIT) return failure(context, "EPUB table of contents exceeds 2048 entries");
     size_t capacity = context->nav_capacity ? context->nav_capacity * 2 : 16;
     navigation_item_t* items = folio_epub_alloc(capacity * sizeof(*items));
     if (items == NULL) return failure(context, "Not enough memory for EPUB contents");
@@ -237,7 +237,7 @@ static bool package_token(void* userdata, const folio_xml_token_t* token) {
             char id[EPUB_ID_CAP], linear[16];
             if (!folio_xml_attr(token, "idref", id, sizeof(id))) return failure(context, "Invalid EPUB spine reference");
             if (folio_xml_attr(token, "linear", linear, sizeof(linear)) && strcmp(linear, "no") == 0) return true;
-            if (context->spine_count == EPUB_ITEM_LIMIT) return failure(context, "EPUB spine exceeds 256 chapters");
+            if (context->spine_count == EPUB_ITEM_LIMIT) return failure(context, "EPUB spine exceeds 2048 chapters");
             size_t index;
             for (index = 0; index < context->item_count; ++index) if (strcmp(context->items[index].id, id) == 0) break;
             if (index == context->item_count || !context->items[index].html) return failure(context, "EPUB spine contains unsupported content");
@@ -557,11 +557,11 @@ bool folio_epub_metadata(const char* path, char* title, size_t title_cap,
         .title_cap = title_cap, .author_cap = author_cap, .metadata_depth = -1, .value_depth = -1 };
     if (!folio_zip_open_directory(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
     const folio_zip_entry_t* entry = folio_zip_find(&book->zip, "mimetype");
-    if (!entry || entry->method != 0 || entry->size != 20) { failure(book, "Missing EPUB mimetype"); goto cleanup; }
+    if (!entry || entry->method != 0 || entry->size > 22) { failure(book, "Missing EPUB mimetype"); goto cleanup; }
     size_t mime_size;
-    uint8_t* mime = folio_zip_read(&book->zip, entry, 20, &mime_size, book->message, sizeof(book->message));
+    uint8_t* mime = folio_zip_read(&book->zip, entry, 22, &mime_size, book->message, sizeof(book->message));
     if (!mime) goto cleanup;
-    bool valid_mime = mime_size == 20 && !memcmp(mime, "application/epub+zip", 20);
+    bool valid_mime = folio_epub_valid_mime(mime, mime_size);
     free(mime);
     if (!valid_mime) { failure(book, "Invalid EPUB mimetype"); goto cleanup; }
     if (!parse_resource(book, "META-INF/container.xml", container_token, book)) goto cleanup;
@@ -759,13 +759,13 @@ bool folio_epub_cover(const char* path, uint8_t** data, size_t* size, char* erro
     cover_package_t parser = {.book = book, .manifest_depth = -1, .metadata_depth = -1, .guide_depth = -1};
     if (!folio_zip_open_directory(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
     const folio_zip_entry_t* mime_entry = folio_zip_find(&book->zip, "mimetype");
-    if (mime_entry == NULL || mime_entry->method != 0 || mime_entry->size != 20) {
+    if (mime_entry == NULL || mime_entry->method != 0 || mime_entry->size > 22) {
         failure(book, "Missing EPUB mimetype"); goto cleanup;
     }
     size_t mime_size;
-    uint8_t* mime = folio_zip_read(&book->zip, mime_entry, 20, &mime_size, book->message, sizeof(book->message));
+    uint8_t* mime = folio_zip_read(&book->zip, mime_entry, 22, &mime_size, book->message, sizeof(book->message));
     if (mime == NULL) goto cleanup;
-    bool valid_mime = mime_size == 20 && memcmp(mime, "application/epub+zip", 20) == 0;
+    bool valid_mime = folio_epub_valid_mime(mime, mime_size);
     free(mime);
     if (!valid_mime) { failure(book, "Invalid EPUB mimetype"); goto cleanup; }
     if (folio_zip_find(&book->zip, "META-INF/encryption.xml") != NULL) {
@@ -846,13 +846,13 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     bool okay = false;
     if (!folio_zip_open(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
     const folio_zip_entry_t* mimetype = folio_zip_find(&book->zip, "mimetype");
-    if (mimetype == NULL || mimetype->method != 0 || mimetype->size != 20) {
+    if (mimetype == NULL || mimetype->method != 0 || mimetype->size > 22) {
         failure(book, "Missing EPUB mimetype"); goto cleanup;
     }
     size_t mimetype_size;
-    uint8_t* mime = folio_zip_read(&book->zip, mimetype, 20, &mimetype_size, book->message, sizeof(book->message));
+    uint8_t* mime = folio_zip_read(&book->zip, mimetype, 22, &mimetype_size, book->message, sizeof(book->message));
     if (mime == NULL) goto cleanup;
-    bool valid_mime = mimetype_size == 20 && memcmp(mime, "application/epub+zip", 20) == 0;
+    bool valid_mime = folio_epub_valid_mime(mime, mimetype_size);
     free(mime);
     if (!valid_mime) { failure(book, "Invalid EPUB mimetype"); goto cleanup; }
     if (folio_zip_find(&book->zip, "META-INF/encryption.xml") != NULL) {
