@@ -124,6 +124,7 @@ def validate_acceptance(raw, provenance):
     if "kind" in record:
         candidates = [
             {"version": WAIVER_VERSION, "source_commit": WAIVER_COMMIT, "app_sha256": WAIVER_APP_SHA256},
+            {"version": "0.8.46", "source_commit": "c26ad619651dc85e25856c35b7754c6b11c1b0a6", "app_sha256": "09547ffb7702a8c8b56603a8143e9fbe637aebaf8d4103617e4b49094e986139"},
             {"version": WAIVER_0840_VERSION, "source_commit": WAIVER_0840_COMMIT, "app_sha256": WAIVER_0840_APP_SHA256},
         ]
         identity = next((candidate for candidate in candidates if all(provenance.get(k) == v for k, v in candidate.items())), None)
