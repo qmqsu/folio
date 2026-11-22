@@ -35,7 +35,7 @@ describe('one-click flash (simulated device only)', () => {
     await flash.run();
     expect(flash.stage).toBe('success');
     expect(device.writes).toEqual([0, 0x8000, 0x10000, 0x910000]);
-    expect(seen.slice(0, 2)).toEqual([0x9000, 0x410000]);
+    expect(seen.slice(0, 3)).toEqual([0x8000, 0x9000, 0x410000]);
     expect(seen.filter(offset => offset === 0x9000)).toHaveLength(2);
     expect(seen.filter(offset => offset === 0x410000)).toHaveLength(2);
     for (const offset of [0, 0x8000, 0x10000, 0x910000]) expect(seen).toContain(offset);
@@ -95,6 +95,7 @@ describe('one-click flash (simulated device only)', () => {
 
   it('reconnects once before writing when the initial partition read fails', async () => {
     const { flash, device } = await setup();
+    device.memory[0x8fff] = 0;
     vi.spyOn(device, 'read').mockRejectedValueOnce(new Error('serial read failed'));
     const second = new FakeDevice(false);
     await flash.run(undefined, () => second);
@@ -112,15 +113,36 @@ describe('one-click flash (simulated device only)', () => {
     expect(device.closed).toBe(1);
   });
 
-  it('only downloads the 4 KiB partition table, never a full backup', async () => {
+  it('reads the whole sector and stops if its padding is not erased', async () => {
     const { flash, device } = await setup();
+    device.memory[0x8fff] = 0;
     const reads: number[] = [];
     device.onRead = (_offset, size) => reads.push(size);
     await flash.run();
-    expect(flash.stage).toBe('success');
+    expect(flash.stage).toBe('failed');
     expect(reads).toEqual([4096]);
     expect(reads).not.toContain(FLASH_SIZE);
-    expect(device.writes).toEqual([0, 0x8000, 0x10000, 0x910000]);
+    expect(device.writes).toEqual([]);
+  });
+
+  it('recognises a byte-identical signed partition sector without streaming it', async () => {
+    const { flash, device, release, download } = await setup();
+    const part = release.parts.find(part => part.offset === 0x8000)!;
+    device.memory.fill(0xff, 0x8000, 0x9000);
+    device.memory.set(await download(part.url, part.size), 0x8000);
+    const read = vi.spyOn(device, 'read');
+    await flash.run();
+    expect(read).not.toHaveBeenCalled();
+    expect(flash.stage).toBe('success');
+  });
+
+  it('identifies a partition timeout after successful chip detection', async () => {
+    const { flash, device, updates } = await setup();
+    device.memory[0x8fff] = 0;
+    vi.spyOn(device, 'read').mockRejectedValue(new Error('No serial data received'));
+    await flash.run();
+    expect(updates.at(-1)?.message).toContain('检查分区表');
+    expect(device.writes).toEqual([]);
   });
 
   it('detects a protected-region MD5 change', async () => {
@@ -174,7 +196,7 @@ describe('one-click flash (simulated device only)', () => {
 
   it('cancels, closes the port and never reports success', async () => {
     const { flash, device } = await setup();
-    device.onRead = () => { void flash.cancel(); };
+    device.onMd5 = () => { void flash.cancel(); };
     await flash.run();
     expect(flash.stage).toBe('cancelled');
     expect(device.closed).toBeGreaterThanOrEqual(1);

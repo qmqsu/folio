@@ -5,7 +5,7 @@ import { fetchBounded } from '../src/installer/manifest';
 
 function protocol(bytes: Uint8Array, options: { digest?: Uint8Array; split?: number; extra?: boolean; splitDigest?: boolean } = {}) {
   const frames: Uint8Array[] = [];
-  const step = options.split && options.split > 0 ? options.split : 512;
+  const step = options.split && options.split > 0 ? options.split : (bytes.length <= 4096 ? 64 : 512);
   for (let i = 0; i < bytes.length; i += step) frames.push(bytes.slice(i, i + step));
   if (options.extra) frames[0] = new Uint8Array(frames[0].length + 1);
   const digest = options.digest ?? md5(bytes);
@@ -26,6 +26,12 @@ describe('stub serial read protocol (no actual serial port)', () => {
     expect(output).toEqual(bytes); expect(p.frames).toEqual([]); expect(progress).toEqual(p.acknowledgements);
     expect(p.acknowledgements).toEqual(Array.from({ length: 18 }, (_, index) => Math.min(512 * (index + 1), 9000)));
     const view = new DataView(p.requests[0].buffer); expect([0, 4, 8, 12].map(n => view.getUint32(n, true))).toEqual([0, 9000, 512, 1]);
+  });
+  it('reads a partition sector in 64-byte packets', async () => {
+    const bytes = new Uint8Array(4096).fill(0xff), p = protocol(bytes);
+    expect(await readStubFlash(p.loader, 0x8000, bytes.length, new AbortController().signal, () => {})).toEqual(bytes);
+    expect(new DataView(p.requests[0].buffer).getUint32(8, true)).toBe(64);
+    expect(p.acknowledgements).toHaveLength(64);
   });
   it('reads the complete 16 MiB backup with all frame ACKs and its final digest', async () => {
     const size = 0x1000000, data = new Uint8Array(size);

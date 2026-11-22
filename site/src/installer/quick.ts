@@ -14,6 +14,7 @@ export class QuickFlash {
   #stage: QuickStage = 'idle';
   #abort = new AbortController();
   #images: Uint8Array[] = [];
+  #operation = '';
   #open = false;
   #wrote = false;
   #closing?: Promise<void>;
@@ -29,6 +30,7 @@ export class QuickFlash {
   #status(stage: QuickStage, message: string, done?: number, total?: number): void {
     if (this.#abort.signal.aborted && stage !== 'failed' && stage !== 'cancelled') return;
     this.#stage = stage;
+    this.#operation = message;
     this.emit({ stage, message, done, total });
   }
 
@@ -51,11 +53,17 @@ export class QuickFlash {
       this.#status('connecting', '连接设备，读取芯片与分区表（最多等 30 秒）');
       this.#open = true;
       const inspect = async () => {
+        this.#status('connecting', '识别芯片与 Flash');
         const info = await this.device.connect(signal);
         if (info.chip !== 'ESP32-S3' || info.flashSize !== FLASH_SIZE || !info.securitySafe) {
           throw new UnsupportedDevice('芯片、Flash 容量或安全状态不匹配，已停止。');
         }
         if (info.flashId !== SUPPORTED_FLASH_ID) throw new UnsupportedDevice('这台机器的 Flash 料号还没验证过，一键刷不写。');
+        this.#status('connecting', '已识别小纸，正在检查分区表');
+        const tableIndex = this.release.parts.findIndex(part => part.offset === 0x8000);
+        const sector = new Uint8Array(4096).fill(0xff);
+        sector.set(this.#images[tableIndex]);
+        if (await this.device.md5(0x8000, sector.length, signal) === hex(md5(sector))) return sector;
         return this.device.read(0x8000, 4096, signal, () => {});
       };
       let table: Uint8Array;
@@ -144,7 +152,9 @@ export class QuickFlash {
 
   async #fail(error: unknown): Promise<void> {
     let message = error instanceof Error ? error.message : '未知错误';
-    if (message.includes('No serial data received')) message += '。请选择 USB JTAG_serial debug unit，关闭其他串口程序，短按电源键唤醒，或按机型说明进入 BOOT 模式后重试。';
+    if (message.includes('No serial data received') && this.#operation !== '识别芯片与 Flash') {
+      message = `“${this.#operation}”时设备应答超时。请重新连接后重试。`;
+    } else if (message.includes('No serial data received')) message += '。请选择 USB JTAG_serial debug unit，关闭其他串口程序，短按电源键唤醒，或按机型说明进入 BOOT 模式后重试。';
     let closeNote = '';
     try { await this.#close(); }
     catch { closeNote = ' 串口没关掉，关掉这个页面再重连。'; }

@@ -25,7 +25,8 @@ export async function readStubFlash(loader: StubLoader, offset: number, size: nu
   signal.throwIfAborted();
   if (!loader.IS_STUB || !Number.isInteger(offset) || !Number.isInteger(size) || offset < 0 || size <= 0 || offset + size > FLASH_SIZE) throw new Error('只允许 stub 模式下的有界 Flash 读取。');
   const request = new Uint8Array(16), view = new DataView(request.buffer);
-  [offset, size, 512, 1].forEach((n, i) => view.setUint32(i * 4, n, true));
+  const packetSize = size <= 4096 ? 64 : 512;
+  [offset, size, packetSize, 1].forEach((n, i) => view.setUint32(i * 4, n, true));
   const result = await loader.checkCommand('read flash', loader.ESP_READ_FLASH, request);
   if (result !== 0) throw new Error('设备拒绝读取 Flash。');
   const output = new Uint8Array(size);
@@ -39,7 +40,7 @@ export async function readStubFlash(loader: StubLoader, offset: number, size: nu
       continue;
     }
     emptyFrames = 0;
-    const expected = Math.min(512, size - received);
+    const expected = Math.min(packetSize, size - received);
     if (packet.length !== expected) throw new Error(`Flash 读取包长度不符：应为 ${expected}，实为 ${packet.length}。`);
     output.set(packet, received); received += packet.length;
     const ack = new Uint8Array(4); new DataView(ack.buffer).setUint32(0, received, true);
