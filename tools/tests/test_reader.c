@@ -14,6 +14,7 @@ int epd_rotated_display_height(void) { return screen_height; }
 int folio_font_ascent(const folio_font_t* font) { return font->height * 4 / 5; }
 int folio_font_line_height(const folio_font_t* font) { return font->height; }
 int folio_font_pixel_height(const folio_font_t* font) { return font->height; }
+void folio_font_flush_cache(folio_font_t* font) { (void)font; }
 int folio_font_advance(folio_font_t* font, uint32_t cp, uint32_t previous) {
     (void)previous;
     return cp < 128 ? font->height / 2 : font->height;

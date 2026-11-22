@@ -117,6 +117,7 @@ bool folio_storage_space(uint64_t* capacity, uint64_t* available, char* error, s
 bool folio_storage_validate_parent(const char* path, char* error, size_t cap) {
     assert(storage_depth && !strncmp(path, FOLIO_SD_ROOT, strlen(FOLIO_SD_ROOT)));
     struct stat st;
+    if (lstat(path, &st) != 0 && errno==ENOENT && strstr(path,"/folio-fonts/")) return true;
     if (lstat(path, &st) != 0 || !S_ISREG(st.st_mode)) { snprintf(error, cap, "Unsafe staged file"); return false; }
     if (track_retry_paths) {
         if (!primary_stage_path[0]) snprintf(primary_stage_path, sizeof(primary_stage_path), "%s", path);
@@ -146,7 +147,8 @@ static bool transport_open(void* ctx, const char* url, int* status, int64_t* len
     if (opens < sizeof(open_offsets) / sizeof(open_offsets[0])) open_offsets[opens] = (uint32_t)response_offset;
     bool mirror = !strncmp(url, FOLIO_REMOTE_CDN_ORIGIN, strlen(FOLIO_REMOTE_CDN_ORIGIN));
     response_mirror = mirror;
-    assert(mirror || !strncmp(url, FOLIO_REMOTE_ORIGIN, strlen(FOLIO_REMOTE_ORIGIN)));
+    const char *font=strstr(url,"/main/assets/fonts/folio_");
+    assert(font || mirror || !strncmp(url, FOLIO_REMOTE_ORIGIN, strlen(FOLIO_REMOTE_ORIGIN)));
     if (mirror) assert(!strcmp(url, FOLIO_REMOTE_CDN_ORIGIN "channels/stable.json") ||
         !strcmp(url, FOLIO_REMOTE_CDN_ORIGIN "firmware/0.8.32-dev.1/folio.bin"));
     assert(opens < sizeof(open_urls) / sizeof(open_urls[0]));
@@ -154,6 +156,11 @@ static bool transport_open(void* ctx, const char* url, int* status, int64_t* len
     bool image = strstr(url, "/firmware/") != NULL;
     response_image = image;
     response = image ? image_bytes : manifest_bytes; response_size = image ? image_size : manifest_size;
+    if(font) {
+        const char *name=strrchr(font,'/')+1;
+        free(image_bytes);image_bytes=read_file(name,&image_size);
+        response=image_bytes;response_size=image_size;
+    }
     active_status = response_status;
     if (!mirror && server_error_primary_once) { active_status = 500; server_error_primary_once = false; }
     if (response_offset && ignore_range) {
@@ -316,6 +323,7 @@ static void setup(bool defaults) {
     opens = closes = reads = locks = begins = writes = aborts = boots = ends = 0; ticks = 0;
     guard_task_fail=request_send_fail=request_send_fail_image_once=missing_socket=guard_resource_fail=false;assert(!guard_resources);
     present_card = power_ok = connected = complete_response = true;
+    fail_crypto_init=fail_hash_setup=fail_hash_finish=false;
     lock_fail = disk_full = sync_fail = unknown_length = fail_open = fail_open_primary_once = fail_read = extra_byte = false;
     fail_read_primary_once = incomplete_primary_once = server_error_primary_once = check_mirror_progress = false;
     corrupt_primary_prefix = track_retry_paths = false;
@@ -660,6 +668,28 @@ int main(int argc,char** argv){
     assert(mkdir(FOLIO_SD_ROOT,0700)==0 && mkdir(FOLIO_SD_ROOT "/update",0700)==0);
     FILE* f=fopen(FOLIO_SD_ROOT "/update/folio.bin","wb"); assert(f && fputs("user-owned old update",f)>=0 && fclose(f)==0);
     test_remote_manifests(fixtures); test_cdn_mapping(); test_cdn_fallback();
+    char error[192];
+    for(unsigned face=1;face<=3;++face) {
+        setup(false);assert(folio_online_start_font(face,error,sizeof(error)));
+        folio_online_snapshot_t result=wait_for(FOLIO_ONLINE_FONT_READY);
+        assert(result.received==result.total && opens==(face==3?2:1) && !boots);
+        assert(!folio_online_update_start_install(error,sizeof(error)));
+    }
+    for(unsigned fail=0;fail<4;++fail) {
+        setup(false);
+        FILE *old=fopen(FOLIO_SD_ROOT "/folio-fonts/folio_hei.ttf","wb");
+        assert(old && fputs("old",old)>=0 && fclose(old)==0);
+        if(fail==0)free_bytes=1024;
+        if(fail==1)fail_read=true;
+        if(fail==2)fail_hash_finish=true;
+        if(fail==3)cancel_read=true;
+        assert(folio_online_start_font(1,error,sizeof(error)));
+        wait_for(fail==3?FOLIO_ONLINE_CANCELLED:FOLIO_ONLINE_FAILED);
+        struct stat st;
+        assert(stat(FOLIO_SD_ROOT "/folio-fonts/folio_hei.ttf",&st)==0 && st.st_size==3);
+        assert(access(FOLIO_SD_ROOT "/folio-fonts/folio_hei.ttf.part",F_OK)!=0 && !boots);
+    }
+    puts("Font download: three real fonts, round symbols, cancellation, space, read and hash failures passed");
     test_check_failures(); test_download_failures(); test_install_failures();
     char sentinel[64]={0}; f=fopen(FOLIO_SD_ROOT "/update/folio.bin","rb"); assert(f && fread(sentinel,1,63,f)==21 && fclose(f)==0 && !strcmp(sentinel,"user-owned old update"));
     free(manifest_bytes); free(image_bytes);

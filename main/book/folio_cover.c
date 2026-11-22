@@ -23,7 +23,7 @@
 #define COVER_W 192u
 #define COVER_H 288u
 #define COVER_BOOKS 24
-#define COVER_IMAGES 8
+#define COVER_IMAGES 12
 #define COVER_PATH 256
 
 static size_t s_work_live, s_work_peak;

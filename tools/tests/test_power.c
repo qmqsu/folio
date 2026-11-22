@@ -77,6 +77,7 @@ int64_t esp_timer_get_time(void) { return now; }
 void vTaskDelay(unsigned ticks) { now += (int64_t)ticks * 1000; awake_us += (int64_t)ticks * 1000; }
 void epd_set_vcom(int millivolts) { assert(millivolts == 1290); }
 void epd_poweroff(void) { ++off_count; }
+void read_pico_epd_settle(void) {}
 esp_err_t sc7a20h_power_down(void* sensor) { (void)sensor; ++sensor_count; return fail_peripherals || fault==FAULT_SENSOR_DOWN ? ESP_FAIL : ESP_OK; }
 esp_err_t cst836u_set_mode(void* touch, int mode) {
     (void)touch; assert(mode == CST836U_MODE_DEEPSLEEP); ++touch_count;

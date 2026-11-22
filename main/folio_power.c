@@ -251,6 +251,7 @@ esp_err_t folio_power_finish_shutdown(read_pico_handle_t* hardware) {
     if (!s_shutdown_prepared) {
         s_shutdown_prepared = true;
         epd_poweroff();
+        read_pico_epd_settle();
         if (hardware->sensor_ready) (void)sc7a20h_power_down(hardware->sensor);
         if (hardware->touch_ready) (void)cst836u_set_mode(hardware->touch, CST836U_MODE_DEEPSLEEP);
         // Peripheral errors must not consume the PMU's ten-second deadline.
@@ -294,6 +295,7 @@ esp_err_t folio_power_lock_timed(read_pico_handle_t* hardware, void (*refresh)(v
     if(!retention_ready)retention_ready=sleep_cpu_configure(true)==ESP_OK;
 #endif
     epd_poweroff();
+    read_pico_epd_settle();
     bool sensor_on=hardware->sensor_ready && sc7a20h_powered(hardware->sensor);
     esp_err_t error=sensor_on?sc7a20h_power_down(hardware->sensor):ESP_OK;
     if(error==ESP_OK && hardware->touch_ready)error=cst836u_set_mode(hardware->touch,CST836U_MODE_DEEPSLEEP);
@@ -338,6 +340,7 @@ esp_err_t folio_power_lock_timed(read_pico_handle_t* hardware, void (*refresh)(v
             utc=folio_power_unix_time();
             refresh(context);
             epd_poweroff();
+            read_pico_epd_settle();
             // Rendering takes time; a key or PMU deadline may arrive meanwhile.
             // Never hide that event behind another 30-second timer sleep.
             event=folio_power_poll();
@@ -406,6 +409,7 @@ esp_err_t folio_power_suspend(read_pico_handle_t* hardware, bool power_off) {
     if (hardware == NULL || !s_available) return ESP_ERR_INVALID_STATE;
     if (folio_power_poll() == FOLIO_POWER_SHUTDOWN_NOW) return folio_power_finish_shutdown(hardware);
     epd_poweroff();
+    read_pico_epd_settle();
     if (hardware->sensor_ready) (void)sc7a20h_power_down(hardware->sensor);
     esp_err_t error = ESP_OK;
     if (hardware->touch_ready) error = cst836u_set_mode(hardware->touch, CST836U_MODE_DEEPSLEEP);

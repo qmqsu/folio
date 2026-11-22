@@ -13,6 +13,7 @@ if ! "$python" -c 'import cryptography' 2>/dev/null; then
     python="$HOME/.espressif/python_env/idf6.1_py3.13_env/bin/python"
 fi
 "$python" tools/tests/generate_remote_manifest_fixtures.py "$tmp/fixtures"
+cp main/assets/fonts/folio_*.ttf "$tmp/fixtures/"
 toolchain=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin
 sdk=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk
 cc=${CC:-cc}

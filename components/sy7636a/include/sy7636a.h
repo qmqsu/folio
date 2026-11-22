@@ -141,6 +141,10 @@ void sy7636a_i2c_end(sy7636a_handle_t h, bool woke);
 esp_err_t sy7636a_power_on(sy7636a_handle_t h);
 esp_err_t sy7636a_power_off(sy7636a_handle_t h);
 bool sy7636a_rails_on(sy7636a_handle_t h);
+/// Drop EN once the deferred power-off hold has elapsed; call from the owning task.
+void sy7636a_service(sy7636a_handle_t h);
+/// Block until the power-off hold elapses and EN is low (before sleep/shutdown).
+void sy7636a_finish_power_off(sy7636a_handle_t h);
 
 esp_err_t sy7636a_read(sy7636a_handle_t h, sy7636a_status_t* status);
 const sy7636a_status_t* sy7636a_last(sy7636a_handle_t h);

@@ -11,6 +11,8 @@ typedef struct folio_font folio_font_t;
 bool folio_font_is_builtin_path(const char* path);
 const char* folio_font_builtin_path(unsigned index);
 const char* folio_font_builtin_label(const char* path);
+// True when a built-in face's resource is present, without loading it.
+bool folio_font_builtin_installed(const char* path);
 folio_font_t* folio_font_open_builtin(int pixel_height);
 
 // Card files are paged; this limit is independent of the resident built-in TTF limit.
@@ -22,6 +24,9 @@ folio_font_t* folio_font_open(const char* path, int pixel_height);
 bool folio_font_validate_file(const char* path);
 folio_font_t* folio_font_open_first_on_card(int pixel_height, char* path_out, uint32_t path_cap);
 void folio_font_close(folio_font_t* font);
+// Release cached glyph bitmaps, e.g. before a memory-hungry image decode.
+void folio_font_flush_cache(folio_font_t* font);
+bool folio_font_has_glyph(folio_font_t* font, uint32_t codepoint);
 // Changes size without reloading the TTF. The bounded bitmap cache keeps sizes separate.
 bool folio_font_set_size(folio_font_t* font, int pixel_height);
 

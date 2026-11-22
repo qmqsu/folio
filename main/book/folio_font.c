@@ -6,6 +6,9 @@
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
+#ifdef ESP_PLATFORM
+#include "sdkconfig.h"
+#endif
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -54,6 +57,7 @@ static void* font_raster_alloc(size_t size, void* context) {
 #endif
 
 #define FOLIO_GLYPH_CACHE_N 96
+#define SHARED_GLYPH_CACHE_N 1024
 #define FOLIO_FONT_MAX_EXPANDED_POINTS 8192
 #define FOLIO_FONT_MAX_COMPONENT_DEPTH 16
 #ifndef FOLIO_SD_ROOT
@@ -86,7 +90,7 @@ typedef struct {
 #define CARD_TREE_LIMIT (256u * 1024u)
 #define CARD_TREE_N 256u
 #define CARD_LOCA_BYTES ((CARD_TREE_N + 1) * 4u)
-#define CACHE_BITMAP_LIMIT (384u * 1024u)
+#define CACHE_BITMAP_LIMIT (768u * 1024u)
 
 typedef struct {
     FILE* file;
@@ -118,9 +122,13 @@ struct folio_font {
     int line_height;
     uint16_t cmap_segments;
     uint32_t tick;
-    glyph_cache_entry_t cache[FOLIO_GLYPH_CACHE_N];
+    glyph_cache_entry_t local_cache[FOLIO_GLYPH_CACHE_N];
+    glyph_cache_entry_t *cache;
+    unsigned cache_slots;
+    uint32_t* advances; // ADVANCE_CACHE_N entries: cp<<8 | pixel_height, advance in the low half.
     struct folio_font* fallback;
 };
+#define ADVANCE_CACHE_N 4096u
 
 static const struct { const char* path; const char* label; const char* resource; } builtin_fonts[] = {
     {FOLIO_FONT_BUILTIN_PATH, "内置宋体", NULL},
@@ -681,11 +689,15 @@ bool folio_font_has_weight(const folio_font_t* font) {
 void folio_font_set_weight(folio_font_t* font,int step) {
     if (!folio_font_has_weight(font) || step < -2 || step > 2 || font->weight_step==step) return;
     font->weight_step=step;
-    for (unsigned i=0;i<FOLIO_GLYPH_CACHE_N;++i) evict_bitmap(font,&font->cache[i]);
+    for (unsigned i=0;i<font->cache_slots;++i) evict_bitmap(font,&font->cache[i]);
+}
+
+void folio_font_flush_cache(folio_font_t* font) {
+    if (font) for (unsigned i = 0; i < font->cache_slots; ++i) evict_bitmap(font, &font->cache[i]);
 }
 
 static glyph_cache_entry_t* glyph_get(folio_font_t* font, uint32_t cp) {
-    for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) {
+    for (unsigned i = 0; i < font->cache_slots; ++i) {
         if (font->cache[i].pixels != NULL && font->cache[i].codepoint == cp &&
             font->cache[i].pixel_height == font->pixel_height) {
             font->cache[i].age = ++font->tick;
@@ -698,7 +710,7 @@ static glyph_cache_entry_t* glyph_get(folio_font_t* font, uint32_t cp) {
     if (glyph_index <= 0) return NULL;
     unsigned slot = 0;
     uint32_t oldest = UINT32_MAX;
-    for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) {
+    for (unsigned i = 0; i < font->cache_slots; ++i) {
         if (font->cache[i].pixels == NULL) { slot = i; oldest = 0; break; }
         if (font->cache[i].age < oldest) { oldest = font->cache[i].age; slot = i; }
     }
@@ -719,7 +731,7 @@ static glyph_cache_entry_t* glyph_get(folio_font_t* font, uint32_t cp) {
     if (bytes > CACHE_BITMAP_LIMIT) return NULL;
     while (bytes > CACHE_BITMAP_LIMIT - font->cache_bytes) {
         glyph_cache_entry_t* victim = NULL;
-        for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) {
+        for (unsigned i = 0; i < font->cache_slots; ++i) {
             glyph_cache_entry_t* p = &font->cache[i];
             if (p->pixels && p->pixels != (uint8_t*)font && (!victim || p->age < victim->age)) victim = p;
         }
@@ -772,7 +784,14 @@ static glyph_cache_entry_t* glyph_get(folio_font_t* font, uint32_t cp) {
 
 static folio_font_t* font_alloc_state(void) {
     folio_font_t* font = font_alloc(sizeof(*font));
-    if (font != NULL) memset(font, 0, sizeof(*font));
+    if (font != NULL) {
+        memset(font, 0, sizeof(*font));
+        // A CJK page holds hundreds of distinct glyphs; a small LRU misses on
+        // nearly every character and re-rasterises the whole page each turn.
+        glyph_cache_entry_t* cache = font_alloc(SHARED_GLYPH_CACHE_N * sizeof(*cache));
+        if (cache) { memset(cache, 0, SHARED_GLYPH_CACHE_N * sizeof(*cache)); font->cache = cache; font->cache_slots = SHARED_GLYPH_CACHE_N; }
+        else { font->cache = font->local_cache; font->cache_slots = FOLIO_GLYPH_CACHE_N; }
+    }
     return font;
 }
 
@@ -845,21 +864,7 @@ static folio_font_t* font_open_deflated(const uint8_t* data, size_t total, size_
 
 #if defined(ESP_PLATFORM) || defined(FOLIO_TEST_CARD_FONT)
 /* Only these unmodified OFL assets can stand in for a built-in face. */
-static const struct {
-    const char* id;
-    const char* path;
-    size_t length;
-    uint8_t sha256[33]; /* 32 digest bytes plus the literal's NUL. */
-} card_faces[] = {
-    {"hei", FOLIO_SD_ROOT "/folio-fonts/folio_hei.ttf", 2043496,
-     "\x6f\xdb\xc4\x17\xcb\xb4\x12\x8a\x43\x77\xfc\x5d\x84\x4f\x81\x75\x19\xe0\x39\xdf\xdd\xf0\xa3\x2a\xcc\x8d\x58\xdb\x3d\xd9\x41\xb7"},
-    {"kai", FOLIO_SD_ROOT "/folio-fonts/folio_kai.ttf", 3477784,
-     "\xaf\xd2\xb9\x96\x29\x48\xeb\x67\x5a\xc6\x54\xdc\x2c\x10\x47\x6f\x6a\xa7\xa2\xf2\x27\x85\x2b\x09\x92\xad\x06\x00\x36\x42\xe1\x3c"},
-    {"yuan", FOLIO_SD_ROOT "/folio-fonts/folio_yuan.ttf", 2689336,
-     "\xf7\x73\x53\x97\x2b\xd5\xe4\xb3\xb4\x76\xc0\xc9\xaa\x81\xac\xa7\xdd\xc1\xb0\x2f\xc9\x2f\xba\xda\x1b\xe8\x8a\xa3\x95\x43\x06\x30"},
-    {"symbols", FOLIO_SD_ROOT "/folio-fonts/folio_symbols.ttf", 5144,
-     "\x1d\xee\x19\xf0\x20\xa7\x55\x89\x81\x47\x62\xb6\xd3\x2e\x44\x27\xcd\xd2\xec\xe9\x84\x79\xa9\x49\xdc\x9c\xc1\xb8\x2a\xa0\xce\xdd"},
-};
+#include "folio_font_assets.h"
 
 static folio_font_t* font_open_card_face(const char* id, int pixel_height) {
     size_t i = 0;
@@ -940,6 +945,35 @@ static folio_font_t* font_open_flash_resource(const char* id,int pixel_height) {
 #endif
 }
 
+// Index-only availability check for the font list: no decompression or hashing.
+static bool font_resource_present(const char* id) {
+#ifdef ESP_PLATFORM
+    const esp_partition_t* partition=esp_partition_find_first(ESP_PARTITION_TYPE_DATA,ESP_PARTITION_SUBTYPE_DATA_FAT,"storage");
+    const void* mapped=NULL; esp_partition_mmap_handle_t handle;
+    if(partition && partition->address==0x410000u && partition->size==0x500000u &&
+       esp_partition_mmap(partition,0,0x500000u,ESP_PARTITION_MMAP_DATA,&mapped,&handle)==ESP_OK) {
+        folio_font_resource_t resource;
+        bool found=folio_font_pack_find(mapped,0x500000u,id,&resource);
+        esp_partition_munmap(handle);
+        if(found)return true;
+    }
+#endif
+#if defined(ESP_PLATFORM) || defined(FOLIO_TEST_CARD_FONT)
+    for(size_t i=0;i<sizeof(card_faces)/sizeof(card_faces[0]);++i) {
+        struct stat info;
+        if(!strcmp(id,card_faces[i].id))
+            return stat(card_faces[i].path,&info)==0 && (size_t)info.st_size==card_faces[i].length &&
+                   (strcmp(id,"yuan") || font_resource_present("symbols"));
+    }
+#endif
+    (void)id; return false;
+}
+bool folio_font_builtin_installed(const char* path) {
+    for(size_t i=0;i<sizeof(builtin_fonts)/sizeof(builtin_fonts[0]);++i)
+        if(path && !strcmp(path,builtin_fonts[i].path))
+            return !builtin_fonts[i].resource || font_resource_present(builtin_fonts[i].resource);
+    return false;
+}
 static folio_font_t* font_open_resource(const char* id, int pixel_height) {
     folio_font_t* font = font_open_flash_resource(id, pixel_height);
 #if defined(ESP_PLATFORM) || defined(FOLIO_TEST_CARD_FONT)
@@ -1100,7 +1134,17 @@ fail:
 folio_font_t* folio_font_open(const char* path, int pixel_height) {
     if (path == NULL || pixel_height < 12 || pixel_height > 72) return NULL;
     if(folio_font_is_builtin_path(path)) {
-        if(!strcmp(path,FOLIO_FONT_BUILTIN_PATH))return folio_font_open_builtin(pixel_height);
+        if(!strcmp(path,FOLIO_FONT_BUILTIN_PATH)) {
+            // The in-app Songti is a 7.5k-character subset; books routinely use
+            // characters outside it, which would otherwise render as '?'. Borrow
+            // missing glyphs from an installed complete face (hei is the smallest).
+            folio_font_t* font=folio_font_open_builtin(pixel_height);
+            if(font && !font->fallback && !font_cancelled()) {
+                font->fallback=font_open_resource("hei",pixel_height);
+                if(!font->fallback)font->fallback=font_open_resource("kai",pixel_height);
+            }
+            return font;
+        }
         for(unsigned i=1;i<FOLIO_FONT_BUILTIN_COUNT;++i)
             if(!strcmp(path,builtin_fonts[i].path))return font_open_resource(builtin_fonts[i].resource,pixel_height);
         return NULL;
@@ -1200,7 +1244,7 @@ folio_font_t* folio_font_open_first_on_card(int pixel_height, char* path_out, ui
 void folio_font_close(folio_font_t* font) {
     if (font == NULL) return;
     folio_font_close(font->fallback);
-    for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) {
+    for (unsigned i = 0; i < font->cache_slots; ++i) {
         if (font->cache[i].pixels != NULL && font->cache[i].pixels != (uint8_t*)font) free(font->cache[i].pixels);
     }
     if (font->card) {
@@ -1208,6 +1252,8 @@ void folio_font_close(folio_font_t* font) {
         free(font->card->tree);
         free(font->card);
     }
+    if (font->cache!=font->local_cache) free(font->cache);
+    free(font->advances);
     free(font->bytes);
     free(font);
 }
@@ -1253,11 +1299,39 @@ int folio_font_ascent(const folio_font_t* font) { return font != NULL ? font->as
 int folio_font_line_height(const folio_font_t* font) { return font != NULL ? font->line_height : 0; }
 int folio_font_pixel_height(const folio_font_t* font) { return font != NULL ? font->pixel_height : 0; }
 
+bool folio_font_has_glyph(folio_font_t* font, uint32_t cp) {
+    return font && font_glyph_index(glyph_source(font, cp), cp) != 0;
+}
+static int font_advance_uncached(folio_font_t* font, uint32_t cp);
+// Layout asks for the same few thousand advances on every page; each lookup is
+// two cmap binary searches in PSRAM, so memoize them per pixel height.
 int folio_font_advance(folio_font_t* font, uint32_t cp, uint32_t previous) {
     (void)previous; // Kerning and shaping are outside the supported cmap4/glyf subset.
     if (font == NULL) return 0;
+    if (cp > 0xFFFF || font->pixel_height <= 0 || font->pixel_height > 255) return font_advance_uncached(font, cp);
+    if (!font->advances) {
+        font->advances = font_alloc(2 * ADVANCE_CACHE_N * sizeof(uint32_t));
+        if (font->advances) memset(font->advances, 0xFF, 2 * ADVANCE_CACHE_N * sizeof(uint32_t));
+        else return font_advance_uncached(font, cp);
+    }
+    uint32_t key = cp << 8 | (uint32_t)font->pixel_height;
+    uint32_t* slot = &font->advances[2 * ((cp * 2654435761u >> 20) % ADVANCE_CACHE_N)];
+    if (slot[0] == key) return (int)(int32_t)slot[1];
+    int advance = font_advance_uncached(font, cp);
+    slot[0] = key; slot[1] = (uint32_t)advance;
+    return advance;
+}
+static int font_advance_uncached(folio_font_t* font, uint32_t cp) {
     folio_font_t* source=glyph_source(font,cp);
     int glyph_index = font_glyph_index(source, cp);
+#if defined(ESP_PLATFORM) && defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
+    if (glyph_index == 0 && cp >= 0x80) {
+        static uint32_t seen[64]; static unsigned count;
+        bool known = false;
+        for (unsigned i = 0; i < count && !known; ++i) known = seen[i] == cp;
+        if (!known && count < 64) { seen[count++] = cp; printf("glyph missing U+%04lX\n", (unsigned long)cp); }
+    }
+#endif
     if (glyph_index == 0) {source=font;glyph_index=font_glyph_index(font, '?');}
     if (glyph_index == 0) return font->pixel_height;
     uint16_t metric_count = be16(source->bytes + source->info.hhea + 34);

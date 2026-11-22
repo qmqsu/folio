@@ -86,6 +86,10 @@ esp_err_t read_pico_get_ioe_status_full(read_pico_status_t* status);
 int read_pico_ioe_int_level(void);
 bool read_pico_sd_present(void);
 bool read_pico_rails_on(void);
+/// Drop the panel PMIC enable once the deferred power-off hold elapsed.
+void read_pico_epd_service(void);
+/// Block until the panel PMIC is fully off; call before sleep or shutdown.
+void read_pico_epd_settle(void);
 
 /// 翻转 VCOMCTL：1=外部 VCOM_EN，0=自动时序。
 /// / Toggle VCOMCTL: 1=external VCOM_EN, 0=auto timing.

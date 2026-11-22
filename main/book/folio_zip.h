@@ -27,6 +27,7 @@ typedef struct {
     uint64_t source_hash;
     uint32_t source_crc; // Full archive CRC from folio_zip_open; zero for directory-only open.
     uint32_t source_size;
+    uint32_t directory_crc; // CRC of the central directory, which lists every member CRC.
 } folio_zip_t;
 
 void* folio_epub_alloc(size_t size);
@@ -39,6 +40,8 @@ bool folio_zip_open(const char* path, folio_zip_t* zip, char* error, size_t cap)
  * without scanning all archive bytes for a fingerprint. source_crc stays zero
  * and must not be used as cache/progress identity. folio_zip_read still verifies
  * each extracted member's CRC. Intended for fast cover/metadata discovery. */
+/* Hash the whole archive into source_hash/source_crc. */
+bool folio_zip_fingerprint(folio_zip_t* zip);
 bool folio_zip_open_directory(const char* path, folio_zip_t* zip, char* error, size_t cap);
 void folio_zip_close(folio_zip_t* zip);
 const folio_zip_entry_t* folio_zip_find(const folio_zip_t* zip, const char* name);

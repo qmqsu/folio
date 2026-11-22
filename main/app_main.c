@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <strings.h>
 #include <stdatomic.h>
 #include "esp_heap_caps.h"
@@ -31,6 +32,7 @@
 #include "net/folio_network.h"
 #include "net/folio_weread.h"
 #include "folio_text.h"
+#include "read_pico_board.h"
 #include "read_pico_init.h"
 #include "read_pico_sd.h"
 #include "vendor/qrcodegen/qrcodegen.h"
@@ -77,7 +79,8 @@ static view_t s_lock_preview_return=VIEW_HOME_SETTINGS;
 static size_t s_wallpaper_page,s_wallpaper_count,s_wallpaper_total;
 static char s_wallpaper_path[256];
 static const char* s_reader_notice;
-static int64_t s_reader_notice_until;
+static int64_t s_reader_notice_until, s_reader_save_due;
+static bool s_reflow_pending;
 static folio_transfer_status_t s_transfer_status;
 static folio_storage_summary_t s_storage_summary;
 static folio_storage_entry_t s_file_entries[7], s_file_selected;
@@ -99,7 +102,7 @@ static bool s_online_operation, s_online_install_owned, s_online_network;
 static bool s_online_leaving, s_online_card_lost, s_online_wifi_setup;
 static bool s_online_stopping;
 static view_t s_online_target = VIEW_DEVICE;
-static unsigned s_online_wait;
+static unsigned s_online_wait, s_download_face;
 static int64_t s_online_deadline, s_online_draw_at;
 static folio_online_snapshot_t s_online_snapshot;
 static char s_online_message[192];
@@ -254,24 +257,39 @@ static void show_root(view_t view) {
         folio_network_status_t network;folio_network_get_status(&network);
         if(network.running && !stop_transfer())return;
     }
+    int64_t t0 = esp_timer_get_time();
     close_reader();
-    if (view == VIEW_LIBRARY || view == VIEW_HOME) refresh_library();
+    int64_t t1 = esp_timer_get_time();
+    if (view == VIEW_LIBRARY || view == VIEW_HOME) refresh_library_if_stale();
+    int64_t t2 = esp_timer_get_time();
     show_view(view, true);
+    ESP_LOGD(TAG, "root close=%lld refresh=%lld draw=%lld ms", (long long)(t1 - t0) / 1000,
+             (long long)(t2 - t1) / 1000, (long long)(esp_timer_get_time() - t2) / 1000);
 }
 static void show_library(void) { show_root(VIEW_LIBRARY); }
 static void open_recent(size_t index) {
     const folio_recent_book_t* recent = folio_activity_recent(s_activity, index);
     if (!recent) { show_library(); return; }
-    refresh_library();
-    for (size_t i = 0; i < s_book_count; ++i) if (strcmp(recent->path, s_books[i].path) == 0) {
-        open_book_absolute(i, true); return;
+    // The cached shelf may predate a card change made outside this device.
+    if (access(recent->path, F_OK) == 0) refresh_library_if_stale();
+    else refresh_library();
+    for (int pass = 0; pass < 2; ++pass) {
+        for (size_t i = 0; i < s_book_count; ++i) if (strcmp(recent->path, s_books[i].path) == 0) {
+            open_book_absolute(i, true); return;
+        }
+        if (!s_library_fresh) break;
+        refresh_library();
     }
     show_error("书架中没有找到这本书。请将原文件放回 books 目录，阅读记录会保留。", VIEW_HOME);
 }
 static void open_book_absolute(size_t index, bool feedback) {
     if (index >= s_book_count || s_font == NULL || !save_reader()) return;
     close_reader();
-    if (feedback) show_busy("正在打开书籍");
+    int64_t open_t0 = esp_timer_get_time();
+    // Large books are read in full to build caches on their first open.
+    if (feedback) show_busy_hint("正在打开书籍", s_books[index].size >= 2u * 1024 * 1024 ?
+                                 "大书首次打开较慢，之后会快很多" : NULL);
+    ESP_LOGD(TAG, "open busy screen %lld ms", (long long)((esp_timer_get_time() - open_t0) / 1000));
     (void)folio_font_set_size(s_font, s_settings.font_size);
     folio_reader_options_t options = reader_options();
     s_reader = folio_reader_open_with_options(&s_books[index], s_font, &options);
@@ -288,7 +306,9 @@ static void open_book_absolute(size_t index, bool feedback) {
     }
     const char* save_error = folio_reader_error(s_reader);
     if (save_error != NULL && *save_error) { show_error(save_error, VIEW_READING); return; }
+    ESP_LOGD(TAG, "open before draw %lld ms", (long long)((esp_timer_get_time() - open_t0) / 1000));
     show_view(VIEW_READING, true);
+    ESP_LOGD(TAG, "open shown %lld ms", (long long)((esp_timer_get_time() - open_t0) / 1000));
     if(!catalog_save())show_error("这次阅读的书架记录尚未保存，请检查 TF 卡空间。",VIEW_READING);
 }
 // Call only after releasing the previous font. Preference and active identity
@@ -453,7 +473,7 @@ static void turn_page(bool next) {
         folio_cover_draw(s_current_book,fb(),(EpdRect){48,48,588,1120})){
         s_reader_cover=true;show_view(VIEW_READING,true);return;
     }
-    bool changed = !s_reader_cover && (next ? folio_reader_next(s_reader) : folio_reader_previous(s_reader));
+    bool changed = !s_reader_cover && folio_reader_turn(s_reader, next);
     if (!changed) {
         const char* error = folio_reader_error(s_reader);
         if (error != NULL && *error) show_error(error, VIEW_READING);
@@ -462,8 +482,14 @@ static void turn_page(bool next) {
         return;
     }
     show_view(VIEW_READING, false);
-    const char* save_error = folio_reader_error(s_reader);
-    if (save_error != NULL && *save_error) show_error(save_error, VIEW_READING);
+    // Progress is persisted after the reader pauses; every exit path saves too.
+    s_reader_save_due = esp_timer_get_time() + 3000000;
+}
+static void refresh_reader_save(void) {
+    if (!s_reader_save_due || esp_timer_get_time() < s_reader_save_due) return;
+    s_reader_save_due = 0;
+    if (s_reader != NULL && !folio_reader_save(s_reader) && s_view == VIEW_READING)
+        show_error(folio_reader_error(s_reader), VIEW_READING);
 }
 static void move_list(int direction) {
     size_t* page = s_view == VIEW_LIBRARY ? &s_shelf_page : &s_list_page;
@@ -516,9 +542,9 @@ static void change_setting(int row, int direction) {
         return;
     }
     bool okay = folio_font_set_size(s_font, s_settings.font_size);
-    if (okay && s_reader != NULL && (row <= 4 || row == 9 || row == 12 || row == 13)) {
-        folio_reader_options_t options = reader_options(); okay = folio_reader_set_options(s_reader, &options);
-    }
+    // Reflowing a deep page re-lays the book from its start; do it once when the
+    // reader is shown again instead of on every settings tap.
+    if (okay && s_reader != NULL && (row <= 4 || row == 9 || row == 12 || row == 13)) s_reflow_pending = true;
     if (!okay) {
         s_settings = previous; (void)folio_font_set_size(s_font, previous.font_size);
         if (s_reader != NULL) { folio_reader_options_t options = reader_options(); (void)folio_reader_set_options(s_reader, &options); }
@@ -651,6 +677,7 @@ static void suspend_device(bool shutdown) {
     if(wake_view==VIEW_TRANSFER || wake_view==VIEW_WEREAD || wake_view==VIEW_WIFI || wake_view==VIEW_WIFI_EDIT || wake_view==VIEW_TIME)wake_view=VIEW_SYSTEM;
     if (!s_hw.pmu_ready) { show_error("电源管理器未就绪，无法进入低功耗状态。", s_view); return; }
     if (folio_power_poll() == FOLIO_POWER_SHUTDOWN_NOW) { emergency_shutdown(); return; }
+    (void)apply_pending_reflow(false);
     if (!save_reader()) return;
     activity_record_book();
     if (!activity_flush()) {
@@ -764,7 +791,7 @@ static void select_wallpaper(const char* path) {
 static void go_back(void) {
     if(online_setup_back())return;
     if(online_active() && s_view!=VIEW_OFF_CONFIRM) {
-        (void)online_leave(VIEW_DEVICE);return;
+        (void)online_leave(s_download_face?VIEW_FONTS:VIEW_DEVICE);return;
     }
     if(setup_back())return;
     if(s_view==VIEW_WEREAD){weread_back();return;}
@@ -785,9 +812,9 @@ static void handle_tap(int x,int y) {
     if(x<0 || x>=width() || y<0 || y>=height())return;
     activity_track(s_view==VIEW_READING,true);
     if(online_active() && s_view!=VIEW_OFF_CONFIRM) {
-        if(hit(back_rect(),x,y)){(void)online_leave(VIEW_DEVICE);return;}
+        if(hit(back_rect(),x,y)){(void)online_leave(s_download_face?VIEW_FONTS:VIEW_DEVICE);return;}
         if(s_view==VIEW_UPDATE)online_tap(x,y);
-        else if(s_view==VIEW_ERROR && hit(done_rect(),x,y))(void)online_leave(VIEW_DEVICE);
+        else if(s_view==VIEW_ERROR && hit(done_rect(),x,y))(void)online_leave(s_download_face?VIEW_FONTS:VIEW_DEVICE);
         return;
     }
     if(s_view==VIEW_OFF_CONFIRM) {
@@ -837,15 +864,15 @@ static void handle_tap(int x,int y) {
         for(unsigned i=0;i<folio_activity_recent_count(s_activity);++i)
             if(hit(home_recent_rect(i),x,y)){open_recent(i);return;}
     } else if(s_view==VIEW_HOME_SETTINGS) {
-        if(hit((EpdRect){48,232,588,96},x,y)){s_fonts_return=VIEW_HOME_SETTINGS;scan_fonts();s_list_page=0;show_view(VIEW_FONTS,true);return;}
+        if(hit((EpdRect){348,216,288,96},x,y)){s_settings_tab=1;s_settings_return=VIEW_SYSTEM;show_view(VIEW_SETTINGS,true);return;}
         uint8_t old_chart=s_settings.home_chart,old_style=s_settings.keep_page_on_lock;
-        for(unsigned i=0;i<2;++i)if(hit((EpdRect){48+(int)i*300,400,288,88},x,y))s_settings.home_chart=i;
+        for(unsigned i=0;i<2;++i)if(hit((EpdRect){48+(int)i*300,400,288,96},x,y))s_settings.home_chart=i;
         for(unsigned i=0;i<3;++i){
-            if(hit((EpdRect){48+(int)i*200,576,188,88},x,y))s_settings.keep_page_on_lock=(s_settings.keep_page_on_lock&12u)|i;
-            if(hit((EpdRect){48+(int)i*200,752,188,88},x,y))s_settings.keep_page_on_lock=(s_settings.keep_page_on_lock&3u)|(i<<2);
+            if(hit((EpdRect){48+(int)i*200,576,188,96},x,y))s_settings.keep_page_on_lock=(s_settings.keep_page_on_lock&12u)|i;
+            if(hit((EpdRect){48+(int)i*200,752,188,96},x,y))s_settings.keep_page_on_lock=(s_settings.keep_page_on_lock&3u)|(i<<2);
         }
-        if(hit((EpdRect){48,848,588,72},x,y)){s_wallpaper_page=0;load_wallpapers();return;}
-        if(hit((EpdRect){48,944,282,96},x,y)||hit((EpdRect){354,944,282,96},x,y)){
+        if(hit((EpdRect){48,864,588,96},x,y)){s_wallpaper_page=0;load_wallpapers();return;}
+        if(hit((EpdRect){48,976,282,96},x,y)||hit((EpdRect){354,976,282,96},x,y)){
             s_lock_preview_return=VIEW_HOME_SETTINGS;s_lock_preview_off=x>=342;show_view(VIEW_LOCK_PREVIEW,true);return;}
         if(old_chart==s_settings.home_chart && old_style==s_settings.keep_page_on_lock)return;
         if(!folio_settings_save(&s_settings))show_error("设置尚未保存，请重试。",VIEW_HOME_SETTINGS);
@@ -893,7 +920,15 @@ static void handle_tap(int x,int y) {
         if(bottom==0 || bottom==2) {move_list(bottom==0?-1:1);return;}
         if(row<0)return;
         size_t index=s_list_page*list_rows()+(size_t)row;
-        if(s_view==VIEW_FONTS) {select_font(index);return;}
+        if(s_view==VIEW_FONTS) {
+            if(index>0 && index<FOLIO_FONT_BUILTIN_COUNT && x>=470 && strcmp(s_fonts[index],s_active_font) &&
+               !folio_font_builtin_installed(s_fonts[index])) {
+                s_download_face=index;s_update_local=false;s_online_message[0]=0;
+                s_online_confirm=false;memset(&s_online_snapshot,0,sizeof(s_online_snapshot));
+                show_view(VIEW_UPDATE,true);
+            } else select_font(index);
+            return;
+        }
         size_t count=s_view==VIEW_TOC?folio_reader_chapter_count(s_reader):folio_reader_bookmark_count(s_reader);
         if(index>=count)return;
         if(s_view==VIEW_BOOKMARKS && x>=540) {s_pending_bookmark=index;show_view(VIEW_BOOKMARK_DELETE,true);return;}
@@ -918,9 +953,10 @@ static void handle_tap(int x,int y) {
             if(percent!=s_jump_percent){s_jump_percent=percent;show_view(VIEW_JUMP,false);}return;
         }
     } else if(s_view==VIEW_SETTINGS) {
-        if(hit(done_rect(),x,y)){go_back();return;}
         if(hit((EpdRect){48,216,588,96},x,y)) {
-            unsigned tab=(unsigned)(x-48)/200; if(tab>2)tab=2; if(tab!=s_settings_tab){s_settings_tab=tab;show_view(VIEW_SETTINGS,true);}return;
+            bool right=x>=342;
+            if(s_settings_tab==1){if(!right)show_view(VIEW_HOME_SETTINGS,true);return;}
+            unsigned tab=right?2:0; if(tab!=s_settings_tab){s_settings_tab=tab;show_view(VIEW_SETTINGS,true);}return;
         }
         if(!s_settings_tab) {
             if(hit((EpdRect){48,328,588,160},x,y)){enter_fonts();return;}
@@ -932,38 +968,40 @@ static void handle_tap(int x,int y) {
                 if(hit(setting_step(i,-1),x,y)){change_setting(i,-1);return;}
                 if(hit(setting_step(i,1),x,y)){change_setting(i,1);return;}
             }
-            if(hit((EpdRect){308,968,156,96},x,y) && FOLIO_FIRST_LINE_INDENT(&s_settings))change_setting(4,-1);
-            else if(hit((EpdRect){480,968,156,96},x,y) && !FOLIO_FIRST_LINE_INDENT(&s_settings))change_setting(4,1);
+            bool indent=FOLIO_FIRST_LINE_INDENT(&s_settings);int t=toggle_hit(1064,x,y,indent);
+            if(t>=0 && t!=(int)indent)change_setting(4,t?1:-1);
         } else if(s_settings_tab==1) {
             for(int i=0;i<2;++i) {
                 if(hit(setting_step(i,-1),x,y)){change_setting(5+i,-1);return;}
                 if(hit(setting_step(i,1),x,y)){change_setting(5+i,1);return;}
             }
-            if(hit((EpdRect){48,560,588,96},x,y)){change_setting(7,1);return;}
-            if(hit(auto_shutdown_toggle(),x,y)){change_setting(14,1);return;}
+            int t=toggle_hit(560,x,y,s_settings.auto_resume);
+            if(t>=0){if(t!=(int)(s_settings.auto_resume!=0))change_setting(7,1);return;}
+            t=toggle_hit(672,x,y,s_settings.auto_shutdown_enabled);
+            if(t>=0){if(t!=(int)(s_settings.auto_shutdown_enabled!=0))change_setting(14,1);return;}
             for(unsigned i=0;i<AUTO_SHUTDOWN_CHOICES;++i)if(hit(auto_shutdown_choice(i),x,y)){
                 change_setting(15,(int)i);return;
             }
         } else {
-            if(hit((EpdRect){48,336,588,96},x,y)){change_setting(9,1);return;}
+            int t=toggle_hit(336,x,y,!s_settings.footer_hidden);
+            if(t>=0){if(t!=(int)!s_settings.footer_hidden)change_setting(9,1);return;}
             for(unsigned i=0;i<2;++i) {
-                if(hit((EpdRect){280+(int)i*184,448,172,96},x,y)){change_setting(10,(int)i);return;}
-                if(hit((EpdRect){280+(int)i*184,560,172,96},x,y)){change_setting(11,(int)i);return;}
+                if(hit(toggle_rect(448,i!=0),x,y)){change_setting(10,(int)i);return;}
+                if(hit(toggle_rect(560,i!=0),x,y)){change_setting(11,(int)i);return;}
             }
             for(unsigned i=0;i<3;++i) {
-                if(hit((EpdRect){48+(int)i*200,736,188,88},x,y)){change_setting(12,(int)i);return;}
-                if(hit((EpdRect){48+(int)i*200,896,188,88},x,y)){change_setting(13,(int)i);return;}
+                if(hit((EpdRect){48+(int)i*200,716,188,96},x,y)){change_setting(12,(int)i);return;}
+                if(hit((EpdRect){48+(int)i*200,880,188,96},x,y)){change_setting(13,(int)i);return;}
             }
         }
     } else if(s_view==VIEW_SYSTEM) {
         if(hit((EpdRect){48,936,282,96},x,y)){suspend_device(false);return;}
         if(hit((EpdRect){354,936,282,96},x,y)){show_view(VIEW_OFF_CONFIRM,true);return;}
-        for(unsigned row=0;row<6;++row)if(hit(system_row(row),x,y)) {
-            if(row==0){s_wr_reader_path[0]=0;enter_weread();}
-            else if(row==1)enter_wifi();
-            else if(row==2){s_settings_return=VIEW_SYSTEM;show_view(VIEW_SETTINGS,true);}
+        for(unsigned row=0;row<5;++row)if(hit(system_row(row),x,y)) {
+            if(row==0){s_settings_tab=0;s_settings_return=VIEW_SYSTEM;show_view(VIEW_SETTINGS,true);}
+            else if(row==1)enter_transfer();
+            else if(row==2){s_wr_reader_path[0]=0;enter_weread();}
             else if(row==3)show_view(VIEW_HOME_SETTINGS,true);
-            else if(row==4)enter_time();
             else show_view(VIEW_DEVICE,true);
             return;
         }
@@ -973,7 +1011,7 @@ static int key_at(int x,int y) {return y>=KEY_AREA_TOP && x>=0 && x<KEY_AREA_WID
 static void handle_key(int key,bool held) {
     activity_track(s_view==VIEW_READING,true);
     if(online_active() && s_view!=VIEW_OFF_CONFIRM) {
-        if(key==1)(void)online_leave(VIEW_DEVICE);
+        if(key==1)(void)online_leave(s_download_face?VIEW_FONTS:VIEW_DEVICE);
         return;
     }
     if(held && key==1){show_view(s_view,true);return;}
@@ -994,7 +1032,7 @@ static void handle_key(int key,bool held) {
         else move_list(key==0?-1:1);
     } else if(s_view==VIEW_FILES && key!=1)files_move(key==0?-1:1);
     else if(key==1)go_back();
-    else if(s_view==VIEW_SETTINGS){unsigned tab=key==0?(s_settings_tab+2)%3:(s_settings_tab+1)%3;if(s_settings_tab!=tab){s_settings_tab=tab;show_view(VIEW_SETTINGS,true);}}
+    else if(s_view==VIEW_SETTINGS && s_settings_tab!=1){s_settings_tab=s_settings_tab?0:2;show_view(VIEW_SETTINGS,true);}
 }
 // Clock refresh is automatic, so it must not postpone the user's idle lock.
 static void refresh_home_clock(void) {
@@ -1096,6 +1134,9 @@ void app_main(void) {
         if(s_suspend_pending)suspend_device(s_suspend_power_off);
         folio_debug_poll();
         activity_track(s_view==VIEW_READING,false);
+        // A lost release sample would otherwise merge every later tap into one
+        // press and block background refreshes and the idle lock.
+        if (pressed && now - press_time > 8000000) pressed = false;
         if (s_hw.touch_ready) {
             cst836u_touch_t touch = {0};
             if (cst836u_read(s_hw.touch, &touch) == ESP_OK) {
@@ -1137,10 +1178,12 @@ void app_main(void) {
             next_activity_save=now+30000000;
             activity_record_book(); activity_flush(); (void)catalog_save();
         }
-        if(!pressed){refresh_reader_pagination();refresh_home_clock();refresh_lock_preview();refresh_transfer_status();refresh_weread();refresh_setup();}
+        if(!pressed){refresh_reader_save();refresh_reader_pagination();refresh_home_clock();refresh_lock_preview();refresh_transfer_status();refresh_weread();refresh_setup();}
         uint32_t browser_utc;
         if(folio_network_take_utc(&browser_utc)) {bool saved=folio_power_set_time(browser_utc);setup_time_received(saved);if(!saved)ESP_LOGW(TAG,"PMU time could not be saved");}
         if (idle_lock_due(pressed)) suspend_device(false);
-        vTaskDelay(pdMS_TO_TICKS(30));
+        read_pico_epd_service();
+        // Short taps must be sampled down and up; slower polling loses them.
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }

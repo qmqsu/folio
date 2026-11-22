@@ -333,7 +333,9 @@ static void test_registry(void)
         CHECK(folio_font_builtin_label(native_paths[i]) != NULL);
         folio_font_t *font = folio_font_open(native_paths[i], 24);
         CHECK(font != NULL);
-        CHECK((font->fallback != NULL) == (i == 3));
+        /* Songti borrows missing glyphs from hei; yuan carries its symbols face. */
+        CHECK((font->fallback != NULL) == (i == 0 || i == 3));
+        if (i == 0) CHECK(folio_font_has_glyph(font, 0x5C34) && folio_font_has_glyph(font, 0x5C2C));
         CHECK(live_files == 0 && live_descriptors == 0 && live_mappings == 0);
         folio_font_close(font);
         check_clean();

@@ -40,6 +40,8 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
                                               const folio_reader_options_t* options);
 void folio_reader_close(folio_reader_t* reader);
 bool folio_reader_save(folio_reader_t* reader);
+/* Present the new page before persisting progress with folio_reader_save. */
+bool folio_reader_turn(folio_reader_t* reader, bool next);
 bool folio_reader_next(folio_reader_t* reader);
 bool folio_reader_previous(folio_reader_t* reader);
 void folio_reader_draw(folio_reader_t* reader, uint8_t* framebuffer);

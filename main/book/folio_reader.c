@@ -18,6 +18,15 @@
 #include "folio_weread_paths.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#include "esp_timer.h"
+#define OPEN_MARK(name) ESP_LOGD("reader", "open %s +%lld ms", name, (long long)((esp_timer_get_time() - open_started) / 1000))
+#define OPEN_START() int64_t open_started = esp_timer_get_time()
+#else
+#define OPEN_MARK(name) ((void)0)
+#define OPEN_START() ((void)0)
+#endif
 
 #ifndef FOLIO_SD_ROOT
 #define FOLIO_SD_ROOT "/sdcard"
@@ -35,6 +44,8 @@
 #define TOP_MARGIN 48
 #define BOTTOM_MARGIN 64
 #define PROGRESS_MAGIC 0x324F4C46u
+#define INSPECT_MAGIC 0x31534E49u
+#define LAYOUT_MAGIC 0x3159414Cu
 
 typedef struct { uint32_t codepoint; int16_t x, baseline; } glyph_placement_t;
 typedef struct {
@@ -85,13 +96,31 @@ struct folio_reader {
     size_t footer_chapter;
     uint32_t footer_base;
     bool footer_base_valid;
+    uint32_t layout_saved_pages, layout_saved_page;
+    char* io_buffer; // Owned here, never by stdio: picolibc has double-freed library buffers on fclose.
     bookmark_t bookmarks[BOOKMARK_LIMIT];
 };
 static char s_last_error[128];
 
+// Yield by elapsed time rather than by fixed counts: a 1 ms tick sleep every
+// few hundred glyphs dominated long reflows.
+static void reader_yield(void) {
+#ifdef ESP_PLATFORM
+    static int64_t last;
+    int64_t now = esp_timer_get_time();
+    if (now - last < 100000) return;
+    last = now;
+#endif
+    vTaskDelay(1);
+}
 static void* reader_alloc(size_t size) {
     void* memory = heap_caps_calloc(1, size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     return memory != NULL ? memory : calloc(1, size);
+}
+// Must run before the stream's first read; stdio otherwise uses 128-byte reads.
+static void attach_io_buffer(folio_reader_t* reader, FILE* file) {
+    if (!reader->io_buffer) reader->io_buffer = reader_alloc(16384);
+    if (reader->io_buffer) (void)setvbuf(file, reader->io_buffer, _IOFBF, 16384);
 }
 static void copy_utf8(char* destination, size_t capacity, const char* source, size_t length) {
     if (capacity == 0) return;
@@ -228,6 +257,67 @@ static bool inspect_file(FILE* file, uint64_t* hash_out, uint32_t* size_out,
     if (start_out != NULL) *start_out = bom ? 3 : 0;
     return fseek(file, bom ? 3 : 0, SEEK_SET) == 0;
 }
+// Full-file passes over multi-megabyte books dominate opening time. Their
+// results are cached and reused while size, mtime and both file ends match.
+typedef struct {
+    uint32_t magic, size, mtime, head, tail, start, words, encoding, full;
+    uint64_t hash;
+    uint32_t checksum;
+} inspect_record_t;
+static void inspect_record_path(const char* path, char* out, size_t cap) {
+    uint64_t key = hash_update(UINT64_C(14695981039346656037), (const uint8_t*)path, strlen(path));
+    snprintf(out, cap, PROGRESS_DIR "/%08lx%08lx.i", (unsigned long)(uint32_t)(key >> 32), (unsigned long)(uint32_t)key);
+}
+static bool inspect_identity(FILE* file, const char* path, inspect_record_t* record) {
+    struct stat info;
+    uint8_t edge[1024];
+    if (stat(path, &info) != 0 || info.st_size <= 0 || info.st_size > INT32_MAX) return false;
+    record->size = (uint32_t)info.st_size; record->mtime = (uint32_t)info.st_mtime;
+    size_t n = record->size < sizeof(edge) ? record->size : sizeof(edge);
+    if (fseek(file, 0, SEEK_SET) != 0 || fread(edge, 1, n, file) != n) return false;
+    record->head = checksum_bytes(edge, n);
+    if (fseek(file, (long)(record->size - n), SEEK_SET) != 0 || fread(edge, 1, n, file) != n) return false;
+    record->tail = checksum_bytes(edge, n);
+    return true;
+}
+static bool inspect_cached(FILE* file, const char* path, uint64_t* hash_out, uint32_t* size_out,
+                           folio_encoding_t* encoding_out, uint32_t* start_out, uint32_t* words) {
+    inspect_record_t now = {0}, saved = {0};
+    char record_path[sizeof(PROGRESS_DIR) + 24];
+    inspect_record_path(path, record_path, sizeof(record_path));
+    bool identified = inspect_identity(file, path, &now);
+    bool want_full = encoding_out != NULL;
+    if (identified) {
+        FILE* cache = fopen(record_path, "rb");
+        if (cache != NULL) {
+            bool read = fread(&saved, sizeof(saved), 1, cache) == 1;
+            fclose(cache);
+            if (read && saved.magic == INSPECT_MAGIC && saved.checksum == checksum_bytes(&saved, offsetof(inspect_record_t, checksum)) &&
+                saved.size == now.size && saved.mtime == now.mtime && saved.head == now.head && saved.tail == now.tail &&
+                (saved.full || !want_full) && saved.start < saved.size && saved.encoding <= FOLIO_ENCODING_GBK) {
+                *hash_out = saved.hash; *size_out = saved.size;
+                if (encoding_out) *encoding_out = (folio_encoding_t)saved.encoding;
+                if (start_out) *start_out = saved.start;
+                if (words) *words = saved.words;
+                return fseek(file, (long)saved.start, SEEK_SET) == 0;
+            }
+        }
+    }
+    folio_encoding_t encoding = FOLIO_ENCODING_UTF8;
+    uint32_t start = 0, count = 0;
+    if (!inspect_file(file, hash_out, size_out, want_full ? &encoding : NULL, want_full ? &start : NULL, want_full ? &count : NULL)) return false;
+    if (encoding_out) *encoding_out = encoding;
+    if (start_out) *start_out = start;
+    if (words) *words = count;
+    if (identified && now.size == *size_out && ensure_directory(STATE_DIR) && ensure_directory(PROGRESS_DIR)) {
+        now.magic = INSPECT_MAGIC; now.hash = *hash_out; now.full = want_full;
+        now.encoding = (uint32_t)encoding; now.start = start; now.words = count;
+        now.checksum = checksum_bytes(&now, offsetof(inspect_record_t, checksum));
+        FILE* cache = fopen(record_path, "wb");
+        if (cache != NULL) { (void)fwrite(&now, sizeof(now), 1, cache); fclose(cache); }
+    }
+    return fseek(file, (long)(want_full ? start : 0), SEEK_SET) == 0;
+}
 void folio_reader_options_default(folio_reader_options_t* options) {
     if (options != NULL) *options = (folio_reader_options_t){.margin = 48, .line_gap = 8, .paragraph_gap = 10, .justify = true};
 }
@@ -235,15 +325,17 @@ static bool options_valid(const folio_reader_options_t* options) {
     return options != NULL && options->margin >= 12 && options->margin <= 120 &&
            options->line_gap >= 0 && options->line_gap <= 48 && options->paragraph_gap >= 0 && options->paragraph_gap <= 72 && options->underline <= 2 && options->underline_shade <= 2;
 }
-static bool next_codepoint(folio_reader_t* reader, uint32_t* cp) {
-    if (!folio_text_next(reader->file, reader->encoding, cp)) return false;
+static unsigned next_codepoint(folio_reader_t* reader, uint32_t* cp) {
+    unsigned bytes = folio_text_next_bytes(reader->file, reader->encoding, cp);
+    if (!bytes) return 0;
     if (*cp == '\r') {
         int following = fgetc(reader->file);
         if (following != EOF && following != '\n' && ungetc(following, reader->file) == EOF) return false;
+        if (following == '\n') ++bytes;
         *cp = '\n';
     }
     if (*cp == '\t') *cp = ' ';
-    return true;
+    return bytes;
 }
 static bool close_line(page_layout_t* page, uint16_t first, int start_x, int end_x, bool justify) {
     if (page->placement_count == first) return true;
@@ -270,14 +362,15 @@ static const text_token_t* cursor_peek(text_cursor_t* cursor, unsigned index) {
     while (cursor->count <= index && !cursor->eof && !cursor->failed) {
         uint32_t start = cursor->count ? cursor->lookahead[cursor->count-1].end : cursor->offset;
         uint32_t cp;
-        if (!next_codepoint(cursor->reader, &cp)) {
+        unsigned bytes = next_codepoint(cursor->reader, &cp);
+        if (!bytes) {
             cursor->failed = ferror(cursor->reader->file) || !feof(cursor->reader->file) ||
                              (uint32_t)start < cursor->reader->file_size;
             cursor->eof = true;
             break;
         }
-        long end = ftell(cursor->reader->file);
-        if (end < 0 || (uint32_t)end <= start || (uint32_t)end > cursor->reader->file_size) { cursor->failed = true; break; }
+        uint32_t end = start + bytes;
+        if (end <= start || end > cursor->reader->file_size) { cursor->failed = true; break; }
         cursor->lookahead[cursor->count++] = (text_token_t){.cp = cp, .start = (uint32_t)start, .end = (uint32_t)end};
     }
     return index < cursor->count ? &cursor->lookahead[index] : NULL;
@@ -353,7 +446,7 @@ static bool build_page(folio_reader_t* reader, uint32_t offset, bool paragraph_s
         const text_token_t* token = cursor_peek(&cursor, 0);
         if (token == NULL) break;
         uint32_t cp = token->cp;
-        if (++work % 512 == 0) vTaskDelay(1);
+        if (++work % 64 == 0) reader_yield();
         if(reader->is_weread && (cp==' '||cp==0xa0||cp==0x3000) && page->placement_count==line_first){cursor_consume(&cursor);continue;}
         if (cp == '\n') {
             cursor_consume(&cursor);
@@ -404,6 +497,7 @@ static void clear_checkpoints(folio_reader_t* reader) {
     memset(reader->checkpoints, 0, sizeof(reader->checkpoints));
     memset(reader->recent, 0, sizeof(reader->recent));
     reader->checkpoints[0] = (checkpoint_t){.offset = reader->content_start, .paragraph_start = true, .valid = true};
+    reader->layout_saved_pages = reader->layout_saved_page = UINT32_MAX;
 }
 static void remember_checkpoint(folio_reader_t* reader, const page_layout_t* page) {
     if (page->number % CHECKPOINT_INTERVAL != 0) return;
@@ -426,11 +520,18 @@ static bool seek_internal(folio_reader_t* reader, uint32_t target, bool by_page)
     if (reader->scan.count) {
         if (target>=reader->scan.count) target=reader->scan.count-1;
         if (target!=reader->page->number) {
+            folio_font_flush_cache(reader->font);
             folio_pdf_scan_t next={.count=reader->scan.count};
+            // Two full-page images plus the JPEG and decoder exhaust PSRAM; drop
+            // the current image first and redraw it below if decoding fails.
+            uint32_t current=reader->page->number;
+            free(reader->scan.pixels); reader->scan.pixels=NULL;
             if (!folio_pdf_scan_page(reader->path,target,epd_rotated_display_width(),epd_rotated_display_height()-BOTTOM_MARGIN,&next)) {
+                folio_pdf_scan_t again={.count=reader->scan.count};
+                if (folio_pdf_scan_page(reader->path,current,epd_rotated_display_width(),epd_rotated_display_height()-BOTTOM_MARGIN,&again))
+                    reader->scan=again;
                 set_error(reader,"无法读取这页扫描图像，请检查文件及 TF 卡"); return false;
             }
-            free(reader->scan.pixels);
             reader->scan=next;
         }
         reader->page->number=reader->page->start=target;
@@ -468,8 +569,120 @@ static bool seek_internal(folio_reader_t* reader, uint32_t target, bool by_page)
             set_error(reader, "跳转位置超出书籍范围"); return false;
         }
         offset = reader->scratch->end; paragraph = reader->scratch->next_paragraph;
-        if (++number % 8 == 0) vTaskDelay(1);
+        ++number; reader_yield();
     }
+}
+// Pagination checkpoints are persisted so reopening a book deep into its text
+// does not lay out every page from the beginning again.
+typedef struct {
+    uint32_t magic, count, chapters, page_number, page_offset, pagination_offset, pagination_pages, footer_base;
+    uint64_t key;
+    uint8_t page_paragraph, pagination_paragraph, pagination_done, footer_valid;
+    uint32_t footer_chapter;
+} layout_header_t;
+typedef struct { uint32_t index, offset, paragraph; } layout_checkpoint_t;
+static uint64_t layout_key(folio_reader_t* reader) {
+    static const uint32_t samples[] = {0x4E00, 0x7684, 0x3002, 0xFF0C, 0x201C, 'a', 'm', 'W', '1', ' '};
+    int32_t values[24 + sizeof(samples) / sizeof(samples[0])];
+    size_t n = 0;
+    values[n++] = (int32_t)reader->file_size; values[n++] = (int32_t)reader->content_start;
+    values[n++] = (int32_t)reader->text_hash; values[n++] = (int32_t)(reader->text_hash >> 32);
+    values[n++] = reader->options.margin; values[n++] = reader->options.line_gap;
+    values[n++] = reader->options.paragraph_gap; values[n++] = reader->options.justify;
+    values[n++] = reader->options.disable_indent; values[n++] = reader->options.hide_footer;
+    values[n++] = reader->options.underline && reader->options.line_gap < 6;
+    values[n++] = epd_rotated_display_width(); values[n++] = epd_rotated_display_height();
+    values[n++] = folio_font_pixel_height(reader->font); values[n++] = folio_font_line_height(reader->font);
+    values[n++] = folio_font_ascent(reader->font); values[n++] = reader->is_weread;
+    values[n++] = (int32_t)reader->epub.chapter_count;
+    for (size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) values[n++] = folio_font_advance(reader->font, samples[i], 0);
+    uint64_t key = hash_update(UINT64_C(14695981039346656037), (const uint8_t*)values, n * sizeof(values[0]));
+    for (size_t i = 0; i < reader->epub.chapter_count; ++i)
+        key = hash_update(key, (const uint8_t*)&reader->epub.chapters[i].offset, sizeof(uint32_t));
+    return key;
+}
+static void layout_path(const folio_reader_t* reader, char* out, size_t cap) {
+    snprintf(out, cap, "%s.l", reader->progress_path);
+}
+static void save_layout(folio_reader_t* reader) {
+    if (reader->scan.count || (reader->layout_saved_pages == reader->pagination_pages &&
+                               reader->layout_saved_page == reader->page->number)) return;
+    layout_header_t header = {.magic = LAYOUT_MAGIC, .chapters = reader->chapter_pages ? (uint32_t)reader->epub.chapter_count : 0,
+        .page_number = reader->page->number, .page_offset = reader->page->start, .page_paragraph = reader->page->paragraph_start,
+        .pagination_offset = reader->pagination_offset, .pagination_pages = reader->pagination_pages,
+        .pagination_paragraph = reader->pagination_paragraph, .pagination_done = reader->pagination_done,
+        .footer_valid = reader->footer_base_valid, .footer_base = reader->footer_base,
+        .footer_chapter = (uint32_t)reader->footer_chapter, .key = layout_key(reader)};
+    for (size_t i = 1; i < CHECKPOINT_COUNT; ++i) header.count += reader->checkpoints[i].valid;
+    char path[sizeof(reader->progress_path) + 4];
+    layout_path(reader, path, sizeof(path));
+    FILE* file = fopen(path, "wb");
+    if (file == NULL) return;
+    uint64_t sum = hash_update(UINT64_C(14695981039346656037), (const uint8_t*)&header, sizeof(header));
+    bool okay = fwrite(&header, sizeof(header), 1, file) == 1;
+    for (size_t i = 1; okay && i < CHECKPOINT_COUNT; ++i) {
+        if (!reader->checkpoints[i].valid) continue;
+        layout_checkpoint_t entry = {(uint32_t)i, reader->checkpoints[i].offset, reader->checkpoints[i].paragraph_start};
+        sum = hash_update(sum, (const uint8_t*)&entry, sizeof(entry));
+        okay = fwrite(&entry, sizeof(entry), 1, file) == 1;
+    }
+    if (okay && header.chapters) {
+        sum = hash_update(sum, (const uint8_t*)reader->chapter_pages, header.chapters * sizeof(uint32_t));
+        okay = fwrite(reader->chapter_pages, sizeof(uint32_t), header.chapters, file) == header.chapters;
+    }
+    okay = okay && fwrite(&sum, sizeof(sum), 1, file) == 1;
+    if (fclose(file) != 0) okay = false;
+    if (okay) { reader->layout_saved_pages = reader->pagination_pages; reader->layout_saved_page = reader->page->number; }
+    else (void)remove(path);
+}
+static void load_layout(folio_reader_t* reader, uint32_t saved_offset) {
+    char path[sizeof(reader->progress_path) + 4];
+    layout_path(reader, path, sizeof(path));
+    FILE* file = fopen(path, "rb");
+    if (file == NULL) return;
+    layout_header_t header;
+    layout_checkpoint_t* entries = NULL;
+    uint32_t* chapters = NULL;
+    uint64_t sum = 0, stored = 0;
+    bool okay = fread(&header, sizeof(header), 1, file) == 1 && header.magic == LAYOUT_MAGIC &&
+        header.count < CHECKPOINT_COUNT && header.key == layout_key(reader) &&
+        (header.chapters == 0 || header.chapters == reader->epub.chapter_count) &&
+        header.page_offset < reader->file_size && header.pagination_offset <= reader->file_size;
+    if (okay) {
+        sum = hash_update(UINT64_C(14695981039346656037), (const uint8_t*)&header, sizeof(header));
+        entries = reader_alloc((header.count + 1) * sizeof(*entries));
+        chapters = header.chapters ? reader_alloc(header.chapters * sizeof(uint32_t)) : NULL;
+        okay = entries && (!header.chapters || chapters) &&
+            fread(entries, sizeof(*entries), header.count, file) == header.count &&
+            (!header.chapters || fread(chapters, sizeof(uint32_t), header.chapters, file) == header.chapters) &&
+            fread(&stored, sizeof(stored), 1, file) == 1;
+    }
+    fclose(file);
+    if (okay) {
+        sum = hash_update(sum, (const uint8_t*)entries, header.count * sizeof(*entries));
+        if (header.chapters) sum = hash_update(sum, (const uint8_t*)chapters, header.chapters * sizeof(uint32_t));
+        okay = sum == stored;
+    }
+    for (uint32_t i = 0; okay && i < header.count; ++i)
+        okay = entries[i].index > 0 && entries[i].index < CHECKPOINT_COUNT && entries[i].offset < reader->file_size;
+    if (okay) {
+        for (uint32_t i = 0; i < header.count; ++i)
+            reader->checkpoints[entries[i].index] = (checkpoint_t){.offset = entries[i].offset,
+                .paragraph_start = entries[i].paragraph != 0, .valid = true};
+        reader->pagination_offset = header.pagination_offset; reader->pagination_pages = header.pagination_pages;
+        reader->pagination_paragraph = header.pagination_paragraph; reader->pagination_done = header.pagination_done;
+        if (chapters) { free(reader->chapter_pages); reader->chapter_pages = chapters; chapters = NULL; }
+        else if (reader->epub.chapter_count) { reader->pagination_offset = reader->content_start; reader->pagination_pages = 0;
+            reader->pagination_paragraph = true; reader->pagination_done = false; }
+        if (header.footer_valid && header.footer_chapter < reader->epub.chapter_count) {
+            reader->footer_base_valid = true; reader->footer_base = header.footer_base; reader->footer_chapter = header.footer_chapter;
+        }
+        if (header.page_offset == saved_offset) reader->recent[header.page_number % CHECKPOINT_INTERVAL] =
+            (recent_page_t){.number = header.page_number, .position = {.offset = header.page_offset,
+                .paragraph_start = header.page_paragraph != 0, .valid = true}};
+        reader->layout_saved_pages = header.pagination_pages; reader->layout_saved_page = header.page_number;
+    }
+    free(entries); free(chapters);
 }
 static bool record_valid(const folio_reader_t* reader, const progress_record_t* record) {
     if (record->magic != PROGRESS_MAGIC || record->version != 2 ||
@@ -506,6 +719,7 @@ static uint32_t load_progress(folio_reader_t* reader) {
 }
 bool folio_reader_save(folio_reader_t* reader) {
     if (reader == NULL || !reader->ready) return false;
+    save_layout(reader);
     if (!reader->dirty) return true;
     if (!ensure_directory(STATE_DIR) || !ensure_directory(PROGRESS_DIR)) {
         set_error(reader, "无法创建进度目录，请检查 TF 卡"); return false;
@@ -539,6 +753,7 @@ bool folio_reader_save(folio_reader_t* reader) {
 folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_font_t* font,
                                               const folio_reader_options_t* options) {
     s_last_error[0] = '\0';
+    OPEN_START();
     if (book == NULL || font == NULL || (options != NULL && !options_valid(options)) ||
         (book != NULL && (memchr(book->path, 0, sizeof(book->path)) == NULL ||
                           memchr(book->title, 0, sizeof(book->title)) == NULL))) {
@@ -562,13 +777,16 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
     if(native_cache && folio_wr_aux(reader->path,"entry.wrb",pointer_path,sizeof(pointer_path)) && access(pointer_path,F_OK)==0)source_path=pointer_path;
     FILE* source = fopen(source_path, "rb");
     if (source == NULL) { set_error(reader, "无法打开书籍，请检查 TF 卡"); goto fail; }
+    const char* kind = strrchr(reader->path, '.');
+    if (!native_cache && kind && strcasecmp(kind, ".txt") == 0) attach_io_buffer(reader, source);
     const char* extension = strrchr(reader->path, '.');
     bool is_weread = native_cache || (extension != NULL && strcasecmp(extension, ".wrb") == 0);
     reader->is_weread = is_weread;
     reader->is_epub = is_weread || (extension != NULL && strcasecmp(extension, ".epub") == 0);
     reader->is_pdf = extension && !strcasecmp(extension, ".pdf");
     if (reader->is_pdf) {
-        bool inspected = inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL, NULL);
+        folio_font_flush_cache(font);
+        bool inspected = inspect_cached(source, source_path, &reader->source_hash, &reader->source_size, NULL, NULL, NULL);
         fclose(source);
         if (!inspected || !ensure_directory(STATE_DIR)) {
             set_error(reader, "无法读取 PDF 或创建文本缓存"); goto fail;
@@ -577,6 +795,7 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
         snprintf(cache, sizeof(cache), STATE_DIR "/pdf1-%08lx%08lx.txt",
                  (unsigned long)(uint32_t)(reader->source_hash>>32), (unsigned long)(uint32_t)reader->source_hash);
         reader->file = fopen(cache, "rb");
+        if (reader->file) attach_io_buffer(reader, reader->file);
         if (!reader->file && folio_pdf_scan_page(source_path,0,epd_rotated_display_width(),
                 epd_rotated_display_height()-BOTTOM_MARGIN,&reader->scan)) {
             reader->file_size=reader->scan.count;
@@ -596,23 +815,26 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
                 set_error(reader,"无法读取 PDF，请检查文档加密、页面格式和 TF 卡空间"); goto fail;
             }
             reader->file = fopen(cache,"rb");
+            if (reader->file) attach_io_buffer(reader, reader->file);
         }
-        if (!reader->scan.count && (!reader->file || !inspect_file(reader->file,&reader->text_hash,&reader->file_size,
+        if (!reader->scan.count && (!reader->file || !inspect_cached(reader->file,cache,&reader->text_hash,&reader->file_size,
                                             &reader->encoding,&reader->content_start, &reader->word_count))) {
             set_error(reader,"无法读取 PDF 文本缓存"); goto fail;
         }
     } else if (reader->is_epub) {
-        bool inspected = !is_weread || inspect_file(source, &reader->source_hash, &reader->source_size, NULL, NULL, NULL);
+        bool inspected = !is_weread || inspect_cached(source, source_path, &reader->source_hash, &reader->source_size, NULL, NULL, NULL);
         fclose(source);
         if (!inspected) { set_error(reader, "无法读取 EPUB 文件"); goto fail; }
         if (is_weread ? !folio_weread_cache_prepare(reader->path, &reader->epub, reader->error, sizeof(reader->error)) :
                        !folio_epub_prepare(reader->path, &reader->epub, reader->error, sizeof(reader->error))) goto fail;
+        OPEN_MARK("epub_prepare");
         if (!is_weread) {
             reader->source_hash = reader->epub.source_hash;
             reader->source_size = reader->epub.source_size;
         }
         reader->file = fopen(reader->epub.text_path, "rb");
-        if (reader->file == NULL || !inspect_file(reader->file, &reader->text_hash, &reader->file_size,
+        if (reader->file) attach_io_buffer(reader, reader->file);
+        if (reader->file == NULL || !inspect_cached(reader->file, reader->epub.text_path, &reader->text_hash, &reader->file_size,
                                                 &reader->encoding, &reader->content_start, &reader->word_count)) {
             set_error(reader, "无法读取 EPUB 文本缓存"); goto fail;
         }
@@ -629,19 +851,28 @@ folio_reader_t* folio_reader_open_with_options(const folio_book_t* book, folio_f
         if (reader->epub.title[0]) copy_utf8(reader->title, sizeof(reader->title), reader->epub.title, strlen(reader->epub.title));
     } else {
         reader->file = source;
-        if (!inspect_file(source, &reader->source_hash, &reader->source_size, &reader->encoding, &reader->content_start, &reader->word_count)) {
+        if (!inspect_cached(source, source_path, &reader->source_hash, &reader->source_size, &reader->encoding, &reader->content_start, &reader->word_count)) {
             set_error(reader, "TXT 读取失败，仅支持 UTF-8 或 GBK 编码"); goto fail;
         }
         reader->text_hash = reader->source_hash; reader->file_size = reader->source_size;
     }
+    OPEN_MARK("inspect");
     if (reader->content_start >= reader->file_size) { set_error(reader, "书籍没有可阅读的文本"); goto fail; }
     reader->page = reader_alloc(sizeof(*reader->page)); reader->scratch = reader_alloc(sizeof(*reader->scratch));
     if (reader->page == NULL || reader->scratch == NULL) { set_error(reader, "内存不足，无法排版书籍"); goto fail; }
     clear_checkpoints(reader);
     uint32_t saved_offset = load_progress(reader);
+    if (!reader->scan.count) load_layout(reader, saved_offset);
+    OPEN_MARK("progress");
     if (!seek_internal(reader, saved_offset, false)) goto fail;
+    if (reader->active_slot >= 0 && reader->page->start == saved_offset) reader->dirty = false;
+    OPEN_MARK("seek");
+#if defined(ESP_PLATFORM) && defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
+    ESP_LOGI("reader", "open page=%lu offset=%lu size=%lu", (unsigned long)reader->page->number, (unsigned long)saved_offset, (unsigned long)reader->file_size);
+#endif
     reader->ready = true;
     (void)folio_reader_save(reader);
+    OPEN_MARK("save");
     return reader;
 fail:
     snprintf(s_last_error, sizeof(s_last_error), "%s", reader->error[0] ? reader->error : "无法打开书籍");
@@ -655,28 +886,34 @@ void folio_reader_close(folio_reader_t* reader) {
     if (reader == NULL) return;
     if (reader->ready) (void)folio_reader_save(reader);
     if (reader->file != NULL) fclose(reader->file);
+    free(reader->io_buffer);
     folio_epub_free(&reader->epub);
     free(reader->scan.pixels);
     free(reader->chapter_pages);
     free(reader->page); free(reader->scratch); free(reader);
 }
-bool folio_reader_next(folio_reader_t* reader) {
+bool folio_reader_turn(folio_reader_t* reader, bool next) {
     if (reader == NULL || !reader->ready) return false;
     reader->error[0] = '\0';
+    if (!next) {
+        if (reader->page->number == 0) return false;
+        return seek_internal(reader, reader->page->number - 1, true);
+    }
     if (reader->page->end >= reader->file_size) return false;
-    if (reader->scan.count) return folio_reader_seek(reader,reader->page->end);
+    if (reader->scan.count) return seek_internal(reader, reader->page->end, false);
     if (!build_page(reader, reader->page->end, reader->page->next_paragraph, reader->page->number + 1, reader->scratch)) {
         set_error(reader, "翻页失败，请检查 TF 卡"); return false;
     }
     commit_page(reader);
+    return true;
+}
+bool folio_reader_next(folio_reader_t* reader) {
+    if (!folio_reader_turn(reader, true)) return false;
     (void)folio_reader_save(reader);
     return true;
 }
 bool folio_reader_previous(folio_reader_t* reader) {
-    if (reader == NULL || !reader->ready) return false;
-    reader->error[0] = '\0';
-    if (reader->page->number == 0) return false;
-    if (!seek_internal(reader, reader->page->number - 1, true)) return false;
+    if (!folio_reader_turn(reader, false)) return false;
     (void)folio_reader_save(reader);
     return true;
 }
@@ -868,7 +1105,7 @@ uint32_t folio_reader_chapter_page_number(folio_reader_t* reader) {
             if(!build_page(reader,offset,paragraph,number,reader->scratch) || reader->scratch->end<=offset)return 0;
             if(target<reader->scratch->end)break;
             offset=reader->scratch->end;paragraph=reader->scratch->next_paragraph;++number;
-            if(number%8==0)vTaskDelay(1);
+            reader_yield();
         }
         if(number>reader->page->number)return 0;
         reader->footer_base=number;

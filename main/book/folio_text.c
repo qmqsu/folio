@@ -9,17 +9,18 @@
 #endif
 __attribute__((weak,noinline)) bool folio_io_cancelled(void) { return false; }
 
+// Each stream is read by one task only; skip the per-byte stdio lock.
 static int read_byte(FILE* file) {
-    return fgetc(file);
+    return getc_unlocked(file);
 }
 
-static bool read_utf8(FILE* file, uint32_t* out, bool* valid) {
+static unsigned read_utf8(FILE* file, uint32_t* out, bool* valid) {
     int b0 = read_byte(file);
-    if (b0 == EOF) return false;
+    if (b0 == EOF) return 0;
     if (valid != NULL) *valid = true;
     if (b0 < 0x80) {
         *out = (uint32_t)b0;
-        return true;
+        return 1;
     }
 
     unsigned need;
@@ -40,23 +41,23 @@ static bool read_utf8(FILE* file, uint32_t* out, bool* valid) {
     } else {
         *out = 0xFFFD;
         if (valid != NULL) *valid = false;
-        return true;
+        return 1;
     }
 
     unsigned consumed = 0;
     while (consumed < need) {
         int bx = read_byte(file);
         if (bx == EOF) {
-            if (ferror(file)) return false;
+            if (ferror(file)) return 0;
             *out = 0xFFFD;
             if (valid != NULL) *valid = false;
-            return true;
+            return consumed + 1;
         }
         if ((bx & 0xC0) != 0x80) {
-            if (ungetc(bx, file) == EOF) return false;
+            if (ungetc(bx, file) == EOF) return 0;
             *out = 0xFFFD;
             if (valid != NULL) *valid = false;
-            return true;
+            return consumed + 1;
         }
         value = (value << 6) | (uint32_t)(bx & 0x3F);
         ++consumed;
@@ -67,30 +68,30 @@ static bool read_utf8(FILE* file, uint32_t* out, bool* valid) {
     } else {
         *out = value;
     }
-    return true;
+    return consumed + 1;
 }
 
-static bool read_gbk(FILE* file, uint32_t* out) {
+static unsigned read_gbk(FILE* file, uint32_t* out) {
     int lead = read_byte(file);
-    if (lead == EOF) return false;
+    if (lead == EOF) return 0;
     if (lead < 0x80) {
         *out = (uint32_t)lead;
-        return true;
+        return 1;
     }
     if (lead == 0x80) {
         *out = 0x20AC;
-        return true;
+        return 1;
     }
     if (lead < 0x81 || lead > 0xFE) {
         *out = 0xFFFD;
-        return true;
+        return 1;
     }
 
     int trail = read_byte(file);
     if (trail == EOF) {
-        if (ferror(file)) return false;
+        if (ferror(file)) return 0;
         *out = 0xFFFD;
-        return true;
+        return 1;
     }
     int trail_index;
     if (trail >= 0x40 && trail <= 0x7E) {
@@ -98,13 +99,13 @@ static bool read_gbk(FILE* file, uint32_t* out) {
     } else if (trail >= 0x80 && trail <= 0xFE) {
         trail_index = 63 + trail - 0x80;
     } else {
-        if (ungetc(trail, file) == EOF) return false;
+        if (ungetc(trail, file) == EOF) return 0;
         *out = 0xFFFD;
-        return true;
+        return 1;
     }
     uint16_t mapped = folio_gbk_table[(lead - 0x81) * 190 + trail_index];
     *out = mapped ? mapped : 0xFFFD;
-    return true;
+    return 2;
 }
 
 bool folio_text_detect(FILE* file, folio_encoding_t* encoding, long* byte_length) {
@@ -154,10 +155,14 @@ bool folio_text_detect(FILE* file, folio_encoding_t* encoding, long* byte_length
     return fseek(file, bom ? 3 : 0, SEEK_SET) == 0 && original >= 0;
 }
 
-bool folio_text_next(FILE* file, folio_encoding_t encoding, uint32_t* codepoint) {
+unsigned folio_text_next_bytes(FILE* file, folio_encoding_t encoding, uint32_t* codepoint) {
     if (file == NULL || codepoint == NULL) return false;
     if (encoding == FOLIO_ENCODING_GBK) return read_gbk(file, codepoint);
     return read_utf8(file, codepoint, NULL);
+}
+
+bool folio_text_next(FILE* file, folio_encoding_t encoding, uint32_t* codepoint) {
+    return folio_text_next_bytes(file, encoding, codepoint) != 0;
 }
 
 uint32_t folio_utf8_next(const char** text) {

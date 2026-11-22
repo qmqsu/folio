@@ -252,6 +252,7 @@ main/book/folio_epub.h
 main/book/folio_font.c
 main/book/folio_gvar.inc
 main/book/folio_font.h
+main/book/folio_font_assets.h
 main/book/folio_font_pack.c
 main/book/folio_font_pack.h
 main/book/folio_gbk_table.c
@@ -575,6 +576,7 @@ tools/tests/ui_stubs/esp_system.h
 tools/tests/ui_stubs/esp_timer.h
 tools/tests/ui_stubs/freertos/FreeRTOS.h
 tools/tests/ui_stubs/freertos/task.h
+tools/tests/ui_stubs/read_pico_board.h
 tools/tests/ui_stubs/read_pico_init.h
 tools/tests/ui_stubs/read_pico_sd.h
 tools/tests/update_stubs/esp_app_desc.h

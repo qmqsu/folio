@@ -153,6 +153,7 @@ static bool mock_online_cancel, mock_online_start_fail;
 bool folio_online_update_init(const folio_online_hooks_t* hooks) {
     assert(!mock_online.busy);mock_online_hooks=*hooks;memset(&mock_online,0,sizeof(mock_online));return true;
 }
+bool folio_online_start_font(unsigned face,char* error,size_t cap) { (void)error;(void)cap;return face>=1 && face<=3; }
 bool folio_online_update_start_check(const char* channel,char* error,size_t cap) {
     snprintf(mock_online_requested_channel,sizeof(mock_online_requested_channel),"%s",channel?channel:"");
     // Match the real folio_remote_manifest_url contract; beta is not an alias.
@@ -1307,7 +1308,7 @@ static void test_idle_and_card_recovery(const char* font_path) {
     assert(s_card_ready && !s_card_probe_pending && s_book_count==12);
     // The actual rescan action remounts an unavailable card, not merely an empty index.
     remounts=card_remount_calls;s_card_ready=false;mock_card_unmounted=true;
-    show_view(VIEW_DEVICE,true);tap_row(4);
+    show_view(VIEW_DEVICE,true);tap_row(5);
     assert(s_view==VIEW_LIBRARY && s_card_ready && s_book_count==12 && card_remount_calls==remounts+1);
     puts("Idle busy guard and async card wait/late recovery/rescan remount passed");
 }
@@ -1346,7 +1347,7 @@ static void test_auto_shutdown_settings(const char* directory) {
     unsigned writes=settings_writes;
     tap_rect(auto_shutdown_choice(0));
     assert(settings_writes==writes && s_settings.auto_shutdown_minutes==30);
-    tap_rect(auto_shutdown_toggle());assert(s_settings.auto_shutdown_enabled && settings_writes==writes+1);
+    tap_rect(toggle_rect(672,!s_settings.auto_shutdown_enabled));assert(s_settings.auto_shutdown_enabled && settings_writes==writes+1);
     const uint16_t expected[]={30,180,360};
     assert(sizeof(auto_shutdown_minutes)/sizeof(auto_shutdown_minutes[0])==3);
     for(unsigned i=0;i<3;++i) {
@@ -1358,15 +1359,15 @@ static void test_auto_shutdown_settings(const char* directory) {
     handle_tap(140,1004);handle_tap(340,1004); // Removed second row has no actions.
     assert(settings_writes==writes && s_settings.auto_shutdown_minutes==360);
     save_pgm(directory,"123-auto-shutdown-enabled");
-    tap_rect(auto_shutdown_toggle());assert(!s_settings.auto_shutdown_enabled && s_settings.auto_shutdown_minutes==360);
+    tap_rect(toggle_rect(672,!s_settings.auto_shutdown_enabled));assert(!s_settings.auto_shutdown_enabled && s_settings.auto_shutdown_minutes==360);
     save_pgm(directory,"124-auto-shutdown-disabled");
     writes=settings_writes;tap_rect(auto_shutdown_choice(1));assert(settings_writes==writes);
-    fail_settings_write=true;tap_rect(auto_shutdown_toggle());
+    fail_settings_write=true;tap_rect(toggle_rect(672,!s_settings.auto_shutdown_enabled));
     assert(s_view==VIEW_ERROR && !s_settings.auto_shutdown_enabled && s_settings.auto_shutdown_minutes==360);
-    fail_settings_write=false;tap_rect(done_rect());tap_rect(auto_shutdown_toggle());
+    fail_settings_write=false;tap_rect(done_rect());tap_rect(toggle_rect(672,!s_settings.auto_shutdown_enabled));
     fail_settings_write=true;tap_rect(auto_shutdown_choice(1));
     assert(s_view==VIEW_ERROR && s_settings.auto_shutdown_enabled && s_settings.auto_shutdown_minutes==360);
-    fail_settings_write=false;tap_rect(done_rect());tap_rect(auto_shutdown_choice(0));tap_rect(auto_shutdown_toggle());
+    fail_settings_write=false;tap_rect(done_rect());tap_rect(auto_shutdown_choice(0));tap_rect(toggle_rect(672,!s_settings.auto_shutdown_enabled));
     assert(!s_settings.auto_shutdown_enabled && s_settings.auto_shutdown_minutes==30);
     puts("Auto shutdown UI: every duration, disabled hit guards, preserved selection and save rollback passed");
 }
@@ -1523,14 +1524,14 @@ static void test_transfer_records(const char* directory) {
     fail_transfer_stop=true;tap_rect(transfer_done_rect());
     assert(s_view==VIEW_TRANSFER && s_transfer_tab==1 && mock_transfer.running);
     fail_transfer_stop=false;tap_rect(transfer_done_rect());
-    assert(s_view==VIEW_DEVICE && !mock_transfer.running);
+    assert(s_view==VIEW_SYSTEM && !mock_transfer.running);
     enter_transfer();assert(s_view==VIEW_TRANSFER && mock_transfer.running);
     mock_transfer=before;s_transfer_tab=0;show_view(VIEW_TRANSFER,false);
 }
 
 static void test_management(const char* directory,const char* font_path) {
     snprintf(s_settings.font_path,sizeof(s_settings.font_path),"%s",font_path);
-    show_root(VIEW_SYSTEM);tap_rect(system_row(5));assert(s_view==VIEW_DEVICE);
+    show_root(VIEW_SYSTEM);tap_rect(system_row(4));assert(s_view==VIEW_DEVICE);
     save_pgm(directory,"43-device-tools");
     show_root(VIEW_LIBRARY);tap_rect(library_tool(0));assert(s_view==VIEW_CATALOG);save_pgm(directory,"44-catalog-search");
     snprintf(s_search,sizeof(s_search),"yiye");s_catalog_options.filter=FOLIO_CATALOG_ALL;
@@ -1540,7 +1541,7 @@ static void test_management(const char* directory,const char* font_path) {
     show_root(VIEW_LIBRARY);s_search[0]='\0';s_catalog_options.filter=FOLIO_CATALOG_UNREAD;catalog_select();
     for(size_t i=0;i<s_shelf_count;++i)assert(!folio_catalog_metadata(s_catalog,s_books[s_shelf_indexes[i]].path)->read);
     s_catalog_options.filter=FOLIO_CATALOG_ALL;catalog_select();
-    show_root(VIEW_SYSTEM);tap_rect(system_row(5));handle_tap(200,288);
+    show_root(VIEW_SYSTEM);tap_rect(system_row(1));
     assert(s_view==VIEW_TRANSFER && mock_transfer.running);save_pgm(directory,"45-transfer");
     test_transfer_records(directory);
     mock_transfer.busy=true;mock_transfer.total=100;mock_transfer.received=50;advance_clock(3);
@@ -1548,7 +1549,7 @@ static void test_management(const char* directory,const char* font_path) {
     fail_transfer_stop=true;unsigned sync_before=card_sync_calls;
     handle_key(1,false);assert(s_view==VIEW_TRANSFER && mock_transfer.running);
     assert(!prepare_card_change() && s_font && card_sync_calls==sync_before);
-    fail_transfer_stop=false;handle_key(1,false);assert(s_view==VIEW_DEVICE && !mock_transfer.running);
+    fail_transfer_stop=false;handle_key(1,false);assert(s_view==VIEW_SYSTEM && !mock_transfer.running);
     enter_storage();if(s_view!=VIEW_STORAGE)fprintf(stderr,"storage UI: %s\n",s_error);
     assert(s_view==VIEW_STORAGE);save_pgm(directory,"46-storage");
     tap_rect(done_rect());assert(s_view==VIEW_FORMAT_CONFIRM && !s_format_armed && format_calls==0);
@@ -1616,17 +1617,17 @@ static uint32_t fixture_weread_book(void) {
 static void test_weread(const char* directory,const char* font_path) {
     snprintf(s_settings.font_path,sizeof(s_settings.font_path),"%s",font_path);
     show_root(VIEW_SYSTEM);
-    unsigned start=wr_starts;tap_rect(system_row(0));
+    unsigned start=wr_starts;tap_rect(system_row(2));
     assert(s_view==VIEW_WEREAD && wr_starts==start+1 && !mock_wr.running);
     save_pgm(directory,"56-weread-network-setup");
     unsigned initial_commands=wr_commands;
     handle_tap(188,1032);assert(s_view==VIEW_WEREAD && !s_wr_confirm && wr_commands==initial_commands);
     tap_rect(back_rect());assert(s_view==VIEW_SYSTEM && !mock_transfer.running);
-    enter_wifi();assert(s_view==VIEW_WIFI && s_wifi_return==VIEW_SYSTEM);
+    enter_wifi();assert(s_view==VIEW_WIFI && s_wifi_return==VIEW_DEVICE);
     mock_network.has_credentials=mock_network.clock_valid=true;
     mock_network.running=mock_network.connected=true;unsigned stops_before_handoff=wr_stops;
-    tap_rect(back_rect());assert(s_view==VIEW_SYSTEM);
-    tap_rect(system_row(0));assert(s_view==VIEW_WEREAD && !mock_transfer.running && mock_wr.state==FOLIO_WR_LOGIN);
+    tap_rect(back_rect());assert(s_view==VIEW_DEVICE);
+    show_root(VIEW_SYSTEM);tap_rect(system_row(2));assert(s_view==VIEW_WEREAD && !mock_transfer.running && mock_wr.state==FOLIO_WR_LOGIN);
     assert(mock_network.connected && wr_stops==stops_before_handoff);
     save_pgm(directory,"57-weread-qr-login");
     unsigned commands=wr_commands;tap_rect(done_rect());wr_command_is(FOLIO_WR_NEW_QR,commands,0);
@@ -1809,7 +1810,7 @@ static void test_setup(const char* directory) {
     save_pgm(directory,"73-wifi-password");
     snprintf(s_wifi_password,sizeof(s_wifi_password),"password8");
     tap_rect(done_rect());assert(s_view==VIEW_WIFI && s_wifi_connecting && !s_wifi_password[0]);
-    refresh_setup();assert(!s_wifi_connecting);go_back();assert(s_view==VIEW_SYSTEM && mock_network.connected);
+    refresh_setup();assert(!s_wifi_connecting);go_back();assert(s_view==VIEW_DEVICE && mock_network.connected);
     enter_wifi();assert(mock_network.connected && !s_wifi_scanning && !strstr(s_setup_message,"校时"));go_back();assert(mock_network.connected);
     enter_wifi_from_weread();assert(s_wifi_return==VIEW_WEREAD && strstr(s_setup_message,"微信读书"));
     s_wifi_return=VIEW_SYSTEM;go_back();
@@ -2050,6 +2051,10 @@ static void test_native_font_selection(const char* directory) {
     assert(settings_writes == writes);
     scan_fonts(); show_view(VIEW_FONTS, true); save_pgm(directory, "173-native-resource-fallback");
     assert(folio_settings_save(&s_settings) && !strcmp(persisted_settings.font_path, ids[2]));
+    handle_tap(550,LIST_TOP+2*LIST_ROW+48);
+    assert(s_view==VIEW_UPDATE && s_download_face==2);
+    save_pgm(directory,"174-font-download");
+    go_back(); assert(s_view==VIEW_FONTS);
     select_font(2); /* No usable resource but the original Songti can be restored. */
     assert(s_view == VIEW_ERROR && strstr(s_error, "folio-fonts/") && strstr(s_error, "内存不足"));
     assert_font_identity(ids[0], ids[2]);
@@ -2275,11 +2280,9 @@ int main(int argc, char** argv) {
     advance_clock(3);refresh_home_clock();assert(!s_reader_notice);
     assert(folio_reader_seek_percent(s_reader,37));show_view(VIEW_READING,true);
     open_tools(); tap_rect(tool_rect(4)); assert(s_view == VIEW_SETTINGS && s_settings_tab == 0);
-    for(unsigned old_tab=1;old_tab<=2;++old_tab){
-        handle_tap(142+(int)old_tab*200,260);assert(s_settings_tab==old_tab);
-        tap_rect(done_rect());assert(s_view==VIEW_TOOLS);
-        tap_rect(tool_rect(4));assert(s_view==VIEW_SETTINGS && s_settings_tab==0);
-    }
+    handle_tap(490,260);assert(s_settings_tab==2);
+    tap_rect(back_rect());assert(s_view==VIEW_TOOLS);
+    tap_rect(tool_rect(4));assert(s_view==VIEW_SETTINGS && s_settings_tab==0);
     save_pgm(argv[2], "09-typography");
     unsigned before = s_settings.font_size;
     tap_rect(setting_step(0, 1)); assert(s_settings.font_size == before + 2 && settings_writes > 0);
@@ -2290,40 +2293,45 @@ int main(int argc, char** argv) {
     fixture_fonts(argv[1]); show_view(VIEW_FONTS, true); save_pgm(argv[2], "11-fonts");
     tap_row(FOLIO_FONT_BUILTIN_COUNT); assert(s_view == VIEW_SETTINGS && s_reader != NULL); // External choices retain source-view return.
     test_native_font_selection(argv[2]);
-    handle_tap(340, 260); assert(s_settings_tab == 1); save_pgm(argv[2], "10-preferences");
+    s_settings_tab = 1; show_view(VIEW_SETTINGS, true); assert(power_group()); save_pgm(argv[2], "10-preferences");
     unsigned refresh = s_settings.refresh_every; tap_rect(setting_step(0, 1)); assert(s_settings.refresh_every == refresh + 1);
-    bool resume = s_settings.auto_resume; handle_tap(540, 608); assert(s_settings.auto_resume != resume);
-    handle_tap(48,608);assert(s_settings.auto_resume==resume);
-    handle_tap(635,608);assert(s_settings.auto_resume!=resume);
-    handle_tap(636,608);assert(s_settings.auto_resume!=resume);
+    bool resume = s_settings.auto_resume; handle_tap(540, 608); assert(s_settings.auto_resume);
+    handle_tap(48,608);assert(!s_settings.auto_resume);
+    handle_tap(400,608);assert(!s_settings.auto_resume);
+    handle_tap(635,608);assert(s_settings.auto_resume);
+    handle_tap(636,608);assert(s_settings.auto_resume);
+    if(s_settings.auto_resume!=resume)handle_tap(48,608);
     test_idle_settings(argv[2]);
     test_auto_shutdown_settings(argv[2]);
-    handle_tap(540,260);assert(s_settings_tab==2);save_pgm(argv[2],"85-reader-display-settings");
+    s_settings_tab=0;show_view(VIEW_SETTINGS,true);handle_tap(540,260);assert(s_settings_tab==2);save_pgm(argv[2],"85-reader-display-settings");
     handle_tap(550,496);assert(FOLIO_READER_FOOTER(&s_settings)==2);
     handle_tap(550,608);assert(s_settings.progress_chapter);
     handle_tap(342,780);assert(s_settings.underline==1);
     handle_tap(550,940);assert(s_settings.underline_shade==2);
-    tap_rect(done_rect());tap_rect(done_rect());assert(s_view==VIEW_READING);
+    tap_rect(back_rect());tap_rect(done_rect());assert(s_view==VIEW_READING);
     save_pgm(argv[2],"86-reading-chapter-percent-underlined");
     open_tools();tap_rect(tool_rect(4));handle_tap(540,260);
     handle_tap(550,780);assert(s_settings.underline==2);
-    handle_tap(350,496);assert(FOLIO_READER_FOOTER(&s_settings)==0);
-    tap_rect(done_rect());tap_rect(done_rect());
+    handle_tap(400,496);assert(FOLIO_READER_FOOTER(&s_settings)==0);
+    tap_rect(back_rect());tap_rect(done_rect());
     uint32_t original_position=folio_reader_position(s_reader);
+    s_last_activity=mock_us;
+    refresh_reader_pagination();
+    mock_us+=750000;
     while(!folio_reader_page_total(s_reader,false))refresh_reader_pagination();
     assert(folio_reader_position(s_reader)==original_position);
     show_view(VIEW_READING,true);save_pgm(argv[2],"87-reading-chapter-pages-dashed");
-    open_tools();tap_rect(tool_rect(4));handle_tap(540,260);handle_tap(550,384);
+    open_tools();tap_rect(tool_rect(4));handle_tap(540,260);handle_tap(140,384);
     assert(s_settings.footer_hidden);save_pgm(argv[2],"88-reader-status-hidden-setting");
-    tap_rect(done_rect());tap_rect(done_rect());save_pgm(argv[2],"89-reading-text-only");
+    tap_rect(back_rect());tap_rect(done_rect());save_pgm(argv[2],"89-reading-text-only");
     uint8_t* only_text=malloc(sizeof(screen));assert(only_text);memcpy(only_text,screen,sizeof(screen));
     epd_hl_set_all_white(&s_hw.hl);folio_reader_draw(s_reader,fb());assert(!memcmp(only_text,screen,sizeof(screen)));free(only_text);
-    open_tools();tap_rect(tool_rect(4));handle_tap(540,260);handle_tap(550,384);handle_tap(140,780);handle_tap(350,608);
+    open_tools();tap_rect(tool_rect(4));handle_tap(540,260);handle_tap(140,384);handle_tap(140,780);handle_tap(400,608);
     assert(!s_settings.footer_hidden && !s_settings.underline && !s_settings.progress_chapter);
     handle_key(2,false);assert(s_settings_tab==0);
-    handle_tap(380, 996); assert(!FOLIO_FIRST_LINE_INDENT(&s_settings));
-    handle_tap(558, 996); assert(FOLIO_FIRST_LINE_INDENT(&s_settings));
-    tap_rect(done_rect()); assert(s_view == VIEW_TOOLS);
+    handle_tap(400, 1112); assert(!FOLIO_FIRST_LINE_INDENT(&s_settings));
+    handle_tap(558, 1112); assert(FOLIO_FIRST_LINE_INDENT(&s_settings));
+    tap_rect(back_rect()); assert(s_view == VIEW_TOOLS);
     tap_rect(done_rect()); assert(s_view == VIEW_READING); save_pgm(argv[2], "12-reflowed-reading");
     handle_key(1, true); assert(s_view == VIEW_READING);
     folio_reader_t* locked_reader=s_reader;folio_font_t* locked_font=s_font;

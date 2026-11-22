@@ -497,7 +497,7 @@ static void board_poweron(epd_ctrl_state_t* state) {
 
     sy7636a_status_t st;
     if (sy7636a_read(s_sy, &st) == ESP_OK) {
-        ESP_LOGI(
+        ESP_LOGD(
             TAG, "SY7636A rails ready, VCOM=-%dmV, temperature=%dC",
             st.vcom_mv, st.temperature_c
         );
@@ -694,6 +694,14 @@ esp_err_t read_pico_toggle_vcomctl(void) {
     const sy7636a_power_config_t* cfg = sy7636a_get_config(s_sy);
     bool next = cfg ? !cfg->vcom_manual : true;
     return sy7636a_set_vcom_manual(s_sy, next);
+}
+
+void read_pico_epd_service(void) {
+    sy7636a_service(s_sy);
+}
+
+void read_pico_epd_settle(void) {
+    sy7636a_finish_power_off(s_sy);
 }
 
 bool read_pico_rails_on(void) {

@@ -10,7 +10,7 @@ static struct tm s_clock_edit;
 static unsigned s_clock_field;
 static uint32_t s_time_clock_minute;
 static view_t s_wifi_return=VIEW_SYSTEM;
-static EpdRect wifi_row(unsigned i){return (EpdRect){48,344+(int)i*104,588,96};}
+static EpdRect wifi_row(unsigned i){return (EpdRect){48,336+(int)i*108,588,96};}
 static EpdRect clock_field(unsigned i){return (EpdRect){48+(int)(i%3)*200,352+(int)(i/3)*152,188,128};}
 static void setup_save(view_t view) {
     if(!folio_settings_save(&s_settings))show_error("设置未能保存，请重试。",view);else show_view(view,false);
@@ -26,12 +26,9 @@ static void draw_wifi(void) {
         icon((EpdRect){588,row.y+36,24,24},FOLIO_ICON_CHEVRON_RIGHT,INK);
     }
     if(!s_wifi_count)centered(342,576,588,30,MUTED,s_wifi_scanning?"正在扫描附近网络":"暂未发现网络，请重新扫描");
-    size_t pages=(s_wifi_count+5)/6;if(!pages)pages=1;
-    char page[32];snprintf(page,sizeof(page),"%u / %u",(unsigned)s_wifi_page+1,(unsigned)pages);
-    icon((EpdRect){96,1008,32,32},FOLIO_ICON_CHEVRON_LEFT,s_wifi_page?INK:RULE);
-    centered(342,1036,160,24,MUTED,page);icon((EpdRect){556,1008,32,32},FOLIO_ICON_CHEVRON_RIGHT,s_wifi_page+1<pages?INK:RULE);
-    action_state((EpdRect){48,1096,282,96},"重新扫描",false,!s_wifi_scanning&&!s_wifi_connecting);
-    action_state((EpdRect){354,1096,282,96},"手动输入",false,!s_wifi_scanning&&!s_wifi_connecting);
+    action_state((EpdRect){48,984,282,96},"重新扫描",false,!s_wifi_scanning&&!s_wifi_connecting);
+    action_state((EpdRect){354,984,282,96},"手动输入",false,!s_wifi_scanning&&!s_wifi_connecting);
+    pager(s_wifi_page,s_wifi_count,6);
 }
 static void draw_wifi_input(void) {
     epd_fill_rect((EpdRect){48,264,588,144},PAPER,fb());panel((EpdRect){48,264,588,144});
@@ -62,7 +59,7 @@ static void enter_wifi_for(view_t target) {
     if(!stop_transfer()){snprintf(s_setup_message,sizeof(s_setup_message),"网络正在停止，请稍后重新扫描。");show_view(VIEW_WIFI,true);return;}
     s_view=VIEW_WIFI;start_wifi_scan();
 }
-static void enter_wifi(void) {enter_wifi_for(VIEW_SYSTEM);}
+static void enter_wifi(void) {enter_wifi_for(VIEW_DEVICE);}
 static void enter_wifi_from_weread(void) {enter_wifi_for(VIEW_WEREAD);}
 static void enter_time(void) {
     snprintf(s_setup_message,sizeof(s_setup_message),"手动设置或通过 Wi-Fi 同步时间。\n长时间关机后建议联网校时。");show_view(VIEW_TIME,true);
@@ -113,15 +110,16 @@ static bool setup_back(void) {
     bool keep_connection=s_view==VIEW_WIFI && state.connected;
     if(!keep_connection && !folio_network_stop()){snprintf(s_setup_message,sizeof(s_setup_message),"正在关闭网络，请稍后再返回。");show_view(s_view,false);return true;}
     s_clock_waiting=s_clock_ntp_started=s_wifi_scanning=s_wifi_connecting=false;memset(s_wifi_password,0,sizeof(s_wifi_password));
-    if(s_view==VIEW_WIFI && s_wifi_return==VIEW_WEREAD)enter_weread();else show_view(VIEW_SYSTEM,true);return true;
+    if(s_view==VIEW_WIFI && s_wifi_return==VIEW_WEREAD)enter_weread();else show_view(VIEW_DEVICE,true);return true;
 }
 static bool setup_tap(int x,int y) {
     if(s_view==VIEW_WIFI) {
         if(s_wifi_scanning||s_wifi_connecting)return true;
-        if(hit((EpdRect){48,1096,282,96},x,y)){start_wifi_scan();return true;}
-        if(hit((EpdRect){354,1096,282,96},x,y)){s_wifi_manual=true;s_wifi_name[0]=s_wifi_password[0]=0;s_wifi_keys=0;s_setup_message[0]=0;show_view(VIEW_WIFI_EDIT,true);return true;}
-        if(hit((EpdRect){48,984,128,88},x,y)&&s_wifi_page){--s_wifi_page;show_view(VIEW_WIFI,false);return true;}
-        if(hit((EpdRect){508,984,128,88},x,y)&&(s_wifi_page+1)*6<s_wifi_count){++s_wifi_page;show_view(VIEW_WIFI,false);return true;}
+        if(hit((EpdRect){48,984,282,96},x,y)){start_wifi_scan();return true;}
+        if(hit((EpdRect){354,984,282,96},x,y)){s_wifi_manual=true;s_wifi_name[0]=s_wifi_password[0]=0;s_wifi_keys=0;s_setup_message[0]=0;show_view(VIEW_WIFI_EDIT,true);return true;}
+        int page=footer_hit(x,y);
+        if(page==0&&s_wifi_page){--s_wifi_page;show_view(VIEW_WIFI,false);return true;}
+        if(page==2&&(s_wifi_page+1)*6<s_wifi_count){++s_wifi_page;show_view(VIEW_WIFI,false);return true;}
         for(unsigned i=0;i<6;++i){size_t n=s_wifi_page*6+i;if(n<s_wifi_count && hit(wifi_row(i),x,y)) {
             snprintf(s_wifi_name,sizeof(s_wifi_name),"%s",s_wifi_items[n].ssid);s_wifi_saved=folio_network_saved_password(s_wifi_name,s_wifi_password,sizeof(s_wifi_password));s_wifi_manual=false;s_wifi_keys=0;
             snprintf(s_setup_message,sizeof(s_setup_message),s_wifi_items[n].secured?"密码直接显示；用大小写、123 和 #+= 切换键盘。":"开放网络可留空密码直接连接。");show_view(VIEW_WIFI_EDIT,true);return true;}}

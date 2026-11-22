@@ -232,20 +232,20 @@ static void draw_home(void) {
 }
 
 static void draw_home_settings(void) {
-    page_header("设置","个性化","字体、首页与待机画面");
-    action((EpdRect){48,232,588,96},"字体",false);
-    label(48,376,636,28,MUTED,"首页阅读统计");
+    page_header("设置","显示与电源","首页统计、锁屏与关机画面");
+    settings_tabs();
+    label(48,384,636,26,MUTED,"首页阅读统计");
     const char* charts[]={"热力图","条形图"};
-    for(unsigned i=0;i<2;++i)action((EpdRect){48+(int)i*300,400,288,88},charts[i],s_settings.home_chart==i);
-    label(48,552,636,28,MUTED,"锁屏显示");label(48,728,636,28,MUTED,"关机显示");
+    for(unsigned i=0;i<2;++i)action((EpdRect){48+(int)i*300,400,288,96},charts[i],s_settings.home_chart==i);
+    label(48,560,636,26,MUTED,"锁屏显示");label(48,736,636,26,MUTED,"关机显示");
     const char* lock_styles[]={"书籍封面","阅读正文","时间显示"};
     const char* off_styles[]={"书籍封面","阅读正文","图片壁纸"};
     for(unsigned i=0;i<3;++i){
-        action((EpdRect){48+(int)i*200,576,188,88},lock_styles[i],FOLIO_LOCK_STYLE(&s_settings)==i);
-        action((EpdRect){48+(int)i*200,752,188,88},off_styles[i],FOLIO_OFF_STYLE(&s_settings)==i);
+        action((EpdRect){48+(int)i*200,576,188,96},lock_styles[i],FOLIO_LOCK_STYLE(&s_settings)==i);
+        action((EpdRect){48+(int)i*200,752,188,96},off_styles[i],FOLIO_OFF_STYLE(&s_settings)==i);
     }
-    action((EpdRect){48,848,588,72},"选择关机壁纸",false);
-    action((EpdRect){48,944,282,96},"预览锁屏",false);action((EpdRect){354,944,282,96},"预览关机",false);
-    centered_in((EpdRect){48,1080,588,72},24,MUTED,"锁屏时间按分钟更新 · 关机保留静态画面");
+    action((EpdRect){48,864,588,96},"选择关机壁纸",false);
+    action((EpdRect){48,976,282,96},"预览锁屏",false);action((EpdRect){354,976,282,96},"预览关机",false);
+    centered_in((EpdRect){48,1088,588,64},24,MUTED,"锁屏时间按分钟更新 · 关机保留静态画面");
 }
 

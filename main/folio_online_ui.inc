@@ -2,6 +2,7 @@
 enum {
     ONLINE_ACTION_CHECK_STABLE=1,
     ONLINE_ACTION_DOWNLOAD=2,
+    ONLINE_ACTION_FONT=5,
 #if defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
     ONLINE_ACTION_CHECK_PREVIEW=3,
     ONLINE_ACTION_DOWNLOAD_PREVIEW=4,
@@ -102,7 +103,9 @@ static void online_start_worker(unsigned action) {
     online_publish_safety();
     // Channel selection is action-scoped: no failed preview can become the UI default.
     bool okay=false;
-    if(action==ONLINE_ACTION_CHECK_STABLE)
+    if(action==ONLINE_ACTION_FONT)
+        okay=folio_online_start_font(s_download_face,error,sizeof(error));
+    else if(action==ONLINE_ACTION_CHECK_STABLE)
         okay=folio_online_update_start_check("stable",error,sizeof(error));
 #if defined(CONFIG_FOLIO_USB_DEBUG) && CONFIG_FOLIO_USB_DEBUG
     else if(action==ONLINE_ACTION_CHECK_PREVIEW)
@@ -120,7 +123,7 @@ static void online_start_worker(unsigned action) {
 static void online_connect(unsigned action) {
     if(online_active())return;
     if(!online_init()){online_error("更新任务未能初始化，请重试。");show_view(VIEW_UPDATE,false);return;}
-    if(!folio_update_available()){online_error("当前分区不支持在线安装。首次安装请使用 USB 完整发布包。");show_view(VIEW_UPDATE,false);return;}
+    if(action!=ONLINE_ACTION_FONT && !folio_update_available()){online_error("当前分区不支持在线安装。首次安装请使用 USB 完整发布包。");show_view(VIEW_UPDATE,false);return;}
     if(!s_card_ready){online_error("请先插入可用的 TF 卡，再检查或下载更新。");show_view(VIEW_UPDATE,false);return;}
     // Stop competing workers before claiming the network, not before install.
     if(!stop_transfer()){online_error("其他网络任务正在停止，请稍后重试。");show_view(VIEW_UPDATE,false);return;}
@@ -214,6 +217,14 @@ static void online_tap(int x,int y) {
         }
         return;
     }
+    if(s_download_face) {
+        if(hit((EpdRect){48,984,588,96},x,y)){s_online_wifi_setup=true;enter_wifi_for(VIEW_UPDATE);return;}
+        if(hit(done_rect(),x,y)){
+            if(!s_online_message[0] && s_online_snapshot.state==FOLIO_ONLINE_FONT_READY)select_font(s_download_face);
+            else online_connect(ONLINE_ACTION_FONT);
+        }
+        return;
+    }
     if(s_online_confirm) {
         if(hit((EpdRect){48,984,588,96},x,y)){s_online_confirm=false;show_view(VIEW_UPDATE,true);}
         else if(hit(done_rect(),x,y))online_install();
@@ -294,6 +305,21 @@ static void refresh_online(void) {
     if(s_view==VIEW_UPDATE)show_view(VIEW_UPDATE,false);
 }
 static void draw_online_update(void) {
+    if(s_download_face) {
+        const char *name=folio_font_builtin_label(folio_font_builtin_path(s_download_face));
+        bool busy=online_active();
+        bool ready=!s_online_message[0] && s_online_snapshot.state==FOLIO_ONLINE_FONT_READY;
+        page_header("字体","下载字体",name);
+        const char *message=s_online_message[0]?s_online_message:s_online_wait?"正在连接 Wi-Fi":
+            s_online_snapshot.message[0]?s_online_snapshot.message:"连接 Wi-Fi 后将字体保存到 TF 卡，下载后可离线阅读。";
+        paragraph(60,368,624,32,52,5,INK,message);
+        if(busy && s_online_snapshot.total) {
+            char percent[32];snprintf(percent,sizeof(percent),"%u%%",(unsigned)(100ull*s_online_snapshot.received/s_online_snapshot.total));
+            label(60,660,620,36,INK,percent);
+        }
+        if(!busy)text_action((EpdRect){48,984,588,96},"设置 Wi-Fi");
+        action(done_rect(),busy?"取消下载":ready?"启用字体":"下载到 TF 卡",true);return;
+    }
     char current[80];snprintf(current,sizeof(current),"当前版本  %s",esp_app_get_description()->version);
     page_header(s_online_confirm?"取消":"返回",s_online_confirm?"确认安装":"固件升级",current);
     if(s_online_confirm) {

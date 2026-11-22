@@ -20,7 +20,14 @@ static void* fault_caps_malloc(size_t size, unsigned caps) {
 static bool fail_malloc;
 static void* fault_malloc(size_t size) { return fail_malloc ? NULL : malloc(size); }
 #define malloc fault_malloc
+static size_t font_reads;
+static size_t count_font_read(void *data,size_t size,size_t count,FILE *file) {
+    ++font_reads;
+    return fread(data,size,count,file);
+}
+#define fread count_font_read
 #include "../../main/book/folio_font.c"
+#undef fread
 #undef malloc
 #undef heap_caps_malloc
 
@@ -209,8 +216,8 @@ static void bitmap_budget_regressions(void) {
         assert(font->cache_bytes <= CACHE_BITMAP_LIMIT);
     }
     unsigned live = 0;
-    for (unsigned i = 0; i < FOLIO_GLYPH_CACHE_N; ++i) if (font->cache[i].pixels) ++live;
-    assert(live == 2); // The byte limit evicts before running out of slots.
+    for (unsigned i = 0; i < font->cache_slots; ++i) if (font->cache[i].pixels) ++live;
+    assert(live >= 2 && live < 32); // The byte limit evicts before running out of slots.
     folio_font_close(font); assert(unlink(path) == 0);
 }
 
@@ -383,6 +390,18 @@ static void text_regressions(void) {
     assert(!folio_text_next(file, encoding, &cp) && !ferror(file));
     fclose(file);
 
+    // Count only consumed bytes, including truncated UTF-8 and pushed-back input.
+    const uint8_t mixed[] = {0xf0,0x9f,0x98,0x80, 0xe4,0xb8,'A', 0xe4,0xb8};
+    const unsigned lengths[] = {4,2,1,2};
+    file = bytes_file(mixed, sizeof(mixed));
+    for (size_t i = 0; i < sizeof(lengths)/sizeof(lengths[0]); ++i) {
+        long start = ftell(file);
+        assert(folio_text_next_bytes(file, FOLIO_ENCODING_UTF8, &cp) == lengths[i]);
+        assert(ftell(file) - start == (long)lengths[i]);
+    }
+    assert(!folio_text_next_bytes(file, FOLIO_ENCODING_UTF8, &cp));
+    fclose(file);
+
     const uint8_t utf16[] = {0xFF, 0xFE, 'A', 0};
     file = bytes_file(utf16, sizeof(utf16));
     assert(!folio_text_detect(file, &encoding, &length)); fclose(file);
@@ -440,6 +459,15 @@ int main(int argc, char** argv) {
             printf("Variable outline coverage at five weights: %u %u %u %u %u\n",
                    ink[0],ink[1],ink[2],ink[3],ink[4]);
             folio_font_set_weight(font,0);
+            uint32_t sample_chars[128]; unsigned count=0;
+            for (uint32_t cp=0x4e00; cp<=0x9fff && count<128; ++cp)
+                if (font_glyph_index(font,cp)>0 && glyph_get(font,cp)) sample_chars[count++]=cp;
+            if (count==128) {
+                size_t before=font_reads;
+                for (unsigned j=0;j<count;++j) assert(glyph_get(font,sample_chars[j]));
+                assert(font_reads==before);
+                puts("128 repeated Chinese glyphs: zero additional font-file reads");
+            }
         }
         uint8_t framebuffer[1] = {0};
         // A full PSRAM heap must not turn a valid built-in/card face into a

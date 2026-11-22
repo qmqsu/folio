@@ -50,6 +50,8 @@ struct sy7636a_dev_t {
     bool last_ok;
     bool rails;
     bool en_on;
+    bool en_off_pending;
+    int64_t en_off_at_us;
 };
 
 static bool gpio_ok(gpio_num_t gpio) {
@@ -268,6 +270,7 @@ esp_err_t sy7636a_init(i2c_master_bus_handle_t bus_handle, const sy7636a_config_
 esp_err_t sy7636a_deinit(sy7636a_handle_t h) {
     if (h == NULL) return ESP_OK;
     if (h->rails) (void)sy7636a_power_off(h);
+    sy7636a_finish_power_off(h);
     if (h->dev) i2c_master_bus_rm_device(h->dev);
     free(h);
     return ESP_OK;
@@ -343,20 +346,41 @@ esp_err_t sy7636a_power_on(sy7636a_handle_t h) {
     }
     vTaskDelay(pdMS_TO_TICKS(5));
     h->rails = true;
-    ESP_LOGI(TAG, "rails on, VCOM=-%d mV", h->cfg.vcom_mv);
+    h->en_off_pending = false;
+    ESP_LOGD(TAG, "rails on, VCOM=-%d mV", h->cfg.vcom_mv);
     return ESP_OK;
 }
 
 esp_err_t sy7636a_power_off(sy7636a_handle_t h) {
     if (h == NULL) return ESP_ERR_INVALID_ARG;
+    if (!h->rails && !h->en_on) return ESP_OK;
     (void)set_vcom_en(h, false);
     if (h->en_on) (void)write_reg(h, REG_OPERATION, 0x00);
-    vTaskDelay(pdMS_TO_TICKS(h->poweroff_hold_ms));
+    bool was_on = h->rails;
+    h->rails = false;
+    // The rails are already commanded off; only the EN drop must wait for the
+    // discharge hold. It is deferred so back-to-back refreshes skip the wait.
+    if (h->en_on) {
+        if (!h->en_off_pending || was_on) h->en_off_at_us = esp_timer_get_time() + (int64_t)h->poweroff_hold_ms * 1000;
+        h->en_off_pending = true;
+    }
+    ESP_LOGD(TAG, "rails off");
+    return ESP_OK;
+}
+
+void sy7636a_service(sy7636a_handle_t h) {
+    if (h == NULL || !h->en_off_pending || h->rails) return;
+    if (esp_timer_get_time() < h->en_off_at_us) return;
     (void)set_en(h, false);
     h->en_on = false;
-    h->rails = false;
-    ESP_LOGI(TAG, "rails off");
-    return ESP_OK;
+    h->en_off_pending = false;
+}
+
+void sy7636a_finish_power_off(sy7636a_handle_t h) {
+    if (h == NULL || !h->en_off_pending || h->rails) return;
+    int64_t wait_us = h->en_off_at_us - esp_timer_get_time();
+    if (wait_us > 0) vTaskDelay(pdMS_TO_TICKS((wait_us + 999) / 1000) + 1);
+    sy7636a_service(h);
 }
 
 bool sy7636a_rails_on(sy7636a_handle_t h) {

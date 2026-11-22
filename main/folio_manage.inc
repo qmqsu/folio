@@ -125,6 +125,7 @@ static void inspect_local_update(void) {
     show_view(VIEW_UPDATE,true);
 }
 static void enter_update(void) {
+    s_download_face=0;
     s_update_local=false;s_online_confirm=false;s_online_wifi_setup=false;
     show_view(VIEW_UPDATE,true);
 }
@@ -147,7 +148,7 @@ static bool manage_back(void) {
             folio_cover_clear_cache();
             if(s_wr_network_setup){s_wr_network_setup=false;enter_weread();return true;}
             if(!s_font)load_card(false,false);
-            else {refresh_library();show_view(VIEW_DEVICE,true);}return true;
+            else {refresh_library();show_view(VIEW_SYSTEM,true);}return true;
         case VIEW_STORAGE:show_view(VIEW_DEVICE,true);return true;
         case VIEW_FILES: {
             if(strcmp(s_file_directory,FOLIO_SD_ROOT)==0)show_view(VIEW_DEVICE,true);
@@ -158,6 +159,7 @@ static bool manage_back(void) {
         case VIEW_DELETE_CONFIRM:folio_storage_cancel_delete();show_view(VIEW_FILE_ACTION,true);return true;
         case VIEW_FORMAT_CONFIRM:case VIEW_FORMAT_FINAL:s_format_armed=false;show_view(VIEW_STORAGE,true);return true;
         case VIEW_UPDATE:
+            if(s_download_face){if(online_leave(VIEW_FONTS))show_view(VIEW_FONTS,true);return true;}
             if(s_online_confirm){s_online_confirm=false;show_view(VIEW_UPDATE,true);return true;}
             if(online_leave(VIEW_DEVICE))show_view(VIEW_DEVICE,true);
             return true;
@@ -188,12 +190,12 @@ static bool manage_tap(int x,int y) {
         return true;
     }
     if(s_view==VIEW_DEVICE) {
-        if(x<48 || x>=636 || y<240 || y>=1024 || (y-240)%112>=96)return true;
-        switch((y-240)/112) {
-            case 0:enter_transfer();break;
-            case 1:enter_file_directory(FOLIO_SD_ROOT);break;case 2:enter_storage();break;
-            case 3:enter_update();break;
-            case 4:if(rescan_library())show_view(VIEW_LIBRARY,true);break;
+        if(x<48 || x>=636 || y<232 || y>=904 || (y-232)%112>=96)return true;
+        switch((y-232)/112) {
+            case 0:enter_wifi();break;case 1:enter_time();break;
+            case 2:enter_file_directory(FOLIO_SD_ROOT);break;case 3:enter_storage();break;
+            case 4:enter_update();break;
+            case 5:if(rescan_library())show_view(VIEW_LIBRARY,true);break;
         }return true;
     }
     if(s_view==VIEW_TRANSFER) {

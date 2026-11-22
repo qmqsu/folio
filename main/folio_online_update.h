@@ -13,7 +13,7 @@ typedef enum {
     FOLIO_ONLINE_IDLE, FOLIO_ONLINE_CHECKING, FOLIO_ONLINE_AVAILABLE,
     FOLIO_ONLINE_DOWNLOADING, FOLIO_ONLINE_READY, FOLIO_ONLINE_INSTALLING,
     FOLIO_ONLINE_INSTALLED, FOLIO_ONLINE_NO_RELEASE, FOLIO_ONLINE_FAILED,
-    FOLIO_ONLINE_CANCELLED
+    FOLIO_ONLINE_CANCELLED, FOLIO_ONLINE_FONT_READY
 } folio_online_state_t;
 
 typedef struct {
@@ -68,6 +68,7 @@ typedef struct {
 // During network I/O NO storage lock is held. Storage chunks take short locks;
 // final validation/install holds a lock after the HTTP client is CLOSED.
 bool folio_online_update_init(const folio_online_hooks_t* hooks);
+bool folio_online_start_font(unsigned face, char* error, size_t cap);
 bool folio_online_update_start_check(const char* channel, char* error, size_t error_cap);
 bool folio_online_update_start_download(char* error, size_t error_cap);
 // Explicit UI confirmation only, after saving/closing other card consumers.

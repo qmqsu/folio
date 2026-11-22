@@ -55,14 +55,14 @@ static void draw_catalog(void) {
     action(done_rect(),"显示结果",true);
 }
 static void draw_device(void) {
-    page_header("设置","传书与系统","书籍、文件和固件维护");
-    const char* names[]={"无线传书","文件管理","存储空间","固件升级","重新扫描书架"};
-    for(unsigned i=0;i<5;++i) {
-        EpdRect r={48,240+(int)i*112,588,96};panel(r);
-        label(72,baseline_for_center_y(34,names[i],r.y+48),568,34,INK,names[i]);
-        icon((EpdRect){596,r.y+36,24,24},FOLIO_ICON_CHEVRON_RIGHT,MUTED);
+    page_header("设置","系统设置","网络、时间、存储与固件");
+    const char* names[]={"Wi-Fi","日期与时间","文件管理","存储空间","固件升级","重新扫描书架"};
+    for(unsigned i=0;i<6;++i) {
+        EpdRect r={48,232+(int)i*112,588,96};panel(r);
+        label(72,baseline_for_center_y(32,names[i],r.y+48),564,32,INK,names[i]);
+        if(i<5)icon((EpdRect){588,r.y+36,24,24},FOLIO_ICON_CHEVRON_RIGHT,MUTED);
     }
-    centered(342,1060,588,24,MUTED,"传书与同步结束后，Wi-Fi 自动关闭");
+    centered(342,1000,588,24,MUTED,"传书与同步结束后，Wi-Fi 自动关闭");
 }
 static void storage_size(char* output,size_t capacity,uint64_t bytes) {
     if(bytes>=UINT64_C(1000000000))snprintf(output,capacity,"%llu.%02llu GB",(unsigned long long)(bytes/1000000000),(unsigned long long)(bytes%1000000000/10000000));

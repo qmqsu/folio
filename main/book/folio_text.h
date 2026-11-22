@@ -15,6 +15,7 @@ bool folio_text_detect(FILE* file, folio_encoding_t* encoding, long* byte_length
 
 // Reads the next Unicode scalar. Invalid UTF-8/GBK bytes become U+FFFD.
 // Returns false at EOF or I/O failure; callers must distinguish errors with ferror(file).
+unsigned folio_text_next_bytes(FILE* file, folio_encoding_t encoding, uint32_t* codepoint);
 bool folio_text_next(FILE* file, folio_encoding_t encoding, uint32_t* codepoint);
 
 // Decode one UTF-8 sequence from memory. Invalid input consumes one byte.

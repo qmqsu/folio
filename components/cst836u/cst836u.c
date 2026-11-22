@@ -200,7 +200,7 @@ esp_err_t cst836u_read(cst836u_handle_t h, cst836u_touch_t* touch) {
 
     uint8_t active_n = 0;
     bool have_primary = false;
-    for (int i = 0; i < CST836U_MAX_POINTS; i++) {
+    for (unsigned i = 0; i < touch->count; ++i) {
         const uint8_t* src = &data[3 + i * 6];
         cst836u_point_t* pt = &touch->points[i];
         uint8_t event = src[0] >> 6;
@@ -214,7 +214,7 @@ esp_err_t cst836u_read(cst836u_handle_t h, cst836u_touch_t* touch) {
             continue;
         }
         pt->active = event != 1;
-        if (!have_primary) {
+        if (pt->active && !have_primary) {
             touch->x = pt->x;
             touch->y = pt->y;
             have_primary = true;

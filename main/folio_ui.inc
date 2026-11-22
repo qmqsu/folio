@@ -29,14 +29,21 @@ static EpdRect library_tool(unsigned i) { return (EpdRect){348+(int)i*96,112,96,
 static EpdRect done_rect(void) { return (EpdRect){48, 1096, 588, 96}; }
 static EpdRect tool_rect(unsigned i) { return (EpdRect){56+(int)(i%3)*196, 640+(int)(i/3)*144, 180, 128}; }
 static EpdRect setting_step(int row, int direction) {
-    int top=s_settings_tab ? 336+row*112 : 504+row*92;
-    return (EpdRect){direction<0 ? 332 : 540, top, 96, s_settings_tab ? 96 : 76};
+    int top=s_settings_tab ? 336+row*112 : 504+row*112;
+    return (EpdRect){direction<0 ? 332 : 540, top, 96, 96};
+}
+// One on/off control style for every binary setting: label plus 关闭/开启.
+// Every two-choice row shares these columns so buttons line up across rows.
+static EpdRect toggle_rect(int y,bool on) { return (EpdRect){on?496:344,y,140,96}; }
+// Returns the requested state; the label side flips the current value.
+static int toggle_hit(int row_y,int x,int y,bool on) {
+    if(hit((EpdRect){48,row_y,292,96},x,y))return !on;
+    return hit(toggle_rect(row_y,false),x,y)?0:hit(toggle_rect(row_y,true),x,y)?1:-1;
 }
 static const uint16_t auto_shutdown_minutes[] = {30,180,360};
 #define AUTO_SHUTDOWN_CHOICES (sizeof(auto_shutdown_minutes)/sizeof(auto_shutdown_minutes[0]))
-static EpdRect auto_shutdown_toggle(void) { return (EpdRect){48,688,588,96}; }
 static EpdRect auto_shutdown_choice(unsigned i) {
-    return (EpdRect){48+(int)i*200,856,188,88};
+    return (EpdRect){48+(int)i*200,832,188,96};
 }
 static EpdRect jump_step(unsigned i) { return (EpdRect){48+(int)i*150, 600, 138, 104}; }
 static int footer_hit(int x, int y) {
@@ -274,15 +281,16 @@ static void show_error(const char* message,view_t return_view) {
     snprintf(s_error,sizeof(s_error),"%s",message && *message ? message : "操作未完成，请重试");
     s_error_return=return_view==VIEW_ERROR ? s_error_return : return_view; show_view(VIEW_ERROR,true);
 }
-static void show_busy(const char* message) {
+static void show_busy_hint(const char* message,const char* hint) {
     if(folio_power_shutdown_pending())return;
     activity_track(false,false);
     page_header(NULL,"请稍候",NULL);
     panel((EpdRect){48,280,588,460});
     icon((EpdRect){310,394,64,64},FOLIO_ICON_BOOK,INK);
     centered(342,540,588,36,INK,message);
-    centered(342,602,588,26,MUTED,"正在处理，请稍候"); present(false);
+    centered(342,602,588,26,MUTED,hint?hint:"正在处理，请稍候"); present(false);
 }
+static void show_busy(const char* message) { show_busy_hint(message,NULL); }
 static void draw_missing_font(void) {
     epd_hl_set_all_white(&s_hw.hl);
     folio_gfx_text(fb(),48,52,3,"FOLIO",INK); rule_at(48,104,588,RULE);
@@ -295,7 +303,16 @@ static void draw_missing_font(void) {
     else if(card_needs_format()){panel((EpdRect){48,984,588,96});ascii_centered_in((EpdRect){48,984,588,96},2,"FORMAT SD CARD");}
     selected_panel(done_rect(),true); ascii_centered_in(done_rect(),3,"TRY AGAIN");
 }
+// Set after a full card scan; cleared by any screen that can add, remove or
+// rewrite books. Root navigation otherwise reuses the shelf already in RAM.
+static bool s_library_fresh;
+static void refresh_library(void);
+static void refresh_library_if_stale(void) {
+    if(!s_library_fresh || !s_card_ready){refresh_library();return;}
+    catalog_select();
+}
 static void refresh_library(void) {
+    s_library_fresh=false;
     if(!s_card_ready){s_book_count=s_shelf_count=0;return;}
     /* Migration re-exports every pending .wrb on this (the main) task and takes
      * the storage lock for the whole book. Never do that while the WeRead worker
@@ -318,6 +335,7 @@ static void refresh_library(void) {
     size_t pages=(s_shelf_count+LIBRARY_PAGE_SIZE-1)/LIBRARY_PAGE_SIZE;
     if(!pages)pages=1;
     if(s_shelf_page>=pages)s_shelf_page=pages-1;
+    s_library_fresh=true;
 }
 static const char* book_format(const folio_book_t* book) {
     const char* ext=strrchr(book->path,'.'); return ext && !strcasecmp(ext,".pdf") ? "PDF" : ext && strcasecmp(ext,".epub")==0 ? "EPUB" : "TXT";
@@ -338,6 +356,7 @@ static void cover(EpdRect r,const char* path,const char* title,const char* forma
         } else icon((EpdRect){r.x+(r.width-28)/2,r.y+(r.height-32)/2,28,32},FOLIO_ICON_BOOK,MUTED);
     }
 }
+static void settings_tabs(void);
 #include "folio_home.inc"
 static void draw_library(void) {
     const char* filters[]={"全部","最近","未读"};
@@ -461,7 +480,10 @@ static void draw_reader(void) {
     if(s_reader_notice){folio_gfx_fill_round_rect(fb(),(EpdRect){142,1024,400,80},UI_RADIUS,PAPER);panel((EpdRect){142,1024,400,80});centered_in((EpdRect){154,1032,376,64},28,INK,s_reader_notice);}
 }
 static void refresh_reader_pagination(void) {
-    if(s_view!=VIEW_READING || !s_reader || s_reader_cover || s_reader_notice)return;
+    if(s_view!=VIEW_READING || !s_reader || s_reader_cover || s_reader_notice ||
+       s_settings.footer_hidden || FOLIO_READER_FOOTER(&s_settings)==2)return;
+    // Leave the input loop free immediately after a gesture or display refresh.
+    if(esp_timer_get_time()-s_last_activity < 750000)return;
     (void)folio_font_set_size(s_font,s_settings.font_size);
     uint32_t before=folio_reader_page_total(s_reader,s_settings.progress_chapter!=0);
     (void)folio_reader_paginate_step(s_reader,1);
@@ -528,10 +550,22 @@ static void draw_contents(bool bookmarks) {
     }
     pager(s_list_page,count,list_rows());
 }
+// Two tab groups share the settings screens: 排版/阅读显示 (tabs 0/2) and
+// 外观/电源 (VIEW_HOME_SETTINGS and tab 1).
+static void toggle_row(int y,const char* name,bool on) {
+    label(72,baseline_for_center_y(30,name,y+48),332,30,INK,name);
+    action(toggle_rect(y,false),"关闭",!on); action(toggle_rect(y,true),"开启",on);
+}
+static bool power_group(void) { return s_view==VIEW_HOME_SETTINGS || s_settings_tab==1; }
+static void settings_tabs(void) {
+    bool power=power_group();
+    const char* names[2]={power?"外观":"排版",power?"电源":"阅读显示"};
+    unsigned selected=power ? s_view==VIEW_SETTINGS : s_settings_tab==2;
+    for(unsigned i=0;i<2;++i)action((EpdRect){48+(int)i*300,216,288,96},names[i],selected==i);
+}
 static void draw_settings(void) {
-    page_header(s_settings_return==VIEW_SYSTEM?"设置":"阅读","阅读设置","调整会自动保存");
-    const char* tabs[]={"排版","偏好","阅读显示"};
-    for(unsigned i=0;i<3;++i)action((EpdRect){48+(int)i*200,216,188,96},tabs[i],s_settings_tab==i);
+    page_header(s_settings_return==VIEW_SYSTEM?"设置":"阅读",power_group()?"显示与电源":"阅读与排版","调整会自动保存");
+    settings_tabs();
     if(!s_settings_tab) {
         panel((EpdRect){48,328,588,160});
         label(64,baseline_for_center_y(22,"字体与预览",346),540,22,MUTED,"字体与预览"); icon((EpdRect){592,332,28,28},FOLIO_ICON_CHEVRON_RIGHT,INK);
@@ -540,23 +574,21 @@ static void draw_settings(void) {
         unsigned values[]={s_settings.font_size,s_settings.line_gap,s_settings.paragraph_gap,s_settings.margin};
         const unsigned minimum[]={24,0,0,24}, maximum[]={56,24,32,80}, step[]={2,2,4,8};
         for(int i=0;i<4;++i) {
-            int y=setting_step(i,-1).y; panel((EpdRect){48,y,588,76}); label(72,baseline_for_center_y(30,names[i],y+38),306,32,INK,names[i]);
-            char value[24]; snprintf(value,sizeof(value),"%u",values[i]); centered_in((EpdRect){436,y,96,76},30,INK,value);
-            icon((EpdRect){364,y+22,32,32},FOLIO_ICON_MINUS,values[i]>=minimum[i]+step[i]?INK:RULE);
-            icon((EpdRect){572,y+22,32,32},FOLIO_ICON_PLUS,values[i]+step[i]<=maximum[i]?INK:RULE);
+            int y=setting_step(i,-1).y; panel((EpdRect){48,y,588,96}); label(72,baseline_for_center_y(30,names[i],y+48),306,32,INK,names[i]);
+            char value[24]; snprintf(value,sizeof(value),"%u",values[i]); centered_in((EpdRect){436,y,96,96},30,INK,value);
+            icon((EpdRect){364,y+32,32,32},FOLIO_ICON_MINUS,values[i]>=minimum[i]+step[i]?INK:RULE);
+            icon((EpdRect){572,y+32,32,32},FOLIO_ICON_PLUS,values[i]+step[i]<=maximum[i]?INK:RULE);
         }
         int weight_y=setting_step(4,-1).y;
-        panel((EpdRect){48,weight_y,588,76});
-        label(72,baseline_for_center_y(30,"字重",weight_y+38),306,30,INK,"字重");
+        panel((EpdRect){48,weight_y,588,96});
+        label(72,baseline_for_center_y(30,"字重",weight_y+48),306,30,INK,"字重");
         if(folio_font_has_weight(s_font)){
             const char* weights[]={"细","偏细","默认","偏粗","粗"};
-            centered_in((EpdRect){428,weight_y,112,76},28,INK,weights[s_settings.weight_step+2]);
-            icon((EpdRect){364,weight_y+22,32,32},FOLIO_ICON_MINUS,s_settings.weight_step>-2?INK:RULE);
-            icon((EpdRect){572,weight_y+22,32,32},FOLIO_ICON_PLUS,s_settings.weight_step<2?INK:RULE);
-        }else right_label(612,weight_y+48,24,MUTED,"当前字体固定");
-        label(72,baseline_for_center_y(32,"首行缩进",1016),280,32,INK,"首行缩进");
-        action((EpdRect){308,968,156,96},"关闭",!FOLIO_FIRST_LINE_INDENT(&s_settings));
-        action((EpdRect){480,968,156,96},"开启",FOLIO_FIRST_LINE_INDENT(&s_settings));
+            centered_in((EpdRect){428,weight_y,112,96},28,INK,weights[s_settings.weight_step+2]);
+            icon((EpdRect){364,weight_y+32,32,32},FOLIO_ICON_MINUS,s_settings.weight_step>-2?INK:RULE);
+            icon((EpdRect){572,weight_y+32,32,32},FOLIO_ICON_PLUS,s_settings.weight_step<2?INK:RULE);
+        }else right_label(612,weight_y+58,24,MUTED,"当前字体固定");
+        toggle_row(1064,"首行缩进",FOLIO_FIRST_LINE_INDENT(&s_settings));
     } else if(s_settings_tab==1) {
         const char* names[]={"全刷间隔","空闲锁屏"};
         for(int i=0;i<2;++i) {
@@ -568,12 +600,9 @@ static void draw_settings(void) {
             icon((EpdRect){364,y+32,32,32},FOLIO_ICON_MINUS,v>(i?FOLIO_IDLE_MINUTES_MIN:1)?INK:RULE);
             icon((EpdRect){572,y+32,32,32},FOLIO_ICON_PLUS,v<(i?FOLIO_IDLE_MINUTES_MAX:32)?INK:RULE);
         }
-        panel((EpdRect){48,560,588,96});label(72,baseline_for_center_y(30,"开机继续阅读",608),420,30,INK,"开机继续阅读");
-        centered_in((EpdRect){456,560,180,96},30,INK,s_settings.auto_resume?"开启":"关闭");
-        panel(auto_shutdown_toggle());
-        label(72,baseline_for_center_y(30,"锁屏后自动关机",736),448,30,INK,"锁屏后自动关机");
-        centered_in((EpdRect){456,688,180,96},30,INK,s_settings.auto_shutdown_enabled?"开启":"关闭");
-        label(48,828,636,24,MUTED,s_settings.auto_shutdown_enabled?
+        toggle_row(560,"开机继续阅读",s_settings.auto_resume);
+        toggle_row(672,"锁屏后自动关机",s_settings.auto_shutdown_enabled);
+        label(48,812,636,26,MUTED,s_settings.auto_shutdown_enabled?
             "从锁屏开始计时 · 唤醒后取消":"已关闭 · 下方保留上次选择的时长");
         const char* durations[]={"30分钟","3小时","6小时"};
         for(unsigned i=0;i<AUTO_SHUTDOWN_CHOICES;++i)action_state(auto_shutdown_choice(i),durations[i],
@@ -583,54 +612,55 @@ static void draw_settings(void) {
                 folio_gfx_round_rect(fb(),auto_shutdown_choice(i),UI_RADIUS,MUTED,3);
         }
     } else {
-        panel((EpdRect){48,336,588,96});
-        label(72,baseline_for_center_y(30,"底部状态",384),388,30,INK,"底部状态");
-        centered_in((EpdRect){436,336,176,96},30,INK,s_settings.footer_hidden?"关闭":"开启");
+        toggle_row(336,"底部状态",!s_settings.footer_hidden);
         const char* titles[]={"显示方式","计算范围"};
         const char* choices[][2]={{"页码","百分比"},{"整本书","当前章节"}};
         for(unsigned row=0;row<2;++row) {
             int y=448+(int)row*112;
-            label(64,baseline_for_center_y(28,titles[row],y+48),268,28,INK,titles[row]);
+            label(72,baseline_for_center_y(30,titles[row],y+48),332,30,INK,titles[row]);
             unsigned selected=row?s_settings.progress_chapter:(FOLIO_READER_FOOTER(&s_settings)==2);
-            for(unsigned i=0;i<2;++i)action((EpdRect){280+(int)i*184,y,172,96},choices[row][i],selected==i);
+            for(unsigned i=0;i<2;++i)action(toggle_rect(y,i!=0),choices[row][i],selected==i);
         }
-        label(48,710,636,26,MUTED,"文字下划线");
+        label(48,700,636,26,MUTED,"文字下划线");
         const char* lines[]={"关闭","直线","虚线"};
-        for(unsigned i=0;i<3;++i)action((EpdRect){48+(int)i*200,736,188,88},lines[i],s_settings.underline==i);
-        label(48,870,636,26,MUTED,"下划线深浅");
+        for(unsigned i=0;i<3;++i)action((EpdRect){48+(int)i*200,716,188,96},lines[i],s_settings.underline==i);
+        label(48,864,636,26,MUTED,"下划线深浅");
         const char* shades[]={"浅","中","深"};
-        for(unsigned i=0;i<3;++i)action((EpdRect){48+(int)i*200,896,188,88},shades[i],s_settings.underline_shade==i);
-        centered_in((EpdRect){48,1004,588,64},26,MUTED,s_settings.footer_hidden?"状态已隐藏 · 点屏幕中间可打开菜单":"页码与百分比均使用所选计算范围");
+        for(unsigned i=0;i<3;++i)action((EpdRect){48+(int)i*200,880,188,96},shades[i],s_settings.underline_shade==i);
+        centered_in((EpdRect){48,1000,588,64},26,MUTED,s_settings.footer_hidden?"状态已隐藏 · 点屏幕中间可打开菜单":"页码与百分比均使用所选计算范围");
     }
-    action(done_rect(),"完成",true);
 }
 static void draw_fonts(void) {
-    const char* back=s_fonts_return==VIEW_SETTINGS?"排版":s_fonts_return==VIEW_HOME_SETTINGS?"个性化":s_fonts_return==VIEW_SYSTEM?"设置":"阅读";
+    const char* back=s_fonts_return==VIEW_SETTINGS?"排版":s_fonts_return==VIEW_SYSTEM?"设置":"阅读";
     const char* desired=s_settings.font_path[0]?s_settings.font_path:FOLIO_FONT_BUILTIN_PATH;
     bool fallback=strcmp(desired,s_active_font)!=0;
-    page_header(back,"字体",fallback?"暂用其他字体 · 已保留原选择":"宋体随固件提供 · 其他字库可从刷机页下载");
+    page_header(back,"字体",fallback?"暂用其他字体 · 已保留原选择":"宋体随固件提供 · 其他三款可按需下载");
     for(size_t row=0;row<list_rows();++row) {
         size_t i=s_list_page*list_rows()+row; if(i>=s_font_count)break;
         const char* name=folio_font_builtin_label(s_fonts[i]);
         if(!name){name=strrchr(s_fonts[i],'/');name=name?name+1:s_fonts[i];}
         int y=LIST_TOP+(int)row*LIST_ROW; bool current=strcmp(s_fonts[i],s_active_font)==0;
         bool remembered=strcmp(s_fonts[i],desired)==0;
+        bool missing=i>0 && i<FOLIO_FONT_BUILTIN_COUNT && !current && !folio_font_builtin_installed(s_fonts[i]);
         const char* state=current?(fallback?"当前使用 · 临时回退":"当前使用"):
-            remembered?"已记住 · 暂未加载":!strcmp(s_fonts[i],FOLIO_FONT_BUILTIN_PATH)?"设备内置":folio_font_is_builtin_path(s_fonts[i])?"配套字库":"TF 卡字体";
+            remembered?"已记住 · 暂未加载":!strcmp(s_fonts[i],FOLIO_FONT_BUILTIN_PATH)?"设备内置":
+            missing?"未安装 · 可下载":folio_font_is_builtin_path(s_fonts[i])?"配套字库 · 已安装":"TF 卡字体";
         selected_panel((EpdRect){48,y,588,96},current);
         label(64,baseline_for_center_y(32,name,y+32),558,32,INK,name);
         label(64,baseline_for_center_y(22,state,y+72),558,22,MUTED,state);
-        if(current)icon((EpdRect){588,y+32,32,32},FOLIO_ICON_CHECK,INK);
+        if(missing)
+            action((EpdRect){470,y+8,152,80},"下载",false);
+        else if(current)icon((EpdRect){588,y+32,32,32},FOLIO_ICON_CHECK,INK);
     }
     if(!s_font_count) { centered(342,520,588,34,INK,"字体列表暂时无法加载"); centered(342,588,588,26,MUTED,"请返回后重试，原选择已保留"); }
     pager(s_list_page,s_font_count,list_rows());
 }
 static EpdRect system_row(unsigned i) {return (EpdRect){48,232+(int)i*112,588,96};}
 static void draw_system(void) {
-    page_header(NULL,"设置","让阅读保持简单");
-    const char* names[]={"微信读书","Wi-Fi","阅读设置","个性化","日期与时间","传书与系统"};
-    const folio_icon_t icons[]={FOLIO_ICON_BOOK,FOLIO_ICON_WIFI,FOLIO_ICON_TYPE,FOLIO_ICON_GRID,FOLIO_ICON_SETTINGS,FOLIO_ICON_LIST};
-    for(unsigned i=0;i<6;++i) {
+    page_header(NULL,"设置",NULL);
+    const char* names[]={"阅读与排版","无线传书","微信读书","显示与电源","系统设置"};
+    const folio_icon_t icons[]={FOLIO_ICON_TYPE,FOLIO_ICON_WIFI,FOLIO_ICON_BOOK,FOLIO_ICON_GRID,FOLIO_ICON_SETTINGS};
+    for(unsigned i=0;i<5;++i) {
         EpdRect row=system_row(i);panel(row);icon((EpdRect){72,row.y+32,32,32},icons[i],INK);
         label(128,baseline_for_center_y(32,names[i],row.y+48),564,32,INK,names[i]);
         icon((EpdRect){588,row.y+36,24,24},FOLIO_ICON_CHEVRON_RIGHT,MUTED);
@@ -772,13 +802,28 @@ static void draw_wallpapers(void) {
     pager(s_wallpaper_page,s_wallpaper_total,7);
 }
 #include "folio_manage_ui.inc"
+static bool apply_pending_reflow(bool feedback) {
+    if(!s_reflow_pending || !s_reader)return s_reflow_pending=false,true;
+    s_reflow_pending=false;
+    if(feedback && folio_reader_page_number(s_reader)>8)show_busy("正在重新排版");
+    (void)folio_font_set_size(s_font,s_settings.font_size);
+    folio_reader_options_t options=reader_options();
+    return folio_reader_set_options(s_reader,&options);
+}
 static void show_view(view_t view,bool full) {
     if(view!=VIEW_READING)s_reader_notice=NULL;
+    if(s_reflow_pending && (view==VIEW_READING || view==VIEW_TOOLS || view==VIEW_TOC || view==VIEW_BOOKMARKS) &&
+       !apply_pending_reflow(true)) {
+        snprintf(s_error,sizeof(s_error),"%s","这次排版调整未能应用，请重试。");
+        s_error_return=VIEW_READING; view=VIEW_ERROR; full=true;
+    }
     if(folio_power_shutdown_pending()){emergency_shutdown();return;}
     if(s_view==VIEW_WEREAD && view!=VIEW_WEREAD && !folio_weread_stop()){
         s_wr_leaving=true;s_wr_target=view;return;
     }
     if(s_view==VIEW_TRANSFER && view!=VIEW_TRANSFER && !stop_transfer())return;
+    if(view==VIEW_TRANSFER || view==VIEW_WEREAD || view==VIEW_FILES || view==VIEW_FILE_ACTION ||
+       view==VIEW_STORAGE || view==VIEW_UPDATE)s_library_fresh=false;
     activity_track(false,false);
     if(!s_reader && (view==VIEW_READING || view==VIEW_TOOLS || view==VIEW_TOC || view==VIEW_BOOKMARKS || view==VIEW_JUMP || view==VIEW_BOOKMARK_DELETE)) view=VIEW_LIBRARY;
     if(view==VIEW_OFF_CONFIRM && s_view!=VIEW_OFF_CONFIRM)s_power_return=s_view;
@@ -822,6 +867,7 @@ static void show_view(view_t view,bool full) {
             paragraph(72,504,612,32,52,6,INK,s_error); action(done_rect(),"知道了",true);break;
     }
     if(view==VIEW_LOCK_PREVIEW && folio_power_shutdown_pending()){emergency_shutdown();return;}
-    present(full); if(s_font)(void)folio_font_set_size(s_font,s_settings.font_size);
+    // Previews flash the panel clean once, as the real lock/off screens do.
+    if(view==VIEW_LOCK_PREVIEW)present_frame(true,true); else present(full); if(s_font)(void)folio_font_set_size(s_font,s_settings.font_size);
     if(view==VIEW_READING) {activity_record_book();activity_track(true,false);}
 }

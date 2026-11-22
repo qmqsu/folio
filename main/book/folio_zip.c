@@ -238,17 +238,24 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
         if ((i & 31) == 0) folio_epub_yield();
     }
     if (pos != central_size) goto failed;
+    zip->directory_crc = folio_epub_crc32(0, central, central_size);
     free(central); central = NULL;
-    if (!fingerprint) return true;
+    if (!fingerprint || folio_zip_fingerprint(zip)) return true;
+    reason = "Cannot read EPUB";
+failed:
+    free(tail); free(central); folio_zip_close(zip);
+    if (folio_epub_cancelled()) reason = "EPUB operation cancelled";
+    return fail(error, cap, reason);
+}
+
+bool folio_zip_fingerprint(folio_zip_t* zip) {
     uint8_t* buffer = folio_epub_alloc(ZIP_INPUT_BYTES);
-    if (buffer == NULL) { reason = "Not enough memory for EPUB fingerprint"; goto failed; }
-    if (fseek(zip->file, 0, SEEK_SET) != 0) { free(buffer); goto failed; }
+    if (buffer == NULL || fseek(zip->file, 0, SEEK_SET) != 0) { free(buffer); return false; }
     uint32_t remaining = zip->source_size;
-    zip->source_hash = UINT64_C(14695981039346656037);
+    zip->source_hash = UINT64_C(14695981039346656037); zip->source_crc = 0;
     while (remaining > 0) {
-        if (folio_epub_cancelled()) { free(buffer); goto failed; }
         size_t n = remaining > ZIP_INPUT_BYTES ? ZIP_INPUT_BYTES : remaining;
-        if (fread(buffer, 1, n, zip->file) != n) { free(buffer); goto failed; }
+        if (folio_epub_cancelled() || fread(buffer, 1, n, zip->file) != n) { free(buffer); return false; }
         for (size_t i = 0; i < n; ++i) zip->source_hash = (zip->source_hash ^ buffer[i]) * UINT64_C(1099511628211);
         zip->source_crc = folio_epub_crc32(zip->source_crc, buffer, n);
         remaining -= (uint32_t)n;
@@ -256,10 +263,6 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
     }
     free(buffer);
     return true;
-failed:
-    free(tail); free(central); folio_zip_close(zip);
-    if (folio_epub_cancelled()) reason = "EPUB operation cancelled";
-    return fail(error, cap, reason);
 }
 
 bool folio_zip_open(const char* path, folio_zip_t* zip, char* error, size_t cap) {

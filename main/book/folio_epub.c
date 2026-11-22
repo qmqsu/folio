@@ -3,6 +3,7 @@
 #include "folio_zip.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -485,7 +486,40 @@ typedef struct {
     char title[FOLIO_EPUB_TITLE_CAP];
 } contents_header_t;
 
-static bool load_contents(const char* index_path, const folio_zip_t* zip, folio_epub_t* result) {
+// Remembers the full-archive fingerprint for an unchanged EPUB: same size, mtime
+// and central directory (which carries every member's CRC).
+typedef struct { uint32_t magic, size, mtime, directory_crc, source_crc; uint64_t source_hash; uint32_t check; } identity_t;
+static void identity_path(const char* path, char* out, size_t cap) {
+    snprintf(out, cap, EPUB_CACHE_ROOT "/%08lx.id", (unsigned long)folio_epub_crc32(0, path, strlen(path)));
+}
+static bool identity_load(const char* path, folio_zip_t* zip) {
+    char name[64]; identity_t id; struct stat info;
+    identity_path(path, name, sizeof(name));
+    FILE* file = fopen(name, "rb");
+    if (file == NULL) return false;
+    bool okay = fread(&id, sizeof(id), 1, file) == 1;
+    fclose(file);
+    if (!okay || stat(path, &info) != 0 || id.magic != 0x31444950u || id.check != folio_epub_crc32(0, &id, offsetof(identity_t, check)) ||
+        id.size != zip->source_size || id.mtime != (uint32_t)info.st_mtime || id.directory_crc != zip->directory_crc) return false;
+    zip->source_crc = id.source_crc; zip->source_hash = id.source_hash;
+    return true;
+}
+static void identity_save(const char* path, const folio_zip_t* zip) {
+    char name[64]; struct stat info;
+    if (stat(path, &info) != 0) return;
+    identity_t id = {.magic = 0x31444950u, .size = zip->source_size, .mtime = (uint32_t)info.st_mtime,
+        .directory_crc = zip->directory_crc, .source_crc = zip->source_crc, .source_hash = zip->source_hash};
+    id.check = folio_epub_crc32(0, &id, offsetof(identity_t, check));
+    identity_path(path, name, sizeof(name));
+    FILE* file = fopen(name, "wb");
+    if (file != NULL) { (void)fwrite(&id, sizeof(id), 1, file); fclose(file); }
+}
+static bool cache_size_matches(const char* path, uint32_t length) {
+    struct stat info;
+    return stat(path, &info) == 0 && (uint64_t)info.st_size == length;
+}
+
+static bool load_contents(const char* index_path, const folio_zip_t* zip, folio_epub_t* result, bool trusted) {
     FILE* index = fopen(index_path, "rb");
     if (!index) return false;
     contents_header_t h;
@@ -510,7 +544,8 @@ static bool load_contents(const char* index_path, const folio_zip_t* zip, folio_
         okay = chapters[i].offset < h.text_size && (!i || chapters[i].offset >= chapters[i-1].offset) &&
             memchr(chapters[i].title, 0, sizeof(chapters[i].title)) != NULL;
     }
-    if (!okay || !existing_cache_matches(result->text_path, h.text_size, h.text_crc)) {
+    if (!okay || !(trusted ? cache_size_matches(result->text_path, h.text_size) :
+                   existing_cache_matches(result->text_path, h.text_size, h.text_crc))) {
         free(chapters);
         return false;
     }
@@ -911,7 +946,12 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     book->line_start = true;
     char temporary[272] = {0};
     bool okay = false;
-    if (!folio_zip_open(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
+    if (!folio_zip_open_directory(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
+    bool trusted = identity_load(path, &book->zip);
+    if (!trusted) {
+        if (!folio_zip_fingerprint(&book->zip)) { failure(book, "Cannot read EPUB"); goto cleanup; }
+        if (make_directory(FOLIO_SD_ROOT "/.folio") && make_directory(EPUB_CACHE_ROOT)) identity_save(path, &book->zip);
+    }
     result->source_hash = book->zip.source_hash;
     result->source_size = book->zip.source_size;
     const folio_zip_entry_t* mimetype = folio_zip_find(&book->zip, "mimetype");
@@ -934,7 +974,7 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     char index_path[272];
     n = snprintf(index_path, sizeof(index_path), "%s.toc", result->text_path);
     if (n < 0 || (size_t)n >= sizeof(index_path)) goto cleanup;
-    if (load_contents(index_path, &book->zip, result)) { okay = true; goto cleanup; }
+    if (load_contents(index_path, &book->zip, result, trusted)) { okay = true; goto cleanup; }
     if (folio_epub_cancelled()) goto cleanup;
     if (!parse_resource(book, "META-INF/container.xml", container_token, book) || !book->package_path[0]) goto cleanup;
     book->spine = folio_epub_alloc(EPUB_ITEM_LIMIT * sizeof(*book->spine));

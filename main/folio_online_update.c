@@ -2,6 +2,8 @@
 #include "folio_remote_manifest.h"
 #include "folio_online_guard.h"
 #include "folio_storage.h"
+#include "book/folio_font_assets.h"
+#include "psa/crypto.h"
 #include "net/folio_network.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -35,7 +37,7 @@
 #define ONLINE_SOURCE_BUDGET_US INT64_C(900000000)
 #define ONLINE_STAGE_ROOT FOLIO_SD_ROOT "/.folio/online-update"
 
-typedef enum { JOB_CHECK, JOB_DOWNLOAD, JOB_INSTALL } job_t;
+typedef enum { JOB_CHECK, JOB_DOWNLOAD, JOB_INSTALL, JOB_FONT } job_t;
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static bool s_initialized, s_cancel;
 static void* s_worker_task;
@@ -49,6 +51,7 @@ static struct {
     folio_remote_manifest_t manifest;
     folio_update_info_t preview;
     char channel[8], path[FOLIO_ONLINE_PATH_CAP];
+    unsigned font_index;
     job_t job;
 } s_work;
 typedef struct {
@@ -575,12 +578,139 @@ static folio_online_state_t install_image(char* error, size_t cap) {
     error_text(error, cap, "新固件安装完成，请重新启动设备。");
     return FOLIO_ONLINE_INSTALLED;
 }
+static bool font_file_matches(const char *path, const folio_font_asset_t *face, uint8_t *buffer) {
+    psa_hash_operation_t hash=PSA_HASH_OPERATION_INIT;
+    FILE *file=fopen(path,"rb");
+    uint8_t digest[32]; size_t n=0;
+    bool okay=file && psa_crypto_init()==PSA_SUCCESS && psa_hash_setup(&hash,PSA_ALG_SHA_256)==PSA_SUCCESS;
+    size_t remaining=face->length;
+    while (okay && remaining) {
+        size_t chunk=remaining<16384?remaining:16384;
+        okay=!cancelled(NULL) && fread(buffer,1,chunk,file)==chunk && psa_hash_update(&hash,buffer,chunk)==PSA_SUCCESS;
+        remaining-=chunk;
+    }
+    okay=okay && fgetc(file)==EOF && !ferror(file) &&
+        psa_hash_finish(&hash,digest,sizeof(digest),&n)==PSA_SUCCESS && n==32 && !memcmp(digest,face->sha256,32);
+    if (file && fclose(file)!=0) okay=false;
+    psa_hash_abort(&hash);
+    return okay;
+}
+
+// Sources are pinned alongside their SHA-256 values in the firmware.
+static bool download_font_file(unsigned asset, uint32_t prior, uint32_t total, char *error, size_t cap) {
+    const folio_font_asset_t *face = &card_faces[asset];
+    const char *root = FOLIO_SD_ROOT "/folio-fonts";
+    if (!lock_card(error, cap)) return false;
+    uint64_t capacity, available;
+    char backup[FOLIO_ONLINE_PATH_CAP];
+    snprintf(backup,sizeof(backup),"%s.old",face->path);
+    struct stat st;
+    bool okay = safe_directory(root,true) && folio_storage_validate_parent(face->path,error,cap) &&
+        folio_storage_validate_parent(backup,error,cap);
+    if (okay && online_lstat(backup,&st)==0) {
+        okay=S_ISREG(st.st_mode);
+        if (okay && online_lstat(face->path,&st)!=0)
+            okay=errno==ENOENT && rename(backup,face->path)==0;
+    }
+    uint8_t *buffer=malloc(16384);
+    if (!buffer) { error_text(error,cap,"内存不足，无法下载字体。");okay=false; }
+    if (okay && online_lstat(face->path,&st)==0) {
+        okay=S_ISREG(st.st_mode);
+        if (okay && st.st_size==(off_t)face->length && font_file_matches(face->path,face,buffer)) {
+            (void)unlink(backup);
+            progress(prior+face->length,total);unlock_card();free(buffer);return true;
+        }
+    }
+    okay=okay && folio_storage_space(&capacity,&available,error,cap);
+    if (okay && available < face->length + 65536) {
+        error_text(error,cap,"TF 卡空间不足，无法保存字体。");
+        okay = false;
+    }
+    snprintf(s_work.path,sizeof(s_work.path),"%s.part",face->path);
+    if (okay) okay = folio_storage_validate_parent(s_work.path,error,cap);
+    if (okay) {
+        int fd = open(s_work.path,O_WRONLY|O_CREAT|O_TRUNC,0600);
+        okay = fd >= 0 && close(fd) == 0;
+    }
+    unlock_card();
+    if (!okay) { if (!*error) error_text(error,cap,"无法创建字体下载文件。"); free(buffer); return false; }
+    char url[192];
+    snprintf(url,sizeof(url),"https://testingcf.jsdelivr.net/gh/qmqsu/folio@v0.8.46/main/assets/fonts/folio_%s.ttf",face->id);
+    char raw[192];
+    snprintf(raw,sizeof(raw),"https://raw.githubusercontent.com/qmqsu/folio/v0.8.46/main/assets/fonts/folio_%s.ttf",face->id);
+    okay = false;
+    for (unsigned attempt=0; buffer && attempt<2 && !cancelled(NULL); ++attempt) {
+        if (attempt) {
+            if (!lock_card(error,cap)) break;
+            int fd=open(s_work.path,O_WRONLY|O_TRUNC);
+            bool reset=fd>=0 && close(fd)==0;
+            unlock_card();
+            if (!reset) break;
+        }
+        error[0]=0;
+        int status; int64_t length;
+        int64_t deadline=esp_timer_get_time()+ONLINE_SOURCE_BUDGET_US;
+        okay=http_begin(NULL,attempt?raw:url,true,0,&status,&length,deadline,error,cap) &&
+            response_ok(status,error,cap) && (length<0 || (uint64_t)length==face->length);
+        size_t received=0;
+        while (okay && received<face->length) {
+            size_t used=0, want=face->length-received;
+            if (want>16384) want=16384;
+            while (used<want) {
+                if (!card(error,cap) || !within_budget(deadline,error,cap)) break;
+                int n=s_transport.read(s_transport.context,buffer+used,want-used);
+                if (n<=0 || (size_t)n>want-used) break;
+                used+=(size_t)n;
+            }
+            okay=used==want && stage_write(buffer,used,received,received+used==face->length,error,cap);
+            if (okay) {received+=used; progress(prior+received,total);}
+        }
+        if (okay) okay=s_transport.read(s_transport.context,buffer,1)==0 && s_transport.complete(s_transport.context);
+        close_connection();
+        if (okay) break;
+    }
+    if (okay && lock_card(error,cap)) {
+        // Hash the actual staged file before exposing it under its final name.
+        okay=font_file_matches(s_work.path,face,buffer);
+        if (okay && !cancelled(NULL)) {
+            // FAT may require moving the previous file before replacing it.
+            if (rename(s_work.path,face->path)!=0) {
+                okay=folio_storage_validate_parent(backup,error,cap) && rename(face->path,backup)==0;
+                if (okay) {
+                    okay=rename(s_work.path,face->path)==0;
+                    if (okay) unlink(backup); else (void)rename(backup,face->path);
+                }
+            }
+        } else okay=false;
+        unlock_card();
+    } else okay=false;
+    free(buffer);
+    if (!okay) {
+        if (s_hooks.card_ready(s_hooks.context) && s_hooks.storage_lock(s_hooks.context,1000)) {
+            (void)unlink(s_work.path); unlock_card();
+        }
+        if (!*error) error_text(error,cap,"字体下载或完整性校验失败，请重试。");
+    }
+    return okay;
+}
+static folio_online_state_t download_font(char *error,size_t cap) {
+    unsigned face=s_work.font_index-1;
+    uint32_t total=card_faces[face].length+(face==2?card_faces[3].length:0);
+    progress(0,total);
+    if (!connection_ready(error,cap)) return FOLIO_ONLINE_FAILED;
+    if (face==2 && !download_font_file(3,0,total,error,cap)) return FOLIO_ONLINE_FAILED;
+    if (!download_font_file(face,face==2?card_faces[3].length:0,total,error,cap)) return FOLIO_ONLINE_FAILED;
+    error_text(error,cap,"下载完成，可启用字体。");
+    return FOLIO_ONLINE_FONT_READY;
+}
+
 static void worker(void* unused) {
     (void)unused;
     portENTER_CRITICAL(&s_mux); s_worker_task = xTaskGetCurrentTaskHandle(); portEXIT_CRITICAL(&s_mux);
     char error[FOLIO_ONLINE_MESSAGE_CAP] = {0}; folio_online_state_t state;
     if (s_work.job == JOB_CHECK) state = check_manifest(error, sizeof(error));
     else if (s_work.job == JOB_DOWNLOAD) state = download_image(error, sizeof(error));
+    else if (s_work.job == JOB_FONT) state = download_font(error, sizeof(error));
     else state = install_image(error, sizeof(error));
     if (state != FOLIO_ONLINE_INSTALLED && cancelled(NULL)) {
         state = FOLIO_ONLINE_CANCELLED; error_text(error, sizeof(error), "在线更新已取消，当前固件保留。");
@@ -604,23 +734,24 @@ bool folio_online_update_init(const folio_online_hooks_t* hooks) {
     s_connection_open = false; s_initialized = true; s_cancel = false;
     portEXIT_CRITICAL(&s_mux); return true;
 }
-static bool launch(job_t job, const char* channel, char* error, size_t cap) {
+static bool launch(job_t job, unsigned face, const char* channel, char* error, size_t cap) {
     error_text(error, cap, "");
     portENTER_CRITICAL(&s_mux);
     bool allowed = s_initialized && !s_snapshot.busy && s_snapshot.state != FOLIO_ONLINE_INSTALLED &&
-        (job == JOB_CHECK || (job == JOB_DOWNLOAD && s_snapshot.state == FOLIO_ONLINE_AVAILABLE) ||
+        (job == JOB_FONT || job == JOB_CHECK || (job == JOB_DOWNLOAD && s_snapshot.state == FOLIO_ONLINE_AVAILABLE) ||
             (job == JOB_INSTALL && s_snapshot.state == FOLIO_ONLINE_READY));
     if (!allowed) { portEXIT_CRITICAL(&s_mux); error_text(error, cap, "在线更新正忙或当前操作尚未就绪。"); return false; }
-    if (job == JOB_CHECK) {
+    if (job == JOB_CHECK || job == JOB_FONT) {
         memset(&s_work, 0, sizeof(s_work));
         uint32_t revision = s_snapshot.revision;
         memset(&s_snapshot, 0, sizeof(s_snapshot)); s_snapshot.revision = revision;
         snprintf(s_work.channel, sizeof(s_work.channel), "%s", channel);
         snprintf(s_snapshot.channel, sizeof(s_snapshot.channel), "%s", channel);
     }
+    s_work.font_index=face;
     s_cancel = false; s_work.job = job; s_snapshot.busy = true; ++s_snapshot.revision;
-    s_snapshot.state = job == JOB_CHECK ? FOLIO_ONLINE_CHECKING : job == JOB_DOWNLOAD ? FOLIO_ONLINE_DOWNLOADING : FOLIO_ONLINE_INSTALLING;
-    snprintf(s_snapshot.message, sizeof(s_snapshot.message), "%s", job == JOB_CHECK ? "正在检查签名发布清单" : job == JOB_DOWNLOAD ? "正在下载新固件" : "正在复验并安装，请保持供电");
+    s_snapshot.state = job == JOB_CHECK ? FOLIO_ONLINE_CHECKING : job != JOB_INSTALL ? FOLIO_ONLINE_DOWNLOADING : FOLIO_ONLINE_INSTALLING;
+    snprintf(s_snapshot.message, sizeof(s_snapshot.message), "%s", job == JOB_CHECK ? "正在检查签名发布清单" : job == JOB_FONT ? "正在下载字体" : job == JOB_DOWNLOAD ? "正在下载新固件" : "正在复验并安装，请保持供电");
     portEXIT_CRITICAL(&s_mux);
     if (xTaskCreate(worker, "folio_online", 16384, NULL, 4, NULL) != pdPASS) {
         portENTER_CRITICAL(&s_mux);
@@ -633,10 +764,10 @@ static bool launch(job_t job, const char* channel, char* error, size_t cap) {
 }
 bool folio_online_update_start_check(const char* channel, char* error, size_t cap) {
     if (!folio_remote_manifest_url(channel)) { error_text(error, cap, "更新通道无效。"); return false; }
-    return launch(JOB_CHECK, channel, error, cap);
+    return launch(JOB_CHECK, 0, channel, error, cap);
 }
-bool folio_online_update_start_download(char* error, size_t cap) { return launch(JOB_DOWNLOAD, NULL, error, cap); }
-bool folio_online_update_start_install(char* error, size_t cap) { return launch(JOB_INSTALL, NULL, error, cap); }
+bool folio_online_update_start_download(char* error, size_t cap) { return launch(JOB_DOWNLOAD, 0, NULL, error, cap); }
+bool folio_online_update_start_install(char* error, size_t cap) { return launch(JOB_INSTALL, 0, NULL, error, cap); }
 void folio_online_update_cancel(void) { portENTER_CRITICAL(&s_mux); if (s_snapshot.busy) s_cancel = true; portEXIT_CRITICAL(&s_mux); }
 bool folio_online_update_busy(void) { portENTER_CRITICAL(&s_mux); bool busy = s_snapshot.busy; portEXIT_CRITICAL(&s_mux); return busy; }
 bool folio_online_update_is_worker(void) {
@@ -648,4 +779,8 @@ bool folio_online_update_cancel_requested(void) { return s_initialized && cancel
 void folio_online_update_get_snapshot(folio_online_snapshot_t* snapshot) {
     if (!snapshot) return;
     portENTER_CRITICAL(&s_mux); *snapshot = s_snapshot; portEXIT_CRITICAL(&s_mux);
+}
+
+bool folio_online_start_font(unsigned face, char* error, size_t cap) {
+    return face>=1 && face<=3 && launch(JOB_FONT,face,"",error,cap);
 }
