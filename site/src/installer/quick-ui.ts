@@ -27,6 +27,8 @@ if (button && status) {
   };
 
   if (!support.supported) {
+    // Without this the version line keeps its HTML placeholder and looks stuck.
+    if (version) version.textContent = '需要桌面版 Chrome 或 Edge';
     say(support.reason);
     sync();
   } else {

@@ -91,6 +91,24 @@ try {
 
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto(url, { waitUntil: 'networkidle' });
+  // This context keeps every init script; only the new page sees the version line
+  // without Web Serial, so assert on a fresh page instead of reloading this one.
+  // A Firefox user agent fails the Chrome/Edge gate, which is what a phone or
+  // Safari visitor hits; the version line must explain it instead of the placeholder.
+  const unsupported = await context.browser().newContext({
+    viewport: { width: 1440, height: 1000 },
+    userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:128.0) Gecko/20100101 Firefox/128.0',
+  });
+  await unsupported.route('https://qmqsu.github.io/**', route => route.fulfill({ status: 404, body: 'Not released (browser test fixture)' }));
+  const plain = await unsupported.newPage();
+  await plain.goto(url, { waitUntil: 'networkidle' });
+  await plain.waitForTimeout(300);
+  assert.match(await plain.locator('#flash-version').innerText(), /需要桌面版 Chrome 或 Edge/i);
+  assert.match(await plain.locator('#flash-status').innerText(), /Web Serial/);
+  assert.equal(await plain.locator('#flash-button').isDisabled(), true);
+  report.checks.push('No Web Serial: version line explains the browser requirement');
+  await unsupported.close();
+  await page.goto(url, { waitUntil: 'networkidle' });
   await page.waitForTimeout(300);
   assert.match(await page.locator('#flash-version').innerText(), /还没发布|暂时拿不到/);
   assert.match(await page.locator('#flash-status').innerText(), /还没有发布|拿不到/);
