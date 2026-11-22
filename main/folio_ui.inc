@@ -245,13 +245,14 @@ static void pager(size_t page,size_t count,size_t per_page) {
     char value[40]; snprintf(value,sizeof(value),"%u / %u",(unsigned)page+1,(unsigned)pages);
     centered_in((EpdRect){208,1096,268,96},26,MUTED,value);
 }
-static void present(bool full) {
+static void present_frame(bool full, bool clear_panel) {
     static unsigned partial_updates;
     unsigned refresh_every=s_settings.refresh_every ? s_settings.refresh_every : 8;
     if(!full && partial_updates+1>=refresh_every)full=true;
     bool clean=full || s_first_present;
     epd_poweron(); int temperature=(int)epd_ambient_temperature(); enum EpdDrawError error;
-    if(s_first_present) error=epd_hl_update_screen_from_white(&s_hw.hl,MODE_GC16,temperature);
+    if(clear_panel) epd_clear();
+    if(clear_panel || s_first_present) error=epd_hl_update_screen_from_white(&s_hw.hl,MODE_GC16,temperature);
     else if(full) error=epd_hl_update_screen_full(&s_hw.hl,MODE_GC16,temperature);
     else error=epd_hl_update_screen(&s_hw.hl,MODE_GL16,temperature);
     epd_poweroff(); s_first_present=error!=EPD_DRAW_SUCCESS;
@@ -259,6 +260,7 @@ static void present(bool full) {
     if(error!=EPD_DRAW_SUCCESS) ESP_LOGW(TAG,"display update: 0x%x",error);
     s_last_activity=esp_timer_get_time();
 }
+static void present(bool full) { present_frame(full, false); }
 static void present_region(EpdRect area) {
     if (s_first_present) { present(true); return; }
     epd_poweron();
@@ -709,7 +711,7 @@ static bool draw_selected_wallpaper(EpdRect rect) {
     return folio_storage_wallpaper_load_legacy(path, sizeof(path)) &&
         folio_cover_draw_image(path, fb(), rect);
 }
-static void draw_lock(bool shutdown) {
+static bool draw_lock(bool shutdown) {
     unsigned style=shutdown?FOLIO_OFF_STYLE(&s_settings):FOLIO_LOCK_STYLE(&s_settings);
     epd_hl_set_all_white(&s_hw.hl);
     const folio_recent_book_t* recent=folio_activity_recent(s_activity,0);
@@ -729,13 +731,14 @@ static void draw_lock(bool shutdown) {
     }
     if(body_drawn){}
     else if(style==0 && path && folio_cover_draw(path,fb(),(EpdRect){70,96,544,936})){}
-    else if(shutdown && style==2 && draw_selected_wallpaper((EpdRect){0,0,width(),height()}))return;
+    else if(shutdown && style==2 && draw_selected_wallpaper((EpdRect){0,0,width(),height()}))return true;
     else if(!shutdown && style==2)draw_lock_time();
     else draw_off_default();
     EpdRect badge={48,1104,588,80};epd_fill_rect(badge,PAPER,fb());panel(badge);
     icon((EpdRect){72,1128,32,32},shutdown?FOLIO_ICON_POWER:FOLIO_ICON_LOCK,INK);
     label(124,1154,290,28,INK,shutdown?"已关机":"已锁屏");
     right_label(612,1154,24,MUTED,shutdown?"按电源键开机":"按电源键继续阅读");
+    return false;
 }
 static void refresh_lock_preview(void) {
     if(s_view!=VIEW_LOCK_PREVIEW || s_lock_preview_off || FOLIO_LOCK_STYLE(&s_settings)!=2)return;

@@ -268,9 +268,8 @@ typedef struct {
 static const text_token_t* cursor_peek(text_cursor_t* cursor, unsigned index) {
     if (index >= sizeof(cursor->lookahead) / sizeof(cursor->lookahead[0])) return NULL;
     while (cursor->count <= index && !cursor->eof && !cursor->failed) {
-        long start = ftell(cursor->reader->file);
+        uint32_t start = cursor->count ? cursor->lookahead[cursor->count-1].end : cursor->offset;
         uint32_t cp;
-        if (start < 0) { cursor->failed = true; break; }
         if (!next_codepoint(cursor->reader, &cp)) {
             cursor->failed = ferror(cursor->reader->file) || !feof(cursor->reader->file) ||
                              (uint32_t)start < cursor->reader->file_size;
@@ -278,7 +277,7 @@ static const text_token_t* cursor_peek(text_cursor_t* cursor, unsigned index) {
             break;
         }
         long end = ftell(cursor->reader->file);
-        if (end <= start || (uint32_t)end > cursor->reader->file_size) { cursor->failed = true; break; }
+        if (end < 0 || (uint32_t)end <= start || (uint32_t)end > cursor->reader->file_size) { cursor->failed = true; break; }
         cursor->lookahead[cursor->count++] = (text_token_t){.cp = cp, .start = (uint32_t)start, .end = (uint32_t)end};
     }
     return index < cursor->count ? &cursor->lookahead[index] : NULL;
@@ -406,13 +405,16 @@ static void clear_checkpoints(folio_reader_t* reader) {
     memset(reader->recent, 0, sizeof(reader->recent));
     reader->checkpoints[0] = (checkpoint_t){.offset = reader->content_start, .paragraph_start = true, .valid = true};
 }
-static void remember_page(folio_reader_t* reader, const page_layout_t* page) {
-    reader->recent[page->number % CHECKPOINT_INTERVAL] = (recent_page_t){.number = page->number,
-        .position = {.offset = page->start, .paragraph_start = page->paragraph_start, .valid = true}};
+static void remember_checkpoint(folio_reader_t* reader, const page_layout_t* page) {
     if (page->number % CHECKPOINT_INTERVAL != 0) return;
     size_t index = page->number / CHECKPOINT_INTERVAL;
     if (index < CHECKPOINT_COUNT) reader->checkpoints[index] = (checkpoint_t){
         .offset = page->start, .paragraph_start = page->paragraph_start, .valid = true};
+}
+static void remember_page(folio_reader_t* reader, const page_layout_t* page) {
+    reader->recent[page->number % CHECKPOINT_INTERVAL] = (recent_page_t){.number = page->number,
+        .position = {.offset = page->start, .paragraph_start = page->paragraph_start, .valid = true}};
+    remember_checkpoint(reader,page);
 }
 static void commit_page(folio_reader_t* reader) {
     page_layout_t* previous = reader->page;
@@ -886,7 +888,7 @@ bool folio_reader_paginate_step(folio_reader_t* reader, unsigned budget) {
             reader->pagination_failed=true;return false;
         }
         page_layout_t* page=reader->scratch;
-        remember_page(reader,page);
+        remember_checkpoint(reader,page);
         size_t section=SIZE_MAX;uint32_t best=0;
         for(size_t i=0;i<reader->epub.chapter_count;++i) {
             uint32_t start=reader->epub.chapters[i].offset;

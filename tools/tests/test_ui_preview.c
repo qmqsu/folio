@@ -297,9 +297,10 @@ void epd_draw_rect(EpdRect rect, uint8_t color, uint8_t* target) {
 void epd_hl_set_all_white(EpdiyHighlevelState* state) { memset(state->framebuffer, 255, sizeof(screen)); }
 void epd_poweron(void) {}
 void epd_poweroff(void) {}
-void epd_clear(void) { memset(screen, 255, sizeof(screen)); }
-float epd_ambient_temperature(void) { return 25; }
+static unsigned panel_clears;
 static uint8_t displayed[SCREEN_W*SCREEN_H];
+void epd_clear(void) { ++panel_clears; memset(displayed, 255, sizeof(displayed)); }
+float epd_ambient_temperature(void) { return 25; }
 static unsigned region_frames,full_frames;
 static EpdRect last_region;
 enum EpdDrawError epd_hl_update_screen(EpdiyHighlevelState* state, int mode, int temperature) {
@@ -891,7 +892,10 @@ static void test_lock_personalization(const char* directory) {
     assert(memcmp(fallback,screen,sizeof(screen))); memcpy(wallpaper,screen,sizeof(screen));
     save_pgm(directory,"114-shutdown-wallpaper-jpeg");
     mock_utc = saved_utc; mock_clock_valid = true;
-    draw_lock(true); assert(!memcmp(wallpaper,screen,sizeof(screen)));
+    unsigned clears_before=panel_clears;
+    assert(draw_lock(true));
+    present_frame(true,true);
+    assert(panel_clears==clears_before+1 && !memcmp(wallpaper,displayed,sizeof(displayed)));
     handle_tap(342,900); assert(s_view == VIEW_WALLPAPERS);
     assert(!strcmp(s_wallpaper_path,second));
     tap_row(0); assert(s_view == VIEW_LOCK_PREVIEW);
@@ -2321,7 +2325,7 @@ int main(int argc, char** argv) {
     handle_tap(558, 996); assert(FOLIO_FIRST_LINE_INDENT(&s_settings));
     tap_rect(done_rect()); assert(s_view == VIEW_TOOLS);
     tap_rect(done_rect()); assert(s_view == VIEW_READING); save_pgm(argv[2], "12-reflowed-reading");
-    handle_key(1, true); assert(s_view == VIEW_READING && s_turns_since_full == 0);
+    handle_key(1, true); assert(s_view == VIEW_READING);
     folio_reader_t* locked_reader=s_reader;folio_font_t* locked_font=s_font;
     uint32_t locked_position=folio_reader_position(s_reader);mock_lock_success=true;
     uint64_t locked_seconds=folio_activity_total_seconds(s_activity);

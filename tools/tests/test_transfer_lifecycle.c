@@ -99,7 +99,8 @@ size_t httpd_req_get_hdr_value_len(httpd_req_t* r,const char* name){(void)r;retu
 esp_err_t httpd_req_get_hdr_value_str(httpd_req_t* r,const char* name,char* out,size_t cap){(void)r;const char* value=!strcmp(name,"Host")?(request_host?request_host:"192.168.4.1"):!strcmp(name,"X-Folio-Token")?(request_token?request_token:s_token):!strcmp(name,"Origin")?request_origin:!strcmp(name,"X-Folio-Name")?request_name:!strcmp(name,"X-Folio-Directory")?request_directory:NULL;if(!value||strlen(value)>=cap)return ESP_FAIL;snprintf(out,cap,"%s",value);return ESP_OK;}
 esp_err_t httpd_req_get_url_query_str(httpd_req_t* r,char* out,size_t cap){(void)r;if(!request_query||strlen(request_query)>=cap)return ESP_FAIL;snprintf(out,cap,"%s",request_query);return ESP_OK;}
 esp_err_t httpd_query_key_value(const char* form,const char* key,char* out,size_t cap){size_t n=strlen(key);while(*form){if(!strncmp(form,key,n)&&form[n]=='='){form+=n+1;size_t len=strcspn(form,"&");if(len>=cap)return ESP_FAIL;memcpy(out,form,len);out[len]=0;return ESP_OK;}const char* next=strchr(form,'&');if(!next)break;form=next+1;}return ESP_FAIL;}
-int httpd_req_recv(httpd_req_t* r,char* out,size_t cap){(void)r;++receive_calls;if(stop_on_receive){atomic_store(&s_stopping,true);return HTTPD_SOCK_ERR_TIMEOUT;}if(receive_timeouts){--receive_timeouts;return HTTPD_SOCK_ERR_TIMEOUT;}if(!request_body)return 0;size_t n=strlen(request_body);if(n>cap)n=cap;memcpy(out,request_body,n);request_body+=n;return (int)n;}
+static size_t receive_limit;
+int httpd_req_recv(httpd_req_t* r,char* out,size_t cap){(void)r;++receive_calls;if(stop_on_receive){atomic_store(&s_stopping,true);return HTTPD_SOCK_ERR_TIMEOUT;}if(receive_timeouts){--receive_timeouts;return HTTPD_SOCK_ERR_TIMEOUT;}if(!request_body)return 0;size_t n=strlen(request_body);if(n>cap)n=cap;if(receive_limit && n>receive_limit)n=receive_limit;memcpy(out,request_body,n);request_body+=n;return (int)n;}
 bool folio_storage_lock(uint32_t ms){(void)ms;return true;}
 void folio_storage_unlock(void){}
 bool folio_storage_validate_parent(const char* p,char* error,size_t cap){(void)p;(void)error;(void)cap;return true;}
@@ -196,6 +197,13 @@ int main(void){
     request_directory=NULL;request_name="wire-short.txt";request_body="he";req.content_len=5;
     assert(upload_handler(&req)==ESP_FAIL);folio_transfer_get_status(&state);assert(state.recent[0].result==FOLIO_UPLOAD_TRUNCATED);
     request_name="saved.MOBI";request_body="hello";req.content_len=5;assert(upload_handler(&req)==ESP_OK && strstr(response_body,"\"saved_only\":true") && strstr(response_body,"暂不支持阅读"));
+    static char body[32770], uploaded[sizeof(body)];
+    for(size_t i=0;i<sizeof(body)-1;++i)body[i]=(char)('a'+i%26);
+    receive_limit=731;request_body=body;request_name="batched.txt";req.content_len=sizeof(body)-1;
+    assert(upload_handler(&req)==ESP_OK);
+    FILE* upload_file=fopen(FOLIO_SD_ROOT "/books/batched.txt","rb");assert(upload_file);
+    assert(fread(uploaded,1,sizeof(uploaded),upload_file)==sizeof(body)-1);
+    assert(!memcmp(uploaded,body,sizeof(body)-1));fclose(upload_file);receive_limit=0;
     validation_ok=false;
     request_name="abort.txt";request_body="hello";req.content_len=5;stop_on_receive=true;receive_calls=0;
     assert(upload_handler(&req)==ESP_FAIL && receive_calls==1 && atomic_load(&s_stopping));stop_on_receive=false;

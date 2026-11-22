@@ -64,7 +64,7 @@ static view_t s_fonts_return = VIEW_TOOLS, s_power_return = VIEW_SYSTEM;
 static char s_error[192], s_active_font[256], s_current_book[256];
 static char (*s_fonts)[256];
 static size_t s_book_count, s_font_count, s_shelf_page, s_list_page, s_pending_bookmark;
-static unsigned s_jump_percent, s_turns_since_full, s_settings_tab;
+static unsigned s_jump_percent, s_settings_tab;
 static int64_t s_last_activity;
 static bool s_first_present = true, s_card_ready, s_card_probe_pending;
 static bool s_activity_save_failed, s_activity_load_failed;
@@ -283,7 +283,6 @@ static void open_book_absolute(size_t index, bool feedback) {
     snprintf(s_current_book, sizeof(s_current_book), "%s", s_books[index].path);
     s_reader_cover=folio_reader_page_number(s_reader)==1;s_reader_notice=NULL;
     activity_record_book(); activity_flush();
-    s_turns_since_full = 0;
     if (!folio_session_save(s_current_book)) {
         show_error("上次阅读的书籍未能保存，当前仍可阅读。请检查 TF 卡空间。", VIEW_READING); return;
     }
@@ -462,10 +461,7 @@ static void turn_page(bool next) {
             show_view(VIEW_READING,false);activity_track(true,false);}
         return;
     }
-    ++s_turns_since_full;
-    bool full = s_turns_since_full >= s_settings.refresh_every;
-    show_view(VIEW_READING, full);
-    if (full) s_turns_since_full = 0;
+    show_view(VIEW_READING, false);
     const char* save_error = folio_reader_error(s_reader);
     if (save_error != NULL && *save_error) show_error(save_error, VIEW_READING);
 }
@@ -592,7 +588,7 @@ static void select_font(size_t index) {
     if (ready) {
         failure = FONT_SAVE_FAILED;
         if (folio_settings_save(&candidate)) {
-            s_settings = candidate; s_turns_since_full = 0;
+            s_settings = candidate;
             show_view(s_fonts_return, true); return;
         }
     }
@@ -668,9 +664,9 @@ static void suspend_device(bool shutdown) {
         folio_gfx_text(fb(), 48, 256, 2, "PRESS POWER TO WAKE", 0x00);
         present(true);
     } else {
-        draw_lock(shutdown);
+        bool image_wallpaper = draw_lock(shutdown);
         if (folio_power_shutdown_pending()) { emergency_shutdown(); return; }
-        present(true);
+        present_frame(true, image_wallpaper);
     }
     if(!shutdown) {
         // Reader/activity/catalog saves above already fflush+fsync their records.
@@ -717,7 +713,7 @@ static void tools_action(int row) {
         case 5: s_settings_tab = 0; s_settings_return = VIEW_TOOLS; show_view(VIEW_SETTINGS, true); break;
         case 6: enter_fonts(); break;
         case 7: show_library(); break;
-        case 8: s_turns_since_full = 0; show_view(VIEW_READING, true); break;
+        case 8: show_view(VIEW_READING, true); break;
     }
 }
 #include "folio_manage.inc"
@@ -980,7 +976,7 @@ static void handle_key(int key,bool held) {
         if(key==1)(void)online_leave(VIEW_DEVICE);
         return;
     }
-    if(held && key==1){s_turns_since_full=0;show_view(s_view,true);return;}
+    if(held && key==1){show_view(s_view,true);return;}
     if(s_view==VIEW_LOCK_PREVIEW){show_view(s_lock_preview_return,true);return;}
     if(s_view==VIEW_WALLPAPERS){
         if(key==1)go_back();

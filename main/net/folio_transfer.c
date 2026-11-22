@@ -377,16 +377,26 @@ static esp_err_t upload_handler(httpd_req_t* req) {
     random_hex(nonce);folio_upload_t* upload=NULL;
     folio_upload_result_t result=folio_storage_validate_parent(target,error,sizeof(error))?
         folio_upload_begin_in_directory(FOLIO_SD_ROOT,name,directory,req->content_len,nonce,folio_transfer_validate,&upload):FOLIO_UPLOAD_BAD_NAME;
-    char* chunk=result==FOLIO_UPLOAD_OK?malloc(4096):NULL;
+    size_t capacity=16384, buffered=0;
+    char* chunk=result==FOLIO_UPLOAD_OK?malloc(capacity):NULL;
+    if(result==FOLIO_UPLOAD_OK && !chunk){capacity=4096;chunk=malloc(capacity);}
     if(result==FOLIO_UPLOAD_OK && !chunk)result=FOLIO_UPLOAD_IO;
     portENTER_CRITICAL(&s_mux);s_status.busy=result==FOLIO_UPLOAD_OK;s_status.received=0;s_status.total=(uint32_t)req->content_len;portEXIT_CRITICAL(&s_mux);
-    int64_t deadline=esp_timer_get_time()+INT64_C(300000000);size_t remaining=req->content_len;
+    int64_t started=esp_timer_get_time(), last_data=started;
+    size_t remaining=req->content_len;
     while(!result && remaining) {
-        if(atomic_load(&s_stopping) || esp_timer_get_time()>deadline){result=FOLIO_UPLOAD_TRUNCATED;break;}
-        int n=httpd_req_recv(req,chunk,remaining<4096?remaining:4096);
+        int64_t now=esp_timer_get_time();
+        if(atomic_load(&s_stopping) || now-last_data>INT64_C(300000000) || now-started>INT64_C(1800000000)){result=FOLIO_UPLOAD_TRUNCATED;break;}
+        size_t available=capacity-buffered;
+        int n=httpd_req_recv(req,chunk+buffered,remaining<available?remaining:available);
         if(n==HTTPD_SOCK_ERR_TIMEOUT)continue;
-        if(n<=0 || (size_t)n>remaining){result=FOLIO_UPLOAD_TRUNCATED;break;}
-        result=folio_upload_write(upload,chunk,(size_t)n);remaining-=(size_t)n;
+        if(n<=0 || (size_t)n>remaining || (size_t)n>available){result=FOLIO_UPLOAD_TRUNCATED;break;}
+        remaining-=(size_t)n;buffered+=(size_t)n;
+        last_data=esp_timer_get_time();
+        if(buffered==capacity || !remaining){
+            result=folio_upload_write(upload,chunk,buffered);
+            buffered=0;
+        }
         portENTER_CRITICAL(&s_mux);s_status.received=(uint32_t)(req->content_len-remaining);portEXIT_CRITICAL(&s_mux);
     }
     free(chunk);
