@@ -7,7 +7,7 @@ on:
         required: true
         type: string
       promotion_run:
-        description: For stable recovery, the previous run ID that signed the stable pointers
+        description: For stable recovery, the signing run ID or release-asset for archived signed pointers
         required: false
         type: string
 permissions:
@@ -46,10 +46,15 @@ jobs:
           PROMOTION_RUN: ${{ inputs.promotion_run }}
         run: |
           python tools/release_ci.py version "$RELEASE_TAG"
-          [[ "$PROMOTION_RUN" =~ ^[0-9]+$ ]]
-          workflow=$(gh api "repos/qmqsu/folio/actions/runs/$PROMOTION_RUN" --jq 'select(.event == "workflow_dispatch" and .head_branch == "main") | .path')
-          test "$workflow" = ".github/workflows/promote.yml"
-          gh run download "$PROMOTION_RUN" --repo qmqsu/folio --name stable-promotion --dir "$RUNNER_TEMP/candidate"
+          if [[ "$PROMOTION_RUN" == release-asset ]]; then
+            gh release download "$RELEASE_TAG" --repo qmqsu/folio --pattern stable-promotion.zip --dir "$RUNNER_TEMP/download"
+            python tools/release_ci.py extract --zip "$RUNNER_TEMP/download/stable-promotion.zip" --output "$RUNNER_TEMP/candidate"
+          else
+            [[ "$PROMOTION_RUN" =~ ^[0-9]+$ ]]
+            workflow=$(gh api "repos/qmqsu/folio/actions/runs/$PROMOTION_RUN" --jq 'select(.event == "workflow_dispatch" and .head_branch == "main") | .path')
+            test "$workflow" = ".github/workflows/promote.yml"
+            gh run download "$PROMOTION_RUN" --repo qmqsu/folio --name stable-promotion --dir "$RUNNER_TEMP/candidate"
+          fi
           python - <<'PY'
           import os, sys
           from pathlib import Path

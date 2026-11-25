@@ -52,7 +52,7 @@ jobs:
       - run: pnpm install --frozen-lockfile && pnpm test && pnpm run check && pnpm run build
         working-directory: site
   deploy-site:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[release deploy]')
     needs: test
     permissions:
       contents: write

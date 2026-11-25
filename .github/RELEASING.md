@@ -153,5 +153,6 @@ Settings → Pages → Build and deployment 的 **Source 选择 GitHub Actions**
 6. 只可提升无 `-dev`/`-rc` 后缀的既有 preview。从 **main** 手工运行 `Promote hardware-accepted stable release`，输入原标签，在 `release-stable` 审阅同一包和真实验收记录。流程下载原离线包、**绝不重建镜像**；只签 stable 通道，原子部署后才把 GitHub Release 改为 stable。序号不能伪增以规避设备反回滚。
    **指定镜像免测**：维护者已分别决定 0.8.39、0.8.40 免去实机验收。每次公开记录须写明 `hardware_tested: false`，并与该次固定的版本、源提交和应用 SHA-256 全部匹配。免测不代表实机通过，不替代候选包签名、镜像校验或 GitHub 环境审批；后续版本仍需自己的验收记录或明确免测决定，不能自动沿用。
 7. 若不可变 Release 已成功而 Pages 后续失败，从 main 运行[恢复工作流](<workflows/recover-release.yml>)并输入原标签。恢复预览发布时将 `promotion_run` 留空。若稳定通道签名已完成且线上仍指向上一稳定版，填写原 `promote.yml` 运行 ID，恢复流程会核对原签名清单、版本和维护者决定，再发布同一镜像。若权威状态与线上快照不一致，先核对已部署快照和运行记录。
+   原运行已清理时，可把留存的同一份 `ota.json`、`usb.json`、`acceptance.json` 打入 `stable-promotion.zip` 保存到原 Release，在恢复工作流选择 `release-asset`。如果本次 main 提交专供发布，可在提交消息中加入 `[release deploy]`，主机和站点检查照常执行，由指定的发布工作流部署该提交一次。
 
 普通 main push 和 pull request 的实际入口是[Checks](<workflows/check.yml>)：PR 不部署、不拿生产签名 secret；main 检查通过后更新当前网站并保留旧固件与通道。详细签名协议、单调序号、四段写入限制和完整验收项见[发布与在线更新](<../docs/发布与在线更新.md>)。
