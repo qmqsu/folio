@@ -6,12 +6,19 @@ on:
         description: Existing immutable Release tag whose Pages deployment failed
         required: true
         type: string
+      promotion_run:
+        description: For stable recovery, the previous run ID that signed the stable pointers
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
   recover:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -22,6 +29,7 @@ jobs:
           python-version: '3.13.3'
       - run: python -m pip install -r .github/release-requirements.txt
       - name: Recover original signed bytes, without keys, rebuilding or overwrite
+        if: inputs.promotion_run == ''
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
@@ -30,6 +38,34 @@ jobs:
           gh release download "$RELEASE_TAG" --repo qmqsu/folio --pattern folio-offline.zip --dir "$RUNNER_TEMP/download"
           python tools/release_ci.py extract --zip "$RUNNER_TEMP/download/folio-offline.zip" --output "$RUNNER_TEMP/candidate"
           python tools/release_manifest.py "$RUNNER_TEMP/candidate/ota.json" --public-key keys/firmware-release-public.pem
+      - name: Recover the original approved stable pointers
+        if: inputs.promotion_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          PROMOTION_RUN: ${{ inputs.promotion_run }}
+        run: |
+          python tools/release_ci.py version "$RELEASE_TAG"
+          [[ "$PROMOTION_RUN" =~ ^[0-9]+$ ]]
+          workflow=$(gh api "repos/qmqsu/folio/actions/runs/$PROMOTION_RUN" --jq 'select(.event == "workflow_dispatch" and .head_branch == "main") | .path')
+          test "$workflow" = ".github/workflows/promote.yml"
+          gh run download "$PROMOTION_RUN" --repo qmqsu/folio --name stable-promotion --dir "$RUNNER_TEMP/candidate"
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, 'tools')
+          import release_manifest as protocol
+          folder = Path(os.environ['RUNNER_TEMP']) / 'candidate'
+          version = os.environ['RELEASE_TAG'].removeprefix('v')
+          key = protocol.public_key('keys/firmware-release-public.pem')
+          for kind in ('ota', 'usb'):
+              payload = protocol.verify((folder / (kind + '.json')).read_bytes(), key)
+              protocol.require((payload['kind'], payload['channel'], payload['version']) == (kind, 'stable', version),
+                               'Stable artifact does not match requested release')
+          record = protocol.load_json((folder / 'acceptance.json').read_bytes())
+          expected = protocol.load_json(Path(f'.github/release-acceptance/{version}.json').read_bytes())
+          protocol.require(record == expected, 'Release decision differs from main')
+          PY
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: recovered-release
@@ -44,6 +80,6 @@ jobs:
       id-token: write
     uses: ./.github/workflows/publish.yml
     with:
-      mode: recover
+      mode: ${{ inputs.promotion_run != '' && 'promote' || 'recover' }}
       artifact: recovered-release
       tag: ${{ inputs.tag }}

@@ -80,10 +80,13 @@ jobs:
           gh release create "$RELEASE_TAG" --repo qmqsu/folio --verify-tag --prerelease --title "Folio $RELEASE_TAG · preview" --notes 'Preview only. CI is not device acceptance. Verify raw P-256 signatures and materials.json against the pinned publisher key. No merged/erase-all/default font installation.' "$RUNNER_TEMP/folio-offline.zip" "$RUNNER_TEMP/incoming/source.tar.gz" "$RUNNER_TEMP/incoming/relink.tar.gz" "$RUNNER_TEMP/incoming/materials.json" "$RUNNER_TEMP/incoming/materials.sig" "$RUNNER_TEMP/incoming/ota.json" "$RUNNER_TEMP/incoming/usb.json"
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
+          name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/pages
       - name: Atomically deploy the complete Pages artifact
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: github-pages-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Verify live snapshot and commit compare-and-swap authority
         env:
           GH_TOKEN: ${{ github.token }}
