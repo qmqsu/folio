@@ -127,6 +127,7 @@ def validate_acceptance(raw, provenance):
             {"version": "0.8.46", "source_commit": "c26ad619651dc85e25856c35b7754c6b11c1b0a6", "app_sha256": "09547ffb7702a8c8b56603a8143e9fbe637aebaf8d4103617e4b49094e986139"},
             {"version": "0.9.0", "source_commit": "63674392438a9f00f94501061f6fd4540757f2ba", "app_sha256": "0a224de2db1072d84ac51b6b113144a7a6d005ff148c69d919ae8d572894c0bd"},
             {"version": "0.9.2", "source_commit": "8918d8dc94542d61642f33d670db34f4c87f2751", "app_sha256": "9e941bc484a27cf14cfb867643c1e69a8fc77ed8faf9f924988b726754fc90f0"},
+            {"version": "0.9.3", "source_commit": "706b24e0055800d38911c59a1ec1f731839419c7", "app_sha256": "44584af700ed785c9d465efb519c8003f8af28745fcee58b40e19395227683f9"},
             {"version": WAIVER_0840_VERSION, "source_commit": WAIVER_0840_COMMIT, "app_sha256": WAIVER_0840_APP_SHA256},
         ]
         identity = next((candidate for candidate in candidates if all(provenance.get(k) == v for k, v in candidate.items())), None)
