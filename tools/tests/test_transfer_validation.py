@@ -47,10 +47,12 @@ def main():
             z.writestr('book.opf','<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>传书测试</dc:title></metadata><manifest><item id="c" href="c.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="c"/></spine></package>')
             z.writestr('c.xhtml','<html><body><p>真实正文 Reading.</p></body></html>')
         with zipfile.ZipFile(fixtures/'good.epub') as source:
-            for target in ('long-chapter.epub','traversal.epub','crc.epub'):
+            for target in ('long-chapter.epub','traversal.epub','crc.epub','missing-mime.epub','wrong-mime.epub'):
                 with zipfile.ZipFile(fixtures/target,'w',compression=zipfile.ZIP_DEFLATED) as z:
                     for entry in source.infolist():
+                        if target=='missing-mime.epub' and entry.filename=='mimetype':continue
                         value=source.read(entry.filename)
+                        if target=='wrong-mime.epub' and entry.filename=='mimetype':value=b'text/plain'
                         if target=='long-chapter.epub' and entry.filename=='c.xhtml':value=b'<html><body><p>'+b'book '*140000+b'</p></body></html>'
                         z.writestr(entry.filename,value)
                     if target=='traversal.epub':z.writestr('../outside.txt','bad')

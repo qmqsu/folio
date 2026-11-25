@@ -368,6 +368,11 @@ static bool text_matches(const char* text, const char* query, const char* query_
     make_key(text, key, sizeof(key), true);
     return strstr(key, query_key) != NULL;
 }
+bool folio_catalog_matches_book(const char* title, const char* author, const char* query) {
+    char key[FOLIO_CATALOG_QUERY_CAP * 2 + 1];
+    make_key(query, key, sizeof(key), false);
+    return text_matches(title, query, key) || text_matches(author, query, key);
+}
 static int compare_text(const char* a, const char* b) {
     char left[CATALOG_KEY_CAP], right[CATALOG_KEY_CAP];
     make_key(a, left, sizeof(left), false); make_key(b, right, sizeof(right), false);

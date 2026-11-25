@@ -166,6 +166,18 @@ static bool manage_back(void) {
         default:return false;
     }
 }
+static void edit_search_key(unsigned i,char* query,size_t capacity,unsigned* mode) {
+    size_t n=strlen(query);const char* letters=keyboard_letters(*mode);
+    if(i<26 && i<strlen(letters) && n+1<capacity){query[n]=letters[i];query[n+1]='\0';}
+    else if(i==26 && n+1<capacity){query[n]=' ';query[n+1]='\0';}
+    else if(i==27 && n) {do{--n;}while(n && ((unsigned char)query[n]&0xC0)==0x80);query[n]='\0';}
+    else if(i==28)query[0]='\0';
+    else if(i==29)*mode=*mode<2?2:0;
+    else if(i==30)*mode^=1;
+    if(i>=29)refresh_keyboard(*mode);
+    else {draw_search_input(query);present_region((EpdRect){48,540,588,76});}
+}
+
 static bool manage_tap(int x,int y) {
     if(s_view==VIEW_CATALOG) {
         if(hit(done_rect(),x,y)) {apply_catalog();return true;}
@@ -176,16 +188,8 @@ static bool manage_tap(int x,int y) {
             s_catalog_options.sort=(folio_catalog_sort_t)i;show_view(s_view,false);return true;
         }
         for(unsigned i=0;i<31;++i)if(hit(catalog_key(i),x,y)) {
-            size_t n=strlen(s_search);const char* letters=keyboard_letters(s_search_keys);
-            if(i<26 && i<strlen(letters) && n+1<sizeof(s_search)){s_search[n]=letters[i];s_search[n+1]='\0';}
-            else if(i==26 && n+1<sizeof(s_search)){s_search[n]=' ';s_search[n+1]='\0';}
-            else if(i==27 && n) {do{--n;}while(n && ((unsigned char)s_search[n]&0xC0)==0x80);s_search[n]='\0';}
-            else if(i==28)s_search[0]='\0';
-            else if(i==29)s_search_keys=s_search_keys<2?2:0;
-            else if(i==30)s_search_keys^=1;
-            if(i>=29)refresh_keyboard(s_search_keys);
-            else {draw_search_input();present_region((EpdRect){48,540,588,76});}
-            return true;
+            edit_search_key(i,s_search,sizeof(s_search),&s_search_keys);
+            break;
         }
         return true;
     }

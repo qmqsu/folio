@@ -1657,6 +1657,13 @@ static void test_weread(const char* directory,const char* font_path) {
     for(unsigned i=0;i<6;++i){snprintf(mock_wr.items[i].title,sizeof(mock_wr.items[i].title),"%s",titles[i]);
         snprintf(mock_wr.items[i].subtitle,sizeof(mock_wr.items[i].subtitle),"%s · %s",i%2?"林舟":"许安",i==0?"已有离线章节":"可下载阅读");mock_wr.items[i].cached=i==0;}
     wr_state(FOLIO_WR_SHELF,"选择书籍后查看章节，下载完成后可离线阅读。");assert(wr_can_relogin());save_pgm(directory,"59-weread-cloud-shelf");
+    tap_rect(wr_right(876));assert(s_wr_searching);
+    tap_rect(catalog_key(0));assert(!strcmp(s_wr_query,"q"));
+    save_pgm(directory,"150-weread-search");
+    tap_rect(back_rect());assert(!s_wr_searching);
+    tap_rect(wr_right(876));assert(!*s_wr_query);
+    tap_rect(catalog_key(1));commands=wr_commands;tap_rect(done_rect());
+    wr_command_is(FOLIO_WR_SEARCH,commands,0);assert(!strcmp(wr_last_value,"w") && !s_wr_searching);
     commands=wr_commands;tap_rect(wr_row(1));wr_command_is(FOLIO_WR_SELECT_BOOK,commands,1);assert(s_wr_book_index==1);
     commands=wr_commands;handle_tap(588,1140);wr_command_is(FOLIO_WR_PAGE,commands,1);
     mock_wr.page=1;show_view(VIEW_WEREAD,false);commands=wr_commands;tap_rect(wr_row(2));wr_command_is(FOLIO_WR_SELECT_BOOK,commands,8);
@@ -1727,6 +1734,12 @@ static void test_weread(const char* directory,const char* font_path) {
     assert(s_view==VIEW_WEREAD && s_wr_open_pending && s_wr_open_position==mock_wr_position);
     fail_weread_stop=false;wr_refresh();assert(s_view==VIEW_READING && s_reader && !s_wr_open_pending && !s_wr_leaving);
     assert(!strcmp(s_current_book,mock_wr_path) && folio_reader_position(s_reader)==mock_wr_position);
+    // A downloaded book outside the local scan window can still reopen by ID.
+    size_t indexed_books=s_book_count;s_book_count=0;
+    folio_book_t downloaded={0};
+    assert(resolve_book(s_current_book,&downloaded)==&downloaded && downloaded.size);
+    open_book(&downloaded,false);assert(s_reader && s_view==VIEW_READING && !strcmp(s_current_book,mock_wr_path));
+    s_book_count=indexed_books;
     save_pgm(directory,"69-weread-offline-reader");
     // Direct sync closes the reader only after recording its position, and
     // cancellation drains the worker before restoring that exact book/page.
@@ -2152,7 +2165,7 @@ static void test_native_font_selection(const char* directory) {
     fail_reader_opens = 2; select_font(1);
     assert(!s_reader && settings_writes == writes && strstr(s_error, "书籍未能重新打开"));
     assert_font_identity(ids[3], ids[3]);
-    assert(reopen_font_reader(0, anchor, false));
+    assert(reopen_font_reader(&s_books[0], anchor, false));
     fail_font_paths[0] = ids[1]; select_font(1); fail_font_paths[0] = NULL;
     assert(s_view == VIEW_ERROR && s_reader && folio_reader_position(s_reader) == anchor);
     assert_font_identity(ids[3], ids[3]);
@@ -2172,7 +2185,7 @@ static void test_native_font_selection(const char* directory) {
     size_t book_index = SIZE_MAX;
     for (size_t i = 0; i < s_book_count; ++i) if (!strcmp(s_books[i].path, saved_book)) book_index = i;
     assert(book_index != SIZE_MAX);
-    close_reader(); assert(reopen_font_reader(book_index, saved_anchor, saved_cover));
+    close_reader(); assert(reopen_font_reader(&s_books[book_index], saved_anchor, saved_cover));
     snprintf(s_current_book, sizeof(s_current_book), "%s", saved_book);
     s_settings_tab = 0; s_fonts_return = VIEW_SETTINGS; s_list_page = 0; scan_fonts();
     show_view(VIEW_SETTINGS, true); assert_single_font = false;

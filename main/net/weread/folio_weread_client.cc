@@ -4,7 +4,6 @@
 #include "folio_weread_crypto.h"
 #include "vendor/cjson/cJSON.h"
 #include <algorithm>
-#include <unordered_map>
 #include <cctype>
 #include <chrono>
 #include <cmath>
@@ -143,6 +142,8 @@ bool response_ok(const HttpResponse& r, Error* e) {
                           r.failure == ErrorCode::Connection ? "无法连接微信读书服务器，请稍后重试" :
                           r.failure == ErrorCode::Certificate ? "服务器证书验证失败，请检查日期与网络" :
                           r.failure == ErrorCode::Limit ? "响应超过设备限制" :
+                          r.failure == ErrorCode::Malformed ? "书架响应格式无效" :
+                          r.failure == ErrorCode::Storage ? "书架写入失败，请检查 TF 卡空间" :
                           r.failure == ErrorCode::NoMemory ? "运行内存不足" : "安全连接或网络请求失败";
         return fail(e, r.failure, msg, r.status);
     }
@@ -287,8 +288,190 @@ bool Client::AbsorbCookies(const HttpResponse& r, Error* e) {
     }
     auth_ = next; wipe(&next, sizeof(next)); return true;
 }
+// Frame top-level fields and individual array elements across HTTP reads.
+// cJSON still validates each complete value, including ignored metadata.
+class ShelfStream {
+public:
+    explicit ShelfStream(ShelfSink& target) : sink(target) {}
+
+    ErrorCode feed(const char* bytes, size_t size) {
+        for (size_t i = 0; i < size; ++i) {
+            char c = bytes[i];
+            if (!token.empty()) {
+                if (!quoted && depth == 0 && (space(c) || c == ',' || c == '}' || c == ']')) {
+                    if (!finish_token()) return error;
+                } else {
+                    if (!append(c)) return error;
+                    continue;
+                }
+            }
+            if (space(c)) continue;
+            switch (state) {
+                case Start: if (c != '{') return ErrorCode::Malformed; state = Key; break;
+                case Key:
+                    if (c != '"' || !append(c)) return ErrorCode::Malformed;
+                    break;
+                case Colon: if (c != ':') return ErrorCode::Malformed; state = Value; break;
+                case Value:
+                    if (c == '[') {
+                        if (field_name == "books") {
+                            if (have_books) return ErrorCode::Malformed;
+                            have_books = true;
+                        }
+                        state = ArrayStart;
+                    } else if (field_name == "books" || !start_value(c)) return ErrorCode::Malformed;
+                    break;
+                case ArrayStart:
+                    if (c == ']') { state = AfterField; break; }
+                    [[fallthrough]];
+                case Element:
+                    if (!start_value(c)) return ErrorCode::Malformed;
+                    break;
+                case AfterElement:
+                    if (c == ']') state = AfterField;
+                    else if (c == ',') state = Element;
+                    else return ErrorCode::Malformed;
+                    break;
+                case AfterField:
+                    if (c == '}') state = Done;
+                    else if (c == ',') state = Key;
+                    else return ErrorCode::Malformed;
+                    break;
+                case Done: return ErrorCode::Malformed;
+            }
+        }
+        return ErrorCode::None;
+    }
+
+    bool finish(std::vector<uint16_t>* order, Error* e) {
+        if (state != Done || !token.empty()) return fail(e, ErrorCode::Malformed, "书架响应不完整");
+        if (server_error)
+            return fail(e, server_error == -2012 ? ErrorCode::SessionExpired : ErrorCode::Permission,
+                        server_error == -2012 ? "登录已过期，请重新扫码" : "服务端拒绝访问", 0, server_error);
+        if (!have_books)
+            return fail(e, ErrorCode::Malformed, "书架响应不完整");
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) { return a.id < b.id; });
+        std::sort(updates.begin(), updates.end(), [](const Update& a, const Update& b) { return a.id < b.id; });
+        size_t stamp = 0;
+        for (size_t i = 0; i < rows.size(); ++i) {
+            if (i && rows[i-1].id == rows[i].id) return fail(e, ErrorCode::Malformed, "书架编号重复");
+            while (stamp < updates.size() && updates[stamp].id < rows[i].id) ++stamp;
+            while (stamp < updates.size() && updates[stamp].id == rows[i].id) {
+                rows[i].updated = std::max(rows[i].updated, updates[stamp].time);
+                ++stamp;
+            }
+        }
+        std::sort(rows.begin(), rows.end(), [](const Row& a, const Row& b) {
+            return a.updated != b.updated ? a.updated > b.updated : a.slot < b.slot;
+        });
+        order->reserve(rows.size());
+        for (const Row& row : rows) order->push_back(row.slot);
+        return true;
+    }
+
+private:
+    enum State { Start, Key, Colon, Value, ArrayStart, Element, AfterElement, AfterField, Done };
+    struct Row { std::string id; uint32_t updated; uint16_t slot; };
+    State state = Start;
+    ShelfSink& sink;
+    std::vector<Row> rows;
+    struct Update { std::string id; uint32_t time; };
+    std::vector<Update> updates;
+    std::string token, field_name;
+    bool have_books = false, quoted = false, escaped = false;
+    unsigned depth = 0;
+    int server_error = 0;
+    ErrorCode error = ErrorCode::Malformed;
+
+    static bool space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+    bool start_value(char c) {
+        return c != ']' && c != '}' && c != ',' && c != ':' && append(c);
+    }
+    bool append(char c) {
+        if (token.size() >= 64 * 1024) { error = ErrorCode::Limit; return false; }
+        token.push_back(c);
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') {
+                quoted = false;
+                if (!depth) return finish_token();
+            }
+        } else if (c == '"') quoted = true;
+        else if (c == '[' || c == '{') { if (++depth > 32) return false; }
+        else if (c == ']' || c == '}') {
+            if (!depth) return false;
+            if (!--depth) return finish_token();
+        }
+        return true;
+    }
+    static std::string display_text(cJSON* node, const char* key) {
+        cJSON* value = field(node, key);
+        if (!cJSON_IsString(value)) return string(node, key, 512);
+        size_t n = strnlen(value->valuestring, 513);
+        if (n > 512) {
+            n = 512;
+            while (n && (static_cast<unsigned char>(value->valuestring[n]) & 0xC0) == 0x80) --n;
+        }
+        return std::string(value->valuestring, n);
+    }
+    bool finish_token() {
+        Json node = parse(token);
+        token.clear();
+        if (!node) return false;
+        if (state == Key) {
+            if (!cJSON_IsString(node.get())) return false;
+            field_name = node->valuestring;
+            state = Colon;
+            return true;
+        }
+        if (state == Value) {
+            if ((field_name == "errcode" || field_name == "errCode") && cJSON_IsNumber(node.get()))
+                server_error = node->valueint;
+            state = AfterField;
+            return true;
+        }
+        state = AfterElement;
+        if (field_name == "books") {
+            if (rows.size() >= kMaxShelfBooks) { error = ErrorCode::Limit; return false; }
+            Book book;
+            book.id = string(node.get(), "bookId", 63);
+            if (!safe_id(book.id)) return false;
+            book.title = display_text(node.get(), "title");
+            book.author = display_text(node.get(), "author");
+            cJSON* url = field(node.get(), "cover");
+            if (cJSON_IsString(url) && strnlen(url->valuestring, 2049) <= 2048) book.cover = url->valuestring;
+            if (book.cover.rfind("http://", 0) == 0) book.cover.replace(0, 7, "https://");
+            else if (book.cover.rfind("//", 0) == 0) book.cover = "https:" + book.cover;
+            if (book.cover.rfind("https://", 0) != 0 || book.cover.find_first_of("\r\n") != std::string::npos)
+                book.cover.clear();
+            rows.push_back({book.id, 0, static_cast<uint16_t>(rows.size())});
+            if (!sink.append(book)) { error = ErrorCode::Storage; return false; }
+        } else if (field_name == "bookProgress") {
+            std::string id = string(node.get(), "bookId", 63);
+            uint32_t updated = 0;
+            if (safe_id(id) && number(field(node.get(), "updateTime"), &updated)) {
+                if (updates.size() >= kMaxShelfBooks) { error = ErrorCode::Limit; return false; }
+                updates.push_back({std::move(id), updated});
+            }
+        }
+        return true;
+    }
+};
+
+bool Client::FetchShelf(ShelfSink& sink, std::vector<uint16_t>* order, Error* e) noexcept { try {
+    clear(e);
+    if (!order) return fail(e, ErrorCode::InvalidArgument, "书架参数无效");
+    order->clear();
+    if (!LoggedIn()) return fail(e, ErrorCode::NotLoggedIn, "请先扫码登录微信读书");
+    ShelfStream stream(sink);
+    auto r = Request("GET", "/web/shelf/sync", {}, kHost, e, false, 180000, &stream);
+    if (r.failure == ErrorCode::Limit) return fail(e, r.failure, "书架超过容量（1 万本、32 MiB 或单项 64 KiB）");
+    if (!response_ok(r, e)) return false;
+    return stream.finish(order, e);
+} WR_CATCH_BOOL(e) }
 HttpResponse Client::Request(const char* method, const std::string& path, const std::string& body,
-                             const std::string& referer, Error* e, bool tokens, uint32_t budget_ms) {
+                             const std::string& referer, Error* e, bool tokens, uint32_t budget_ms, ShelfStream* shelf) {
     HttpResponse r;
     if (!transport_ || path.empty() || path[0] != '/' || path.find_first_of("\r\n") != std::string::npos) {
         r.failure = ErrorCode::InvalidArgument; response_ok(r, e); return r;
@@ -299,6 +482,13 @@ HttpResponse Client::Request(const char* method, const std::string& path, const 
     q.reader_tokens = tokens;
     if(path.rfind("/api/auth/getLoginInfo?",0)==0)q.timeout_ms=30000;
     if(tokens || path.rfind("/web/book/chapter/",0)==0)q.timeout_ms=60000;
+    if (shelf) {
+        q.timeout_ms = budget_ms;
+        q.consume_context = shelf;
+        q.consume = [](void* stream, const char* data, size_t size) {
+            return static_cast<ShelfStream*>(stream)->feed(data, size);
+        };
+    }
     q.timeout_ms=std::min(q.timeout_ms,budget_ms);
     q.max_response = path.find("/chapter/") != std::string::npos ? (kMaxChapterBytes + 2) / 3 * 4 + 128 : kMaxChapterBytes;
     if (path == "/web/shelf/sync") q.max_response = kMaxShelfBytes;
@@ -349,90 +539,6 @@ bool Client::RenewSession(Error* e) noexcept { try {
     uint32_t succ = 0; number(field(j.get(), "succ"), &succ);
     if (succ != 1) return fail(e, ErrorCode::SessionExpired, "登录续期失败，请重新扫码");
     Disconnect(); return true;
-} WR_CATCH_BOOL(e) }
-bool Client::FetchShelf(std::vector<Book>* out, Error* e) noexcept { try {
-    clear(e); if (!out) return fail(e, ErrorCode::InvalidArgument, "书架参数无效"); out->clear();
-    if (!LoggedIn()) return fail(e, ErrorCode::NotLoggedIn, "请先扫码登录微信读书");
-    auto r = Request("GET", "/web/shelf/sync", {}, kHost, e); if (!response_ok(r, e)) return false;
-    // Keep only one JSON item alive. Large shelf replies contain substantial
-    // metadata in addition to the fields displayed by the reader.
-    if (!json_shape(r.body) || r.body.find("\\u0000") != std::string::npos)
-        return fail(e, ErrorCode::Malformed, "书架响应无效");
-    const char* cur = r.body.data();
-    const char* end = cur + r.body.size();
-    auto take = [&](char ch) {
-        while (cur < end && std::isspace(static_cast<unsigned char>(*cur))) ++cur;
-        if (cur == end || *cur != ch) return false;
-        ++cur;
-        return true;
-    };
-    auto value = [&]() {
-        const char* next = nullptr;
-        Json node(cJSON_ParseWithLengthOpts(cur, end - cur, &next, false));
-        if (node) cur = next;
-        return node;
-    };
-    std::unordered_map<std::string, size_t> indexes;
-    std::vector<Book> result;
-    const char* progress_start = nullptr;
-    bool have_books = false;
-    auto malformed = [&]() { return fail(e, ErrorCode::Malformed, "书架响应无效"); };
-    if (!take('{')) return malformed();
-    do {
-        Json key = value();
-        if (!cJSON_IsString(key.get()) || !take(':')) return malformed();
-        bool books = !strcmp(key->valuestring, "books");
-        bool positions = !strcmp(key->valuestring, "bookProgress");
-        if (take('[')) {
-            if (books && have_books) return malformed();
-            if (books) have_books = true;
-            if (positions) progress_start = cur;
-            if (!take(']')) {
-                do {
-                    if (cancelled_()) return fail(e, ErrorCode::Cancelled, "请求已取消");
-                    Json item = value();
-                    if (!item) return malformed();
-                    if (!books) continue;
-                    if (result.size() >= kMaxShelfBooks) return fail(e, ErrorCode::Limit, "书架超过设备容量");
-                    Book book;
-                    book.id = string(item.get(), "bookId", 63);
-                    book.title = string(item.get(), "title", 512);
-                    book.author = string(item.get(), "author", 512);
-                    book.cover = string(item.get(), "cover", 2048);
-                    if (!safe_id(book.id) || !indexes.emplace(book.id, result.size()).second) return malformed();
-                    if (book.cover.rfind("http://",0)==0) book.cover.replace(0,7,"https://");
-                    else if (book.cover.rfind("//",0)==0) book.cover="https:"+book.cover;
-                    if (book.cover.rfind("https://", 0) != 0 || book.cover.find_first_of("\r\n") != std::string::npos)
-                        book.cover.clear();
-                    result.push_back(std::move(book));
-                } while (take(','));
-                if (!take(']')) return malformed();
-            }
-        } else {
-            Json item = value();
-            if (!item || books) return malformed();
-            if (!strcmp(key->valuestring,"errcode") || !strcmp(key->valuestring,"errCode")) {
-                if (cJSON_IsNumber(item.get()) && item->valueint)
-                    return fail(e, item->valueint == -2012 ? ErrorCode::SessionExpired : ErrorCode::Permission,
-                                item->valueint == -2012 ? "登录已过期，请重新扫码" : "服务端拒绝访问", 0, item->valueint);
-            }
-        }
-    } while (take(','));
-    if (!take('}') || !have_books) return malformed();
-    while (cur < end && std::isspace(static_cast<unsigned char>(*cur))) ++cur;
-    if (cur != end) return malformed();
-    if (progress_start) {
-        cur = progress_start;
-        if (!take(']')) do {
-            Json item = value();
-            if (!item) return malformed();
-            std::string id = string(item.get(), "bookId", 63);
-            auto it = indexes.find(id);
-            if (it != indexes.end()) progress(item.get(), id, &result[it->second].progress);
-        } while (take(','));
-    }
-    std::stable_sort(result.begin(), result.end(), [](const Book& a, const Book& b) { return a.progress.update_time > b.progress.update_time; });
-    *out = std::move(result); return true;
 } WR_CATCH_BOOL(e) }
 bool Client::FetchChapters(const std::string& id, std::vector<Chapter>* out, Error* e) noexcept { try {
     clear(e); if (!out) return fail(e, ErrorCode::InvalidArgument, "目录参数无效"); out->clear(); if (!Ready(id, e)) return false;

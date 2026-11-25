@@ -46,6 +46,9 @@ def main():
             str(ROOT/'tools/tests/weread_client_runner.cc'), *(str(SOURCE/n) for n in ['folio_weread_client.cc','folio_weread_crypto.cc','folio_weread_transport.cc']), str(path/'json.o'), '-o', str(path/'runner')], check=True)
         for n in (128, 129, 1024):
             (path/f'shelf{n}.json').write_text(json.dumps({'books':[{'bookId':f'b{i}','title':f'Title {i}'} for i in range(n)]}))
+        (path/'shelf6000.json').write_text(json.dumps({
+            'bookProgress': [{'bookId': 'b5999', 'updateTime': 123}],
+            'books': [{'bookId': f'b{i}', 'title': '书名', 'metadata': 'extra' * 110} for i in range(6000)]}))
         for n in (512, 513):
             (path/f'chapters{n}.json').write_text(json.dumps({'data':[{'bookId':'book1','updated':[{'chapterUid':f'c{i}','chapterIdx':i,'title':f'Chapter {i}'} for i in range(n)]}]}))
         texts = {'xhtml':'<html><body><p id="a">中文😀 &amp; 文本</p>\n<p> untouched </p></body></html>', 'plain':'原始TXT😀\r\n second line\n末尾'}

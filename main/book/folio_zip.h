@@ -50,3 +50,6 @@ uint8_t* folio_zip_read(const folio_zip_t* zip, const folio_zip_entry_t* entry,
 
 /* Permit the optional line ending used by older EPUB builders. */
 bool folio_epub_valid_mime(const uint8_t* data, size_t size);
+
+/* Missing mimetype is tolerated only with a container; callers validate its OPF. */
+bool folio_zip_check_epub_type(const folio_zip_t* zip, char* error, size_t cap);

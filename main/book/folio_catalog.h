@@ -59,3 +59,6 @@ size_t folio_catalog_select(const folio_catalog_t* catalog, const folio_book_t* 
                             size_t* indexes, size_t capacity);
 
 bool folio_catalog_relocate(folio_catalog_t* catalog,const char* old_path,const char* new_path);
+
+/* Match a cloud title or author with the catalog keyboard query. */
+bool folio_catalog_matches_book(const char* title, const char* author, const char* query);

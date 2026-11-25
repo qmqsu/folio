@@ -26,6 +26,7 @@ typedef struct {
     uint32_t cloud_total_seconds, saved_cloud_seconds;
     uint32_t completed, total, pending_seconds, uncertain_seconds;
     size_t page, count, item_count;
+    char query[128];
     char title[128], message[192], qr_url[256], local_path[256];
     char local_position[128], cloud_position[128];
     folio_weread_item_t items[FOLIO_WR_PAGE_SIZE];
@@ -37,7 +38,7 @@ typedef enum {
     FOLIO_WR_UPLOAD_POSITION, FOLIO_WR_ENABLE_TIME, FOLIO_WR_DISABLE_TIME,
     FOLIO_WR_UPLOAD_TIME, FOLIO_WR_LOGOUT, FOLIO_WR_CANCEL,
     FOLIO_WR_RETRY_DOWNLOAD, FOLIO_WR_RETURN_TOC, FOLIO_WR_RELOGIN, FOLIO_WR_UPLOAD_SYNC,
-    FOLIO_WR_RETRY, FOLIO_WR_RETURN_SHELF
+    FOLIO_WR_RETRY, FOLIO_WR_RETURN_SHELF, FOLIO_WR_SEARCH
 } folio_weread_action_t;
 
 // UI-thread lifecycle. Async worker owns the protocol client and SD mutations.

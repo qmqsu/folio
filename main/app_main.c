@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -123,7 +124,9 @@ static uint32_t s_wr_reader_position;
 static bool s_wr_reader_cover;
 static uint32_t s_wr_open_position;
 static size_t s_wr_book_index;
-static unsigned s_wr_confirm;
+static unsigned s_wr_confirm, s_wr_search_keys;
+static bool s_wr_searching;
+static char s_wr_query[FOLIO_CATALOG_QUERY_CAP];
 static bool s_power_initialized;
 static bool s_suspend_pending, s_suspend_power_off;
 static void* s_ui_task;
@@ -267,6 +270,21 @@ static void show_root(view_t view) {
              (long long)(t2 - t1) / 1000, (long long)(esp_timer_get_time() - t2) / 1000);
 }
 static void show_library(void) { show_root(VIEW_LIBRARY); }
+// A cloud download can be present on a full card shelf without appearing in
+// the bounded local list. Reopen only the validated WeRead file in books/.
+static const folio_book_t* resolve_book(const char* path, folio_book_t* downloaded) {
+    for (size_t i = 0; i < s_book_count; ++i)
+        if (!strcmp(path, s_books[i].path)) return &s_books[i];
+    char id[64];
+    struct stat info;
+    if (!folio_wr_path_id(path, id, sizeof(id)) || strlen(path) >= sizeof(downloaded->path) ||
+        stat(path, &info) || !S_ISREG(info.st_mode) || info.st_size <= 0 || info.st_size > INT32_MAX) return NULL;
+    snprintf(downloaded->path, sizeof(downloaded->path), "%s", path);
+    snprintf(downloaded->title, sizeof(downloaded->title), "%s", id);
+    downloaded->size = (uint32_t)info.st_size;
+    return downloaded;
+}
+static void open_book(const folio_book_t* book, bool feedback);
 static void open_recent(size_t index) {
     const folio_recent_book_t* recent = folio_activity_recent(s_activity, index);
     if (!recent) { show_library(); return; }
@@ -274,31 +292,34 @@ static void open_recent(size_t index) {
     if (access(recent->path, F_OK) == 0) refresh_library_if_stale();
     else refresh_library();
     for (int pass = 0; pass < 2; ++pass) {
-        for (size_t i = 0; i < s_book_count; ++i) if (strcmp(recent->path, s_books[i].path) == 0) {
-            open_book_absolute(i, true); return;
-        }
+        folio_book_t downloaded;
+        const folio_book_t* book = resolve_book(recent->path, &downloaded);
+        if (book) { open_book(book, true); return; }
         if (!s_library_fresh) break;
         refresh_library();
     }
     show_error("书架中没有找到这本书。请将原文件放回 books 目录，阅读记录会保留。", VIEW_HOME);
 }
 static void open_book_absolute(size_t index, bool feedback) {
-    if (index >= s_book_count || s_font == NULL || !save_reader()) return;
+    if (index < s_book_count) open_book(&s_books[index], feedback);
+}
+static void open_book(const folio_book_t* book, bool feedback) {
+    if (!book || !s_font || !save_reader()) return;
     close_reader();
     int64_t open_t0 = esp_timer_get_time();
     // Large books are read in full to build caches on their first open.
-    if (feedback) show_busy_hint("正在打开书籍", s_books[index].size >= 2u * 1024 * 1024 ?
+    if (feedback) show_busy_hint("正在打开书籍", book->size >= 2u * 1024 * 1024 ?
                                  "大书首次打开较慢，之后会快很多" : NULL);
     ESP_LOGD(TAG, "open busy screen %lld ms", (long long)((esp_timer_get_time() - open_t0) / 1000));
     (void)folio_font_set_size(s_font, s_settings.font_size);
     folio_reader_options_t options = reader_options();
-    s_reader = folio_reader_open_with_options(&s_books[index], s_font, &options);
+    s_reader = folio_reader_open_with_options(book, s_font, &options);
     if (s_reader == NULL) { show_error(folio_reader_last_error(), VIEW_LIBRARY); return; }
     uint32_t restored_position;
-    if(folio_weread_local_position(s_books[index].path,&restored_position))
+    if(folio_weread_local_position(book->path,&restored_position))
         (void)folio_reader_seek(s_reader,restored_position);
-    if(s_catalog) (void)folio_catalog_touch(s_catalog,s_books[index].path,folio_power_unix_time());
-    snprintf(s_current_book, sizeof(s_current_book), "%s", s_books[index].path);
+    if(s_catalog) (void)folio_catalog_touch(s_catalog,book->path,folio_power_unix_time());
+    snprintf(s_current_book, sizeof(s_current_book), "%s", book->path);
     s_reader_cover=folio_reader_page_number(s_reader)==1;s_reader_notice=NULL;
     activity_record_book(); activity_flush();
     if (!folio_session_save(s_current_book)) {
@@ -422,8 +443,11 @@ static void load_card(bool remount, bool resume) {
         (void)catalog_save();catalog_select();
         snprintf(s_current_book, sizeof(s_current_book), "%s", recent ? recent->path : "");
         if (resume && s_settings.auto_resume && has_last) {
-            for (size_t i = 0; i < s_book_count; ++i) if (strcmp(last_book, s_books[i].path) == 0) {
-                s_shelf_page = i / LIBRARY_PAGE_SIZE; open_book_absolute(i, true); return;
+            folio_book_t downloaded;
+            const folio_book_t* book = resolve_book(last_book, &downloaded);
+            if (book) {
+                if (book != &downloaded) s_shelf_page = (size_t)(book - s_books) / LIBRARY_PAGE_SIZE;
+                open_book(book, true); return;
             }
         }
     }
@@ -557,11 +581,11 @@ static void change_setting(int row, int direction) {
 }
 // Reopen instead of swapping the reader's font pointer: same-size faces have
 // different metrics, and all pagination/checkpoint caches must be rebuilt.
-static bool reopen_font_reader(size_t book_index, uint32_t anchor, bool cover) {
-    if (!s_font || book_index >= s_book_count || !s_card_ready) return false;
+static bool reopen_font_reader(const folio_book_t* book, uint32_t anchor, bool cover) {
+    if (!s_font || !book || !s_card_ready) return false;
     (void)folio_font_set_size(s_font, s_settings.font_size);
     folio_reader_options_t options = reader_options();
-    s_reader = folio_reader_open_with_options(&s_books[book_index], s_font, &options);
+    s_reader = folio_reader_open_with_options(book, s_font, &options);
     if (!s_reader) return false;
     // Opening itself may save a reflowed page start. Seek the captured byte
     // anchor explicitly, including on rollback, rather than trusting that save.
@@ -590,13 +614,10 @@ static void select_font(size_t index) {
     }
     bool had_reader = s_reader != NULL, previous_cover = s_reader_cover;
     uint32_t anchor = had_reader ? folio_reader_position(s_reader) : 0;
-    size_t book_index = SIZE_MAX;
-    if (had_reader) {
-        for (size_t i = 0; i < s_book_count; ++i)
-            if (!strcmp(s_books[i].path, s_current_book)) { book_index = i; break; }
-        if (book_index == SIZE_MAX) {
-            show_error("当前书籍不在书架中，字体选择未改变。请返回书架后重试。", s_fonts_return); return;
-        }
+    folio_book_t downloaded;
+    const folio_book_t* book = had_reader ? resolve_book(s_current_book, &downloaded) : NULL;
+    if (had_reader && !book) {
+        show_error("当前书籍无法读取，请检查 TF 卡。", s_fonts_return); return;
     }
     char previous_font[256];
     snprintf(previous_font, sizeof(previous_font), "%s", s_active_font);
@@ -609,7 +630,7 @@ static void select_font(size_t index) {
     bool ready = open_active_font(candidate.font_path);
     if (ready && had_reader) {
         failure = FONT_READER_FAILED;
-        ready = reopen_font_reader(book_index, anchor, previous_cover);
+        ready = reopen_font_reader(book, anchor, previous_cover);
     }
     if (ready) {
         failure = FONT_SAVE_FAILED;
@@ -626,7 +647,7 @@ static void select_font(size_t index) {
     bool restored_font = open_active_font(previous_font);
     if (!restored_font && strcmp(previous_font, FOLIO_FONT_BUILTIN_PATH))
         (void)open_active_font(FOLIO_FONT_BUILTIN_PATH);
-    bool restored_reader = !had_reader || reopen_font_reader(book_index, anchor, previous_cover);
+    bool restored_reader = !had_reader || reopen_font_reader(book, anchor, previous_cover);
     if (!s_font) {
         show_error("字体切换未完成，原选择已保留。当前字体无法加载，请重试或重新启动。", s_fonts_return); return;
     }

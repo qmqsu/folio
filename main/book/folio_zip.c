@@ -13,9 +13,9 @@
 #include "miniz.h"
 #endif
 
-#define ZIP_MAX_ENTRIES 2048u
-#define ZIP_MAX_NAMES (128u * 1024u)
-#define ZIP_MAX_CENTRAL (512u * 1024u)
+#define ZIP_MAX_ENTRIES 8192u
+#define ZIP_MAX_NAMES (512u * 1024u)
+#define ZIP_MAX_CENTRAL (1536u * 1024u)
 #define ZIP_MAX_ARCHIVE (128u * 1024u * 1024u)
 #define ZIP_MAX_MEMBER (8u * 1024u * 1024u)
 #define ZIP_INPUT_BYTES 4096u
@@ -86,15 +86,26 @@ static bool safe_name(const uint8_t* name, size_t length) {
     }
     return true;
 }
-static bool extra_valid(const uint8_t* bytes, size_t size) {
+// A streaming writer may reserve 64-bit local sizes even for a small ZIP32
+// archive. Only accept that form when its values agree with the bounded index.
+static bool extra_valid(const uint8_t* bytes, size_t size, const folio_zip_entry_t* local64, bool* has64) {
+    bool found = false;
     size_t pos = 0;
     while (pos < size) {
         if (size - pos < 4) return false;
         uint16_t type = le16(bytes + pos), count = le16(bytes + pos + 2);
         pos += 4;
-        if (type == 0x0001 || count > size - pos) return false; // ZIP64 excluded.
+        if (count > size - pos) return false;
+        if (type == 1) {
+            if (!local64 || found || count != 16 || le32(bytes + pos + 4) || le32(bytes + pos + 12)) return false;
+            uint32_t raw = le32(bytes + pos), packed = le32(bytes + pos + 8);
+            bool deferred = (local64->flags & 8) && !raw && !packed;
+            if (!deferred && (raw != local64->size || packed != local64->compressed)) return false;
+            found = true;
+        }
         pos += count;
     }
+    if (has64) *has64 = found;
     return true;
 }
 
@@ -106,13 +117,60 @@ void folio_zip_close(folio_zip_t* zip) {
     memset(zip, 0, sizeof(*zip));
 }
 
+static int by_offset(const void* left, const void* right) {
+    const folio_zip_entry_t* a = left;
+    const folio_zip_entry_t* b = right;
+    return (a->local_offset > b->local_offset) - (a->local_offset < b->local_offset);
+}
+static int by_name(const void* left, const void* right) {
+    return strcmp(((const folio_zip_entry_t*)left)->name, ((const folio_zip_entry_t*)right)->name);
+}
+
+typedef struct {
+    FILE* file;
+    uint32_t base, size, start;
+    size_t used;
+    uint8_t bytes[8192];
+} directory_reader_t;
+
+// The central directory is contiguous on disk, but need not fit in a single
+// heap allocation. Keep its window across seeks to individual local headers.
+static bool directory_read(directory_reader_t* dir, size_t pos, void* target, size_t length) {
+    if (pos > dir->size || length > dir->size - pos) return false;
+    uint8_t* output = target;
+    while (length) {
+        if (pos < dir->start || pos - dir->start >= dir->used) {
+            dir->start = pos;
+            dir->used = dir->size - pos;
+            if (dir->used > sizeof(dir->bytes)) dir->used = sizeof(dir->bytes);
+            if (!read_at(dir->file, dir->base + pos, dir->bytes, dir->used)) return false;
+        }
+        size_t offset = pos - dir->start;
+        size_t n = dir->used - offset;
+        if (n > length) n = length;
+        memcpy(output, dir->bytes + offset, n);
+        output += n; pos += n; length -= n;
+    }
+    return true;
+}
+static bool directory_extra_valid(directory_reader_t* dir, size_t pos, size_t length) {
+    while (length) {
+        uint8_t header[4];
+        if (length < 4 || !directory_read(dir, pos, header, 4) || le16(header) == 1) return false;
+        size_t n = 4u + le16(header + 2);
+        if (n > length) return false;
+        length -= n; pos += n;
+    }
+    return true;
+}
+
 static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap, bool fingerprint) {
     if (zip == NULL || path == NULL) return fail(error, cap, "Invalid EPUB path");
     memset(zip, 0, sizeof(*zip));
     zip->file = fopen(path, "rb");
     if (zip->file == NULL) return fail(error, cap, "Cannot open EPUB");
     uint8_t* tail = NULL;
-    uint8_t* central = NULL;
+    directory_reader_t* directory = NULL;
     const char* reason = "Invalid ZIP directory";
     if (fseek(zip->file, 0, SEEK_END) != 0) goto failed;
     long file_length = ftell(zip->file);
@@ -133,26 +191,43 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
         }
         if (pos == 0) break;
     }
-    if (eocd == SIZE_MAX) goto failed;
+    if (eocd == SIZE_MAX) { reason = "ZIP end record missing or file truncated"; goto failed; }
     const uint8_t* end = tail + eocd;
     uint32_t central_size = le32(end + 12), central_offset = le32(end + 16);
     uint32_t eocd_offset = zip->source_size - (uint32_t)tail_size + (uint32_t)eocd;
     uint16_t count = le16(end + 10);
-    if (le16(end + 4) != 0 || le16(end + 6) != 0 || le16(end + 8) != count ||
-        count == 0 || count > ZIP_MAX_ENTRIES || central_size > ZIP_MAX_CENTRAL ||
+    if (count > ZIP_MAX_ENTRIES || central_size > ZIP_MAX_CENTRAL) {
+        reason = "EPUB ZIP directory exceeds device limits"; goto failed;
+    }
+    if (le16(end + 4) || le16(end + 6) || le16(end + 8) != count) {
+        reason = "Multi-disk EPUB ZIP is unsupported"; goto failed;
+    }
+    if (count == 0 ||
         central_offset > eocd_offset || central_size != eocd_offset - central_offset) goto failed;
     if (eocd >= 20 && le32(tail + eocd - 20) == 0x07064B50u) goto failed;
     free(tail); tail = NULL;
-    central = folio_epub_alloc(central_size);
-    if (central == NULL) { reason = "Not enough memory for ZIP"; goto failed; }
-    if (!read_at(zip->file, central_offset, central, central_size)) goto failed;
+    directory = folio_epub_alloc(sizeof(*directory));
+    if (!directory) { reason = "Not enough memory for ZIP directory"; goto failed; }
+    directory->file = zip->file; directory->base = central_offset; directory->size = central_size;
+    directory->start = 0; directory->used = 0;
+    for (size_t offset = 0; offset < central_size; offset += directory->used) {
+        directory->start = offset;
+        directory->used = central_size - offset;
+        if (directory->used > sizeof(directory->bytes)) directory->used = sizeof(directory->bytes);
+        if (!read_at(zip->file, central_offset + offset, directory->bytes, directory->used)) goto failed;
+        zip->directory_crc = folio_epub_crc32(zip->directory_crc, directory->bytes, directory->used);
+    }
     size_t scan = 0, name_capacity = 0;
+    uint8_t c[46];
     for (size_t i = 0; i < count; ++i) {
-        if (folio_epub_cancelled()) goto failed;
-        if (central_size - scan < 46 || le32(central + scan) != 0x02014B50u) goto failed;
-        uint16_t name_length = le16(central + scan + 28);
-        uint32_t record_size = 46u + name_length + le16(central + scan + 30) + le16(central + scan + 32);
-        if (record_size > central_size - scan || (size_t)name_length + 1 > ZIP_MAX_NAMES - name_capacity) goto failed;
+        if (folio_epub_cancelled() || !directory_read(directory, scan, c, sizeof(c)) ||
+            le32(c) != 0x02014B50u) goto failed;
+        uint16_t name_length = le16(c + 28);
+        uint32_t record_size = 46u + name_length + le16(c + 30) + le16(c + 32);
+        if (record_size > central_size - scan) goto failed;
+        if ((size_t)name_length + 1 > ZIP_MAX_NAMES - name_capacity) {
+            reason = "EPUB ZIP filenames exceed device limits"; goto failed;
+        }
         name_capacity += name_length + 1;
         scan += record_size;
     }
@@ -166,13 +241,20 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
     size_t pos = 0, name_used = 0;
     for (size_t i = 0; i < count; ++i) {
         if (folio_epub_cancelled()) goto failed;
-        if (central_size - pos < 46 || le32(central + pos) != 0x02014B50u) goto failed;
-        const uint8_t* c = central + pos;
+        if (!directory_read(directory, pos, c, sizeof(c)) || le32(c) != 0x02014B50u) goto failed;
         uint16_t name_length = le16(c + 28), extra_length = le16(c + 30), comment_length = le16(c + 32);
         uint32_t record_size = 46u + name_length + extra_length + comment_length;
-        if (record_size > central_size - pos || le16(c + 34) != 0 ||
-            !safe_name(c + 46, name_length) || !extra_valid(c + 46 + name_length, extra_length) ||
+        if (record_size > central_size - pos || name_length >= FOLIO_ZIP_NAME_CAP ||
             (size_t)name_length + 1 > name_capacity - name_used) goto failed;
+        uint8_t* name = (uint8_t*)zip->names + name_used;
+        if (!directory_read(directory, pos + 46, name, name_length)) goto failed;
+        name[name_length] = 0;
+        size_t prefix = 0;
+        while (name_length - prefix > 2 && !memcmp(name + prefix, "./", 2)) prefix += 2;
+        bool root_directory = name_length == 2 && !memcmp(name, "./", 2);
+        if (le16(c + 34) != 0 ||
+            (!root_directory && !safe_name(name + prefix, name_length - prefix)) ||
+            !directory_extra_valid(directory, pos + 46 + name_length, extra_length)) goto failed;
         folio_zip_entry_t* entry = &zip->entries[i];
         entry->flags = le16(c + 8); entry->method = le16(c + 10);
         entry->crc = le32(c + 16); entry->compressed = le32(c + 20);
@@ -184,8 +266,8 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
             ((le32(c + 38) >> 16) & 0xF000u) == 0xA000u) {
             reason = "Unsupported, encrypted or oversized ZIP member"; goto failed;
         }
+        if (root_directory && entry->size) goto failed;
         entry->name = zip->names + name_used;
-        memcpy(entry->name, c + 46, name_length); entry->name[name_length] = '\0';
         name_used += name_length + 1;
         uint8_t local[30], local_name[FOLIO_ZIP_NAME_CAP];
         if (!read_at(zip->file, entry->local_offset, local, sizeof(local)) ||
@@ -198,52 +280,58 @@ static bool open_zip(const char* path, folio_zip_t* zip, char* error, size_t cap
         if (entry->compressed > central_offset - entry->data_offset ||
             !read_at(zip->file, entry->local_offset + 30, local_name, name_length) ||
             memcmp(local_name, entry->name, name_length) != 0) goto failed;
-        if ((entry->flags & 8) == 0 && (le32(local + 14) != entry->crc ||
-            le32(local + 18) != entry->compressed || le32(local + 22) != entry->size)) goto failed;
-        if ((entry->flags & 8) != 0 &&
-            ((le32(local + 14) != 0 && le32(local + 14) != entry->crc) ||
-             (le32(local + 18) != 0 && le32(local + 18) != entry->compressed) ||
-             (le32(local + 22) != 0 && le32(local + 22) != entry->size))) goto failed;
-        entry->member_end = entry->data_offset + entry->compressed;
-        if ((entry->flags & 8) != 0) {
-            uint8_t descriptor[16];
-            uint32_t available = central_offset - entry->member_end;
-            if (available < 12 || !read_at(zip->file, entry->member_end, descriptor, 12)) goto failed;
-            bool unsigned_descriptor = le32(descriptor) == entry->crc &&
-                le32(descriptor + 4) == entry->compressed && le32(descriptor + 8) == entry->size;
-            if (unsigned_descriptor) entry->member_end += 12;
-            else {
-                if (le32(descriptor) != 0x08074B50u || available < 16 ||
-                    !read_at(zip->file, entry->member_end, descriptor, 16) ||
-                    le32(descriptor + 4) != entry->crc || le32(descriptor + 8) != entry->compressed ||
-                    le32(descriptor + 12) != entry->size) goto failed;
-                entry->member_end += 16;
-            }
-        }
+        entry->name += prefix;
+        bool local64 = false;
         if (local_extra_length != 0) {
             uint8_t* extra = folio_epub_alloc(local_extra_length);
             if (extra == NULL) { reason = "Not enough memory for ZIP"; goto failed; }
             bool okay = read_at(zip->file, entry->local_offset + 30u + name_length, extra, local_extra_length) &&
-                        extra_valid(extra, local_extra_length);
+                        extra_valid(extra, local_extra_length, entry, &local64);
             free(extra);
             if (!okay) goto failed;
         }
-        for (size_t prior = 0; prior < i; ++prior) {
-            const folio_zip_entry_t* other = &zip->entries[prior];
-            if (strcmp(other->name, entry->name) == 0 ||
-                (entry->local_offset < other->member_end && other->local_offset < entry->member_end)) goto failed;
+        bool sentinel = local64 && le32(local + 18) == UINT32_MAX && le32(local + 22) == UINT32_MAX;
+        if ((entry->flags & 8) == 0 && (le32(local + 14) != entry->crc ||
+            (!sentinel && (le32(local + 18) != entry->compressed || le32(local + 22) != entry->size)))) goto failed;
+        if ((entry->flags & 8) != 0 &&
+            ((le32(local + 14) != 0 && le32(local + 14) != entry->crc) ||
+             (!sentinel && le32(local + 18) != 0 && le32(local + 18) != entry->compressed) ||
+             (!sentinel && le32(local + 22) != 0 && le32(local + 22) != entry->size))) goto failed;
+        entry->member_end = entry->data_offset + entry->compressed;
+        if ((entry->flags & 8) != 0) {
+            uint8_t descriptor[24];
+            uint32_t available = central_offset - entry->member_end;
+            size_t length = local64 ? 20 : 12;
+            if (available < length || !read_at(zip->file, entry->member_end, descriptor, length)) goto failed;
+            const uint8_t* fields = descriptor;
+            if (le32(fields) == 0x08074B50u &&
+                !(le32(fields) == entry->crc && le32(fields + 4) == entry->compressed &&
+                  le32(fields + (local64 ? 12 : 8)) == entry->size)) {
+                length += 4;
+                if (available < length || !read_at(zip->file, entry->member_end, descriptor, length)) goto failed;
+                fields += 4;
+            }
+            if (le32(fields) != entry->crc || le32(fields + 4) != entry->compressed ||
+                le32(fields + (local64 ? 12 : 8)) != entry->size ||
+                (local64 && (le32(fields + 8) || le32(fields + 16)))) goto failed;
+            entry->member_end += length;
         }
         pos += record_size;
         zip->count++;
         if ((i & 31) == 0) folio_epub_yield();
     }
     if (pos != central_size) goto failed;
-    zip->directory_crc = folio_epub_crc32(0, central, central_size);
-    free(central); central = NULL;
+    free(directory); directory = NULL;
+    qsort(zip->entries, count, sizeof(*zip->entries), by_offset);
+    for (size_t i = 1; i < count; ++i)
+        if (zip->entries[i-1].member_end > zip->entries[i].local_offset) goto failed;
+    qsort(zip->entries, count, sizeof(*zip->entries), by_name);
+    for (size_t i = 1; i < count; ++i)
+        if (!strcmp(zip->entries[i-1].name, zip->entries[i].name)) goto failed;
     if (!fingerprint || folio_zip_fingerprint(zip)) return true;
     reason = "Cannot read EPUB";
 failed:
-    free(tail); free(central); folio_zip_close(zip);
+    free(tail); free(directory); folio_zip_close(zip);
     if (folio_epub_cancelled()) reason = "EPUB operation cancelled";
     return fail(error, cap, reason);
 }
@@ -275,10 +363,8 @@ bool folio_zip_open_directory(const char* path, folio_zip_t* zip, char* error, s
 
 const folio_zip_entry_t* folio_zip_find(const folio_zip_t* zip, const char* name) {
     if (zip == NULL || name == NULL) return NULL;
-    for (size_t i = 0; i < zip->count; ++i) {
-        if (strcmp(zip->entries[i].name, name) == 0) return &zip->entries[i];
-    }
-    return NULL;
+    folio_zip_entry_t key = {.name = (char*)name};
+    return bsearch(&key, zip->entries, zip->count, sizeof(*zip->entries), by_name);
 }
 
 static bool inflate_entry(FILE* file, const folio_zip_entry_t* entry, uint8_t* out) {
@@ -371,4 +457,17 @@ bool folio_epub_valid_mime(const uint8_t* data, size_t size) {
     return data && (size == 20 || (size == 21 && data[20] == '\n') ||
         (size == 22 && data[20] == '\r' && data[21] == '\n')) &&
         !memcmp(data,"application/epub+zip",20);
+}
+
+bool folio_zip_check_epub_type(const folio_zip_t* zip, char* error, size_t cap) {
+    const folio_zip_entry_t* entry = folio_zip_find(zip, "mimetype");
+    if (!entry) return folio_zip_find(zip, "META-INF/container.xml") != NULL ||
+                       fail(error, cap, "Missing EPUB container and mimetype");
+    if (entry->size > 22) return fail(error, cap, "Invalid EPUB mimetype");
+    size_t size = 0;
+    uint8_t* bytes = folio_zip_read(zip, entry, 22, &size, error, cap);
+    if (!bytes) return false;
+    bool valid = folio_epub_valid_mime(bytes, size);
+    free(bytes);
+    return valid || fail(error, cap, "Invalid EPUB mimetype");
 }

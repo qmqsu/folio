@@ -21,11 +21,11 @@ def main():
         folder = Path(temp).resolve()
         common = ['-isysroot',sdk,'-Wall','-Wextra','-Werror','-g','-fsanitize=address,undefined','-fno-sanitize-recover=all','-Wno-deprecated-declarations',f'-DFOLIO_SD_ROOT="{folder / "card"}"','-DFOLIO_EPUB_HOST_TEST','-DFOLIO_WEREAD_HOST_TEST','-D_POSIX_C_SOURCE=200809L','-I',str(ROOT/'main'),'-I',str(ROOT/'main/book'),'-I',str(ROOT/'main/net'),'-I',str(ROOT/'tools/tests/weread_service_stubs'),'-I',str(ROOT/'tools/tests/weread_transport_stubs')]
         objects=[]
-        for index, name in enumerate(['main/folio_storage.c','main/book/folio_weread_cache.c','main/net/folio_weread_time.c','main/book/folio_epub.c','main/book/folio_zip.c','main/book/folio_xml.c','main/net/weread/vendor/cjson/cJSON.c']):
+        for index, name in enumerate(['main/folio_storage.c','main/book/folio_weread_cache.c','main/net/folio_weread_time.c','main/book/folio_epub.c','main/book/folio_catalog.c','main/book/folio_text.c','main/book/folio_gbk_table.c','main/book/folio_zip.c','main/book/folio_xml.c','main/net/weread/vendor/cjson/cJSON.c']):
             target=folder/f'{index}.o'; flags=['-Drename=folio_test_time_rename'] if name.endswith('folio_weread_time.c') else []
-            subprocess.run([cc,*common,'-std=c11',*flags,'-c',str(ROOT/name),'-o',str(target)],check=True);objects.append(str(target))
+            subprocess.run([cc,*common,'-std=c11',*flags,'-idirafter',str(ROOT/'tools/tests/ui_stubs'),'-c',str(ROOT/name),'-o',str(target)],check=True);objects.append(str(target))
         binary=folder/'runner'
-        subprocess.run([cc+'++',*common,'-std=c++17','-Wno-missing-field-initializers',str(ROOT/'tools/tests/weread_service_runner.cc'),str(ROOT/'main/net/weread/folio_weread_client.cc'),str(ROOT/'main/net/weread/folio_weread_crypto.cc'),str(ROOT/'main/net/weread/folio_weread_session.cc'),*objects,'-pthread','-lz','-o',str(binary)],check=True)
+        subprocess.run([cc+'++',*common,'-std=c++17','-Wno-missing-field-initializers',str(ROOT/'tools/tests/weread_service_runner.cc'),str(ROOT/'main/net/weread/folio_weread_client.cc'),str(ROOT/'main/net/weread/folio_weread_crypto.cc'),str(ROOT/'main/net/weread/folio_weread_session.cc'),*objects,'-Wl,-dead_strip','-pthread','-lz','-o',str(binary)],check=True)
         for i in range(4):
             raw=f'<html><body><p>ABCDEFGHIJKLMN Chapter {i} 中文😀 &amp; 正文</p>\n<p>第二段</p></body></html>'.encode()
             (folder/f'raw{i}').write_bytes(raw)

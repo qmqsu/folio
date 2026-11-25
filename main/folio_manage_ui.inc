@@ -40,9 +40,9 @@ static void draw_keyboard(unsigned mode) {
 static void refresh_keyboard(unsigned mode) {
     EpdRect r={24,640,636,404};epd_fill_rect(r,PAPER,fb());draw_keyboard(mode);present_region(r);
 }
-static void draw_search_input(void) {
+static void draw_search_input(const char* query) {
     EpdRect r={48,540,588,76};epd_fill_rect(r,PAPER,fb());panel(r);
-    label(68,baseline_for_center_y(30,*s_search?s_search:"输入关键词",578),616,30,*s_search?INK:MUTED,*s_search?s_search:"输入关键词");
+    label(68,baseline_for_center_y(30,*query?query:"输入关键词",578),616,30,*query?INK:MUTED,*query?query:"输入关键词");
 }
 static void draw_catalog(void) {
     page_header("书架","查找书籍","书名、作者、无声调拼音或首字母");
@@ -50,7 +50,7 @@ static void draw_catalog(void) {
     for(unsigned i=0;i<3;++i)action((EpdRect){48+(int)i*200,252,188,72},filters[i],s_catalog_options.filter==i);
     const char* sorts[]={"最近阅读","书名","作者","加入时间"};
     for(unsigned i=0;i<4;++i)action((EpdRect){48+(int)(i%2)*300,348+(int)(i/2)*84,288,72},sorts[i],s_catalog_options.sort==i);
-    draw_search_input();
+    draw_search_input(s_search);
     draw_keyboard(s_search_keys);
     action(done_rect(),"显示结果",true);
 }

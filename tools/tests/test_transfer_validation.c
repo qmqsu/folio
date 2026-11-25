@@ -71,6 +71,7 @@ int main(int argc,char** argv){
         {"good.gif","Image.GIF",true},{"bad.gif","bad.gif",false},{"good.bmp","Image.BMP",true},
         {"good.webp","Image.WebP",true},{"good.heic","Image.HEIC",true},{"good.heic","Image.HEIF",true},{"bad.heic","bad.heic",false},
         {"binary.txt","fake.gif",false},{"binary.txt","fake.bmp",false},{"binary.txt","fake.webp",false},{"binary.txt","fake.heif",false},
+        {"missing-mime.epub","missing-mime.epub",true},{"wrong-mime.epub","wrong-mime.epub",false},
         {"long-chapter.epub","long-chapter.epub",true},{"traversal.epub","traversal.epub",false},{"crc.epub","crc.epub",false}
     };
     char path[512];

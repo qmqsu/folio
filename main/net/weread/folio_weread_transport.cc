@@ -8,6 +8,7 @@
 #include <cstring>
 #include <strings.h>
 #include <new>
+#include <stdexcept>
 #ifdef ESP_PLATFORM
 #include <esp_log.h>
 #include <esp_heap_caps.h>
@@ -121,7 +122,7 @@ void EspTransport(const HttpRequest& q, HttpResponse* r, CancelCheck cancelled, 
         if (q.url.rfind(kHost, 0) != 0 || q.url.find_first_of("\r\n") != std::string::npos ||
             (!q.referer.empty() && q.referer != "https://weread.qq.com" && q.referer.rfind(kHost, 0) != 0) ||
             (q.method != "GET" && q.method != "POST") || q.body.size() > 8192 || q.cookie.size() > 2200 ||
-            q.max_response > (q.url == "https://weread.qq.com/web/shelf/sync" ? kMaxShelfBytes : 768u * 1024u) || !q.timeout_ms || q.timeout_ms > 60000) {
+            q.max_response > (q.url == "https://weread.qq.com/web/shelf/sync" ? kMaxShelfBytes : 768u * 1024u) || !q.timeout_ms || q.timeout_ms > (q.consume ? 180000u : 60000u)) {
             r->failure = ErrorCode::InvalidArgument; return;
         }
         const int64_t deadline = esp_timer_get_time() + static_cast<int64_t>(q.timeout_ms) * 1000;
@@ -246,7 +247,7 @@ void EspTransport(const HttpRequest& q, HttpResponse* r, CancelCheck cancelled, 
             if (r->status >= 300 && r->status < 400) return;
             const size_t limit = q.reader_tokens ? 4 * 1024 * 1024 : q.max_response;
             if (length > static_cast<int64_t>(limit)) { r->failure = ErrorCode::Limit; return; }
-            if (!q.reader_tokens && length > 0) r->body.reserve(static_cast<size_t>(length));
+            if (!q.reader_tokens && !q.consume && length > 0) r->body.reserve(static_cast<size_t>(length));
             std::string window, ps, pc, token;
             // Fields are <=256 bytes; a 512-byte overlap preserves split fields.
             // Avoid the old 12 KiB internal-RAM reserve while TLS is also active.
@@ -294,12 +295,17 @@ void EspTransport(const HttpRequest& q, HttpResponse* r, CancelCheck cancelled, 
                         return;
                     }
                     if (window.size() > 512) window.erase(0, window.size() - 512);
+                } else if (q.consume) {
+                    if (r->status >= 200 && r->status < 300) {
+                        r->failure = q.consume(q.consume_context, buffer, static_cast<size_t>(n));
+                        if (r->failure != ErrorCode::None) return;
+                    }
                 } else r->body.append(buffer, n);
             }
             if (body_failed) { reset_response(r); continue; }
             if (!active(&ctx)) return;
             if (!esp_http_client_is_complete_data_received(h)) {
-                if (retryable) { reset_response(r); drop_connection(); continue; }
+                if (retryable && (!q.consume || !received)) { reset_response(r); drop_connection(); continue; }
                 r->failure = ErrorCode::Transport; return;
             }
 #ifdef ESP_PLATFORM
@@ -313,7 +319,8 @@ void EspTransport(const HttpRequest& q, HttpResponse* r, CancelCheck cancelled, 
             return;
         }
         if (r->failure == ErrorCode::None) r->failure = ErrorCode::Transport;
-    } catch (const std::bad_alloc&) { r->failure = ErrorCode::NoMemory; }
+    } catch (const std::length_error&) { r->failure = ErrorCode::Limit; }
+      catch (const std::bad_alloc&) { r->failure = ErrorCode::NoMemory; }
       catch (...) { r->failure = ErrorCode::Transport; }
 }
 } // namespace folio::weread

@@ -8,14 +8,14 @@
 
 namespace folio::weread {
 constexpr size_t kMaxChapterBytes = 512 * 1024;
-constexpr size_t kMaxShelfBooks = 4096;
-constexpr size_t kMaxShelfBytes = 2 * 1024 * 1024;
+constexpr size_t kMaxShelfBooks = 10000;
+constexpr size_t kMaxShelfBytes = 32 * 1024 * 1024;
 constexpr size_t kMaxChapters = 512;
 
 enum class ErrorCode : uint8_t {
     None, InvalidArgument, NotLoggedIn, SessionExpired, Cancelled, Timeout,
     Transport, Http, Permission, Unsupported, Limit, Malformed, NoMemory,
-    Clock, Conflict, Uncertain, NameResolution, Connection, Certificate
+    Clock, Conflict, Uncertain, NameResolution, Connection, Certificate, Storage
 };
 struct Error {
     ErrorCode code = ErrorCode::None;
@@ -39,8 +39,13 @@ struct Progress {
 };
 struct Book {
     std::string id, title, author, cover; // cover is a URL; never fetched with session Cookie.
-    Progress progress;
 };
+struct ShelfSink {
+    virtual bool append(const Book&) = 0;
+protected:
+    ~ShelfSink() = default;
+};
+class ShelfStream;
 struct Chapter {
     std::string uid, title;
     uint32_t index = 0, word_count = 0;
@@ -64,8 +69,10 @@ enum class Submission : uint8_t {
 struct HttpRequest {
     std::string method, url, body, referer, cookie;
     size_t max_response = kMaxChapterBytes;
+    ErrorCode (*consume)(void*, const char*, size_t) = nullptr;
+    void* consume_context = nullptr;
     bool reader_tokens = false; // bounded streaming HTML probe, at most 4 MiB scanned
-    uint32_t timeout_ms = 15000; // total deadline; connect <= 10 s, subsequent individual I/O <= 3 s
+    uint32_t timeout_ms = 15000; // Total deadline; body reads check cancellation at least every 3 s.
     ~HttpRequest();
 };
 enum class RequestPhase : uint8_t { Setup, Connect, Send, Headers, Body, Complete };
@@ -114,7 +121,7 @@ public:
     bool BeginQrLogin(QrSession*, Error*) noexcept; // clears previous account first
     bool PollQrLogin(const QrSession&, const std::string& otp, QrState*, Error*) noexcept;
     bool RenewSession(Error*) noexcept;
-    bool FetchShelf(std::vector<Book>*, Error*) noexcept;
+    bool FetchShelf(ShelfSink&, std::vector<uint16_t>* order, Error*) noexcept;
     bool FetchChapters(const std::string& book_id, std::vector<Chapter>*, Error*) noexcept;
     bool FetchChapter(const std::string& book_id, const Chapter&, ChapterContent*, Error*) noexcept;
     bool FetchProgress(const std::string& book_id, Progress*, Error*) noexcept;
@@ -134,7 +141,7 @@ private:
     uint32_t token_acquired_at_ = 0;
     HttpResponse Request(const char* method, const std::string& path, const std::string& body,
                          const std::string& referer, Error*, bool reader_tokens = false,
-                         uint32_t budget_ms = 60000);
+                         uint32_t budget_ms = 60000, ShelfStream* shelf = nullptr);
     bool Ready(const std::string& book_id, Error*);
     bool AbsorbCookies(const HttpResponse&, Error*);
     bool ReaderTokens(const std::string& book_id, const std::string& chapter_uid,

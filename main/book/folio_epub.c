@@ -13,7 +13,8 @@
 #define FOLIO_SD_ROOT "/sdcard"
 #endif
 #define EPUB_CACHE_ROOT FOLIO_SD_ROOT "/.folio/cache"
-#define EPUB_ITEM_LIMIT 2048
+#define EPUB_ITEM_LIMIT 8192
+#define EPUB_INDEX_BLOCK 32
 #define EPUB_TOC_LIMIT 2048
 #define EPUB_TEXT_LIMIT (32u * 1024u * 1024u)
 #define EPUB_ID_CAP 96
@@ -23,9 +24,11 @@
 typedef enum { COVER_OTHER, COVER_PNG, COVER_JPEG, COVER_DOCUMENT } cover_type_t;
 
 typedef struct {
-    char id[EPUB_ID_CAP];
-    char path[FOLIO_ZIP_NAME_CAP];
+    const char* id;
+    const char* path;
     uint32_t offset;
+    uint16_t next_id;
+    bool in_spine;
     bool html;
     bool nav;
     bool ncx;
@@ -34,20 +37,27 @@ typedef struct {
 } manifest_item_t;
 
 typedef struct {
-    char path[FOLIO_ZIP_NAME_CAP];
-    char fragment[EPUB_FRAGMENT_CAP];
+    const char* path;
+    const char* fragment;
     char title[FOLIO_EPUB_TITLE_CAP];
     uint32_t offset;
     bool anchored;
 } navigation_item_t;
 
+typedef struct string_block {
+    struct string_block* next;
+    size_t used;
+    char bytes[4096];
+} string_block_t;
+
 typedef struct {
     folio_zip_t zip;
-    manifest_item_t* items;
+    string_block_t* strings;
+    manifest_item_t* items[EPUB_ITEM_LIMIT / EPUB_INDEX_BLOCK];
+    uint16_t id_heads[512]; // One-based indexes, zero terminates the chain.
     uint16_t* spine;
-    navigation_item_t* nav;
+    navigation_item_t* nav[EPUB_TOC_LIMIT / EPUB_INDEX_BLOCK];
     size_t item_count, spine_count, nav_count;
-    size_t item_capacity, nav_capacity;
     char package_path[FOLIO_ZIP_NAME_CAP];
     char nav_path[FOLIO_ZIP_NAME_CAP];
     char ncx_id[EPUB_ID_CAP];
@@ -70,27 +80,53 @@ static bool make_directory(const char* path) {
     struct stat info;
     return mkdir(path, 0777) == 0 || (stat(path, &info) == 0 && S_ISDIR(info.st_mode));
 }
-static bool reserve_items(epub_context_t* context) {
-    if (context->item_count < context->item_capacity) return true;
-    if (context->item_count == EPUB_ITEM_LIMIT) return failure(context, "EPUB manifest exceeds 2048 items");
-    size_t capacity = context->item_capacity ? context->item_capacity * 2 : 16;
-    manifest_item_t* items = folio_epub_alloc(capacity * sizeof(*items));
-    if (items == NULL) return failure(context, "Not enough memory for EPUB manifest");
-    memset(items, 0, capacity * sizeof(*items));
-    if (context->item_count) memcpy(items, context->items, context->item_count * sizeof(*items));
-    free(context->items); context->items = items; context->item_capacity = capacity;
+// Small stable blocks avoid growing/copying the entire manifest or TOC.
+static const char* save_string(epub_context_t* book, const char* value) {
+    if (!*value) return "";
+    size_t bytes = strlen(value) + 1;
+    string_block_t* block = book->strings;
+    if (!block || bytes > sizeof(block->bytes) - block->used) {
+        block = folio_epub_alloc(sizeof(*block));
+        if (!block) { failure(book, "Not enough memory for EPUB strings"); return NULL; }
+        block->next = book->strings; block->used = 0; book->strings = block;
+    }
+    char* copy = block->bytes + block->used;
+    memcpy(copy, value, bytes); block->used += bytes;
+    return copy;
+}
+static manifest_item_t* manifest_at(epub_context_t* book, size_t i) {
+    return &book->items[i / EPUB_INDEX_BLOCK][i % EPUB_INDEX_BLOCK];
+}
+static unsigned id_bucket(const char* id) {
+    uint32_t hash = 2166136261u;
+    while (*id) hash = (hash ^ (uint8_t)*id++) * 16777619u;
+    return hash % 512;
+}
+static size_t manifest_find(epub_context_t* book, const char* id) {
+    for (uint16_t n = book->id_heads[id_bucket(id)]; n; n = manifest_at(book, n-1)->next_id)
+        if (!strcmp(manifest_at(book, n-1)->id, id)) return n-1;
+    return SIZE_MAX;
+}
+static navigation_item_t* nav_at(epub_context_t* book, size_t i) {
+    return &book->nav[i / EPUB_INDEX_BLOCK][i % EPUB_INDEX_BLOCK];
+}
+static bool reserve_items(epub_context_t* book) {
+    size_t i = book->item_count;
+    if (i == EPUB_ITEM_LIMIT) return failure(book, "EPUB manifest exceeds 8192 items");
+    if (i % EPUB_INDEX_BLOCK == 0) {
+        book->items[i / EPUB_INDEX_BLOCK] = folio_epub_alloc(EPUB_INDEX_BLOCK * sizeof(manifest_item_t));
+        if (!book->items[i / EPUB_INDEX_BLOCK]) return failure(book, "Not enough memory for EPUB manifest");
+    }
+    memset(manifest_at(book, i), 0, sizeof(manifest_item_t));
     return true;
 }
-static bool reserve_navigation(epub_context_t* context) {
-    if (context->nav_count < context->nav_capacity) return true;
-    if (context->nav_count == EPUB_TOC_LIMIT) return failure(context, "EPUB table of contents exceeds 2048 entries");
-    size_t capacity = context->nav_capacity ? context->nav_capacity * 2 : 16;
-    navigation_item_t* items = folio_epub_alloc(capacity * sizeof(*items));
-    if (items == NULL) return failure(context, "Not enough memory for EPUB contents");
-    memset(items, 0, capacity * sizeof(*items));
-    if (context->nav_count) memcpy(items, context->nav, context->nav_count * sizeof(*items));
-    free(context->nav); context->nav = items; context->nav_capacity = capacity;
-    return true;
+static void free_index(epub_context_t* book) {
+    for (size_t i = 0; i < EPUB_ITEM_LIMIT / EPUB_INDEX_BLOCK; ++i) free(book->items[i]);
+    for (size_t i = 0; i < EPUB_TOC_LIMIT / EPUB_INDEX_BLOCK; ++i) free(book->nav[i]);
+    while (book->strings) {
+        string_block_t* next = book->strings->next;
+        free(book->strings); book->strings = next;
+    }
 }
 static bool token_word(const char* list, const char* word) {
     size_t size = strlen(word);
@@ -192,6 +228,8 @@ static bool parse_resource(epub_context_t* context, const char* path,
 
 static bool container_token(void* userdata, const folio_xml_token_t* token) {
     epub_context_t* context = userdata;
+    if (token->kind == FOLIO_XML_START && !token->depth && !folio_xml_name(token->name, "container"))
+        return failure(context, "Invalid EPUB container");
     if (token->kind == FOLIO_XML_START && folio_xml_name(token->name, "rootfile") && !context->package_path[0]) {
         char type[80], path[FOLIO_ZIP_NAME_CAP];
         if (!folio_xml_attr(token, "media-type", type, sizeof(type)) ||
@@ -202,9 +240,29 @@ static bool container_token(void* userdata, const folio_xml_token_t* token) {
     return true;
 }
 
+static manifest_item_t* read_manifest_item(epub_context_t* book, const folio_xml_token_t* token, char type[96]) {
+    char id[EPUB_ID_CAP], href[FOLIO_ZIP_NAME_CAP], path[FOLIO_ZIP_NAME_CAP];
+    if (!folio_xml_attr(token, "id", id, sizeof(id)) || !*id ||
+        !folio_xml_attr(token, "href", href, sizeof(href)) ||
+        !folio_xml_attr(token, "media-type", type, 96) ||
+        !resolve_path(book->package_path, href, path, NULL)) {
+        failure(book, "Invalid EPUB manifest item"); return NULL;
+    }
+    if (manifest_find(book, id) != SIZE_MAX) { failure(book, "Duplicate EPUB manifest ID"); return NULL; }
+    if (!reserve_items(book)) return NULL;
+    manifest_item_t* item = manifest_at(book, book->item_count);
+    item->id = save_string(book, id); item->path = save_string(book, path);
+    if (!item->id || !item->path) return NULL;
+    unsigned bucket = id_bucket(id);
+    item->next_id = book->id_heads[bucket];
+    book->id_heads[bucket] = (uint16_t)++book->item_count;
+    return item;
+}
+
 static bool package_token(void* userdata, const folio_xml_token_t* token) {
     epub_context_t* context = userdata;
     if (token->kind == FOLIO_XML_START) {
+        if (token->depth == 0 && !folio_xml_name(token->name, "package")) return failure(context, "Invalid EPUB package");
         if (folio_xml_name(token->name, "manifest")) context->manifest_depth = (int)token->depth;
         else if (folio_xml_name(token->name, "metadata")) context->metadata_depth = (int)token->depth;
         else if (folio_xml_name(token->name, "spine")) {
@@ -218,33 +276,24 @@ static bool package_token(void* userdata, const folio_xml_token_t* token) {
                 context->layout_depth = (int)token->depth; context->layout[0] = '\0';
             }
         } else if (context->manifest_depth >= 0 && folio_xml_name(token->name, "item")) {
-            if (!reserve_items(context)) return false;
-            manifest_item_t* item = &context->items[context->item_count];
-            char href[FOLIO_ZIP_NAME_CAP], type[96], properties[256];
-            if (!folio_xml_attr(token, "id", item->id, sizeof(item->id)) || !item->id[0] ||
-                !folio_xml_attr(token, "href", href, sizeof(href)) ||
-                !folio_xml_attr(token, "media-type", type, sizeof(type)) ||
-                !resolve_path(context->package_path, href, item->path, NULL)) return failure(context, "Invalid EPUB manifest item");
-            for (size_t i = 0; i < context->item_count; ++i) {
-                if (strcmp(item->id, context->items[i].id) == 0) return failure(context, "Duplicate EPUB manifest ID");
-            }
+            char type[96], properties[256];
+            manifest_item_t* item = read_manifest_item(context, token, type);
+            if (!item) return false;
             item->html = strcmp(type, "application/xhtml+xml") == 0 || strcmp(type, "text/html") == 0;
             item->ncx = strcmp(type, "application/x-dtbncx+xml") == 0;
             item->nav = folio_xml_attr(token, "properties", properties, sizeof(properties)) && token_word(properties, "nav");
             if (item->nav && item->html && !context->nav_path[0]) strcpy(context->nav_path, item->path);
             item->offset = UINT32_MAX;
-            ++context->item_count;
         } else if (context->spine_depth >= 0 && folio_xml_name(token->name, "itemref")) {
             char id[EPUB_ID_CAP], linear[16];
             if (!folio_xml_attr(token, "idref", id, sizeof(id))) return failure(context, "Invalid EPUB spine reference");
             if (folio_xml_attr(token, "linear", linear, sizeof(linear)) && strcmp(linear, "no") == 0) return true;
-            if (context->spine_count == EPUB_ITEM_LIMIT) return failure(context, "EPUB spine exceeds 2048 chapters");
-            size_t index;
-            for (index = 0; index < context->item_count; ++index) if (strcmp(context->items[index].id, id) == 0) break;
-            if (index == context->item_count || !context->items[index].html) return failure(context, "EPUB spine contains unsupported content");
-            for (size_t i = 0; i < context->spine_count; ++i) {
-                if (context->spine[i] == index) return failure(context, "Repeated EPUB spine item");
-            }
+            if (context->spine_count == EPUB_TOC_LIMIT) return failure(context, "EPUB spine exceeds 2048 chapters");
+            size_t index = manifest_find(context, id);
+            if (index == SIZE_MAX || !manifest_at(context, index)->html) return failure(context, "EPUB spine contains unsupported content");
+            manifest_item_t* item = manifest_at(context, index);
+            if (item->in_spine) return failure(context, "Repeated EPUB spine item");
+            item->in_spine = true;
             context->spine[context->spine_count++] = (uint16_t)index;
         }
     } else if (token->kind == FOLIO_XML_TEXT && context->title_depth >= 0) {
@@ -266,10 +315,18 @@ static bool package_token(void* userdata, const folio_xml_token_t* token) {
 }
 
 static navigation_item_t* add_navigation(epub_context_t* context, const char* base, const char* href) {
-    if (!reserve_navigation(context)) return NULL;
-    navigation_item_t* item = &context->nav[context->nav_count];
+    size_t i = context->nav_count;
+    if (i == EPUB_TOC_LIMIT) { failure(context, "EPUB table of contents exceeds 2048 entries"); return NULL; }
+    if (i % EPUB_INDEX_BLOCK == 0) {
+        context->nav[i / EPUB_INDEX_BLOCK] = folio_epub_alloc(EPUB_INDEX_BLOCK * sizeof(navigation_item_t));
+        if (!context->nav[i / EPUB_INDEX_BLOCK]) { failure(context, "Not enough memory for EPUB contents"); return NULL; }
+    }
+    navigation_item_t* item = nav_at(context, i);
+    char path[FOLIO_ZIP_NAME_CAP], fragment[EPUB_FRAGMENT_CAP];
     memset(item, 0, sizeof(*item)); item->offset = UINT32_MAX;
-    if (!resolve_path(base, href, item->path, item->fragment)) { failure(context, "Invalid EPUB navigation URI"); return NULL; }
+    if (!resolve_path(base, href, path, fragment)) { failure(context, "Invalid EPUB navigation URI"); return NULL; }
+    item->path = save_string(context, path); item->fragment = save_string(context, fragment);
+    if (!item->path || !item->fragment) return NULL;
     ++context->nav_count;
     return item;
 }
@@ -299,10 +356,10 @@ static bool nav_token(void* userdata, const folio_xml_token_t* token) {
             parser->link_depth = (int)token->depth;
         }
     } else if (token->kind == FOLIO_XML_TEXT && parser->link_depth >= 0) {
-        return folio_xml_append(token->text, token->literal, book->nav[parser->link_index].title, FOLIO_EPUB_TITLE_CAP);
+        return folio_xml_append(token->text, token->literal, nav_at(book, parser->link_index)->title, FOLIO_EPUB_TITLE_CAP);
     } else if (token->kind == FOLIO_XML_END) {
         if ((int)token->depth == parser->link_depth) {
-            trim_label(book->nav[parser->link_index].title); parser->link_depth = -1; parser->link_index = -1;
+            trim_label(nav_at(book, parser->link_index)->title); parser->link_depth = -1; parser->link_index = -1;
         }
         if ((int)token->depth == parser->nav_depth) parser->nav_depth = -1;
     }
@@ -347,7 +404,7 @@ static bool ncx_token(void* userdata, const folio_xml_token_t* token) {
         }
         if (parser->level_count > 0 && (int)token->depth == parser->levels[parser->level_count - 1].depth) {
             ncx_level_t* level = &parser->levels[parser->level_count - 1];
-            if (level->item >= 0) memcpy(parser->book->nav[level->item].title, level->label, sizeof(level->label));
+            if (level->item >= 0) memcpy(nav_at(parser->book, level->item)->title, level->label, sizeof(level->label));
             --parser->level_count;
         }
         if ((int)token->depth == parser->map_depth) parser->map_depth = -1;
@@ -432,7 +489,7 @@ static bool body_token(void* userdata, const folio_xml_token_t* token) {
         if (!has_id && folio_xml_name(token->name, "a")) has_id = folio_xml_attr(token, "name", id, sizeof(id));
         if (has_id) {
             for (size_t i = 0; i < book->nav_count; ++i) {
-                navigation_item_t* nav = &book->nav[i];
+                navigation_item_t* nav = nav_at(book, i);
                 if (!nav->anchored && nav->fragment[0] && strcmp(nav->path, parser->item->path) == 0 && strcmp(nav->fragment, id) == 0) {
                     nav->offset = book->written; nav->anchored = true;
                 }
@@ -658,14 +715,7 @@ bool folio_epub_metadata(const char* path, char* title, size_t title_cap,
     metadata_parser_t parser = { .book = book, .title = title, .author = author,
         .title_cap = title_cap, .author_cap = author_cap, .metadata_depth = -1, .value_depth = -1 };
     if (!folio_zip_open_directory(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
-    const folio_zip_entry_t* entry = folio_zip_find(&book->zip, "mimetype");
-    if (!entry || entry->method != 0 || entry->size > 22) { failure(book, "Missing EPUB mimetype"); goto cleanup; }
-    size_t mime_size;
-    uint8_t* mime = folio_zip_read(&book->zip, entry, 22, &mime_size, book->message, sizeof(book->message));
-    if (!mime) goto cleanup;
-    bool valid_mime = folio_epub_valid_mime(mime, mime_size);
-    free(mime);
-    if (!valid_mime) { failure(book, "Invalid EPUB mimetype"); goto cleanup; }
+    if (!folio_zip_check_epub_type(&book->zip, book->message, sizeof(book->message))) goto cleanup;
     if (!parse_resource(book, "META-INF/container.xml", container_token, book)) goto cleanup;
     if (!book->package_path[0]) { failure(book, "Missing EPUB package path"); goto cleanup; }
     if (!parse_resource(book, book->package_path, metadata_token, &parser)) goto cleanup;
@@ -695,29 +745,21 @@ static bool cover_package_token(void* userdata, const folio_xml_token_t* token) 
         else if (token->depth == 1 && folio_xml_name(token->name, "guide")) parser->guide_depth = (int)token->depth;
         else if (parser->manifest_depth >= 0 && token->depth == (unsigned)parser->manifest_depth + 1 &&
                  folio_xml_name(token->name, "item")) {
-            if (!reserve_items(book)) return false;
-            manifest_item_t* item = &book->items[book->item_count];
-            char href[FOLIO_ZIP_NAME_CAP], type[96], properties[256] = {0};
-            if (!folio_xml_attr(token, "id", item->id, sizeof(item->id)) || !item->id[0] ||
-                !folio_xml_attr(token, "href", href, sizeof(href)) ||
-                !folio_xml_attr(token, "media-type", type, sizeof(type)) ||
-                !resolve_path(book->package_path, href, item->path, NULL)) return failure(book, "Invalid EPUB cover manifest");
+            char type[96], properties[256] = {0};
+            manifest_item_t* item = read_manifest_item(book, token, type);
+            if (!item) return false;
             if (has_attribute(token, "properties") && !folio_xml_attr(token, "properties", properties, sizeof(properties)))
                 return failure(book, "EPUB manifest properties are too long");
-            for (size_t i = 0; i < book->item_count; ++i) {
-                if (strcmp(item->id, book->items[i].id) == 0) return failure(book, "Duplicate EPUB manifest ID");
-            }
             item->cover_type = strcmp(type, "image/png") == 0 ? COVER_PNG :
                                strcmp(type, "image/jpeg") == 0 ? COVER_JPEG :
                                (strcmp(type, "application/xhtml+xml") == 0 || strcmp(type, "text/html") == 0 ||
                                 strcmp(type, "image/svg+xml") == 0) ? COVER_DOCUMENT : COVER_OTHER;
             item->cover_image = token_word(properties, "cover-image");
             if (item->cover_image) {
-                for (size_t i = 0; i < book->item_count; ++i) {
-                    if (book->items[i].cover_image) return failure(book, "Multiple EPUB cover-image declarations");
+                for (size_t i = 0; i + 1 < book->item_count; ++i) {
+                    if (manifest_at(book, i)->cover_image) return failure(book, "Multiple EPUB cover-image declarations");
                 }
             }
-            ++book->item_count;
         } else if (parser->metadata_depth >= 0 && folio_xml_name(token->name, "meta")) {
             char name[96], id[EPUB_ID_CAP];
             if (folio_xml_attr(token, "name", name, sizeof(name)) && strcmp(name, "cover") == 0) {
@@ -860,16 +902,7 @@ bool folio_epub_cover(const char* path, uint8_t** data, size_t* size, char* erro
     bool okay = false;
     cover_package_t parser = {.book = book, .manifest_depth = -1, .metadata_depth = -1, .guide_depth = -1};
     if (!folio_zip_open_directory(path, &book->zip, book->message, sizeof(book->message))) goto cleanup;
-    const folio_zip_entry_t* mime_entry = folio_zip_find(&book->zip, "mimetype");
-    if (mime_entry == NULL || mime_entry->method != 0 || mime_entry->size > 22) {
-        failure(book, "Missing EPUB mimetype"); goto cleanup;
-    }
-    size_t mime_size;
-    uint8_t* mime = folio_zip_read(&book->zip, mime_entry, 22, &mime_size, book->message, sizeof(book->message));
-    if (mime == NULL) goto cleanup;
-    bool valid_mime = folio_epub_valid_mime(mime, mime_size);
-    free(mime);
-    if (!valid_mime) { failure(book, "Invalid EPUB mimetype"); goto cleanup; }
+    if (!folio_zip_check_epub_type(&book->zip, book->message, sizeof(book->message))) goto cleanup;
     if (folio_zip_find(&book->zip, "META-INF/encryption.xml") != NULL) {
         failure(book, "Encrypted or font-obfuscated EPUB is unsupported"); goto cleanup;
     }
@@ -879,11 +912,11 @@ bool folio_epub_cover(const char* path, uint8_t** data, size_t* size, char* erro
     if (!parser.package_found) { failure(book, "Invalid EPUB package"); goto cleanup; }
     manifest_item_t* selected = NULL;
     for (size_t i = 0; i < book->item_count; ++i) {
-        if (book->items[i].cover_image) { selected = &book->items[i]; break; }
+        if (manifest_at(book, i)->cover_image) { selected = manifest_at(book, i); break; }
     }
     if (selected == NULL && parser.legacy_id[0]) {
         for (size_t i = 0; i < book->item_count; ++i) {
-            if (strcmp(book->items[i].id, parser.legacy_id) == 0) { selected = &book->items[i]; break; }
+            if (strcmp(manifest_at(book, i)->id, parser.legacy_id) == 0) { selected = manifest_at(book, i); break; }
         }
         if (selected == NULL) { failure(book, "EPUB cover ID is missing from manifest"); goto cleanup; }
     }
@@ -897,7 +930,7 @@ bool folio_epub_cover(const char* path, uint8_t** data, size_t* size, char* erro
             failure(book, "Invalid or external EPUB guide cover URL"); goto cleanup;
         }
         for (size_t i = 0; i < book->item_count; ++i) {
-            if (strcmp(book->items[i].path, image_path) == 0) { expected = book->items[i].cover_type; break; }
+            if (strcmp(manifest_at(book, i)->path, image_path) == 0) { expected = manifest_at(book, i)->cover_type; break; }
         }
         /* A guide may name a cover image/document absent from the manifest. */
         if (expected == COVER_OTHER) {
@@ -931,7 +964,7 @@ cleanup:
     if (!okay) { free(*data); *data = NULL; *size = 0; }
     if (!okay && folio_epub_cancelled()) failure(book, "EPUB operation cancelled");
     if (error != NULL && error_cap) snprintf(error, error_cap, "%s", book->message);
-    folio_zip_close(&book->zip); free(book->items); free(book);
+    folio_zip_close(&book->zip); free_index(book); free(book);
     return okay;
 }
 
@@ -950,20 +983,10 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     bool trusted = identity_load(path, &book->zip);
     if (!trusted) {
         if (!folio_zip_fingerprint(&book->zip)) { failure(book, "Cannot read EPUB"); goto cleanup; }
-        if (make_directory(FOLIO_SD_ROOT "/.folio") && make_directory(EPUB_CACHE_ROOT)) identity_save(path, &book->zip);
     }
     result->source_hash = book->zip.source_hash;
     result->source_size = book->zip.source_size;
-    const folio_zip_entry_t* mimetype = folio_zip_find(&book->zip, "mimetype");
-    if (mimetype == NULL || mimetype->method != 0 || mimetype->size > 22) {
-        failure(book, "Missing EPUB mimetype"); goto cleanup;
-    }
-    size_t mimetype_size;
-    uint8_t* mime = folio_zip_read(&book->zip, mimetype, 22, &mimetype_size, book->message, sizeof(book->message));
-    if (mime == NULL) goto cleanup;
-    bool valid_mime = folio_epub_valid_mime(mime, mimetype_size);
-    free(mime);
-    if (!valid_mime) { failure(book, "Invalid EPUB mimetype"); goto cleanup; }
+    if (!folio_zip_check_epub_type(&book->zip, book->message, sizeof(book->message))) goto cleanup;
     if (folio_zip_find(&book->zip, "META-INF/encryption.xml") != NULL) {
         failure(book, "Encrypted or font-obfuscated EPUB is unsupported"); goto cleanup;
     }
@@ -977,7 +1000,7 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     if (load_contents(index_path, &book->zip, result, trusted)) { okay = true; goto cleanup; }
     if (folio_epub_cancelled()) goto cleanup;
     if (!parse_resource(book, "META-INF/container.xml", container_token, book) || !book->package_path[0]) goto cleanup;
-    book->spine = folio_epub_alloc(EPUB_ITEM_LIMIT * sizeof(*book->spine));
+    book->spine = folio_epub_alloc(EPUB_TOC_LIMIT * sizeof(*book->spine));
     if (book->spine == NULL) {
         failure(book, "Not enough memory for EPUB metadata"); goto cleanup;
     }
@@ -991,7 +1014,7 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     if (book->nav_count == 0) {
         const char* ncx = NULL;
         for (size_t i = 0; i < book->item_count; ++i) {
-            manifest_item_t* item = &book->items[i];
+            manifest_item_t* item = manifest_at(book, i);
             if (item->ncx && (!book->ncx_id[0] || strcmp(item->id, book->ncx_id) == 0)) { ncx = item->path; break; }
         }
         if (ncx != NULL) {
@@ -1012,12 +1035,12 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     if (book->output == NULL) { failure(book, "Cannot create EPUB text cache"); goto cleanup; }
     for (size_t i = 0; i < book->spine_count; ++i) {
         if (folio_epub_cancelled()) { failure(book, "EPUB operation cancelled"); goto cleanup; }
-        manifest_item_t* item = &book->items[book->spine[i]];
+        manifest_item_t* item = manifest_at(book, book->spine[i]);
         if (!newline(book)) goto cleanup;
         item->offset = book->written;
         size_t matching = 0;
         for (size_t j = 0; j < book->nav_count; ++j) {
-            if (strcmp(book->nav[j].path, item->path) == 0) { book->nav[j].offset = item->offset; ++matching; }
+            if (strcmp(nav_at(book, j)->path, item->path) == 0) { nav_at(book, j)->offset = item->offset; ++matching; }
         }
         body_context_t parser = {.book = book, .item = item, .body_depth = -1, .skip_depth = -1, .heading_depth = -1};
         if (!parse_resource(book, item->path, body_token, &parser) || !parser.body_found) goto cleanup;
@@ -1037,7 +1060,7 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     result->chapters = folio_epub_alloc(book->nav_count * sizeof(*result->chapters));
     if (result->chapters == NULL) { failure(book, "Not enough memory for EPUB contents"); goto cleanup; }
     for (size_t i = 0; i < book->nav_count; ++i) {
-        navigation_item_t* nav = &book->nav[i];
+        navigation_item_t* nav = nav_at(book, i);
         if (nav->offset == UINT32_MAX || nav->offset >= book->written) continue;
         folio_epub_chapter_t* chapter = &result->chapters[result->chapter_count++];
         memcpy(chapter->title, nav->title, sizeof(chapter->title));
@@ -1064,10 +1087,12 @@ bool folio_epub_prepare(const char* path, folio_epub_t* result, char* error, siz
     save_contents(index_path, book, result);
     okay = true;
 cleanup:
+    if (okay && !trusted) identity_save(path, &book->zip);
+    if (!okay && folio_epub_cancelled()) failure(book, "EPUB operation cancelled");
     if (book->output != NULL) fclose(book->output);
     if (temporary[0]) (void)remove(temporary);
     folio_zip_close(&book->zip);
-    free(book->items); free(book->spine); free(book->nav);
+    free_index(book); free(book->spine);
     if (!okay) {
         folio_epub_free(result);
         if (error != NULL && error_cap) snprintf(error, error_cap, "%s", book->message[0] ? book->message : "Invalid EPUB structure or cache write failed");

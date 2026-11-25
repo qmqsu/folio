@@ -113,6 +113,23 @@ int main(){
  {HttpResponse r;EspTransport(q,&r,{},nullptr);assert(r.failure==ErrorCode::Transport&&clean_count==1);}
  reset();status=401;payload="\"psvts\":\"p_test\",\"pclts\":\"pc_test\",\"token\":\"t_test\""+std::string(1000,'x');
  {HttpResponse r;EspTransport(q,&r,{},nullptr);assert(r.status==401&&r.received_bytes==payload.size());}
+ reset();expected_connect_timeout=10000;
+ Session session;strcpy(session.vid,"123");strcpy(session.skey,"fixture");
+ Client client;assert(client.RestoreSession(session));
+ struct TestShelf : ShelfSink {
+     size_t count=0;
+     bool append(const Book& b) override {assert(b.id=="b"+std::to_string(count));++count;return true;}
+ } shelf;
+ payload=R"({"bookProgress":[{"bookId":"b5999","updateTime":7}],"books":[)";
+ for(unsigned i=0;i<6000;++i){
+     if(i)payload+=',';
+     payload+="{\"bookId\":\"b"+std::to_string(i)+"\",\"extra\":\""+std::string(500,'x')+"\"}";
+ }
+ payload+="]}";known_length=payload.size();
+ std::vector<uint16_t> order;Error error;
+ assert(client.FetchShelf(shelf,&order,&error) && shelf.count==6000 && order[0]==5999 && opens==1);
+ complete=false;shelf.count=0;
+ assert(!client.FetchShelf(shelf,&order,&error) && error.code==ErrorCode::Transport && order.empty() && opens==2);
  EspTransportDisconnect();
  std::puts("WeRead ESP transport: verified TLS config, exact origin, redirects, bounded streams, cancellation, timeout and cleanup tests passed");
 }

@@ -151,6 +151,27 @@ def main() -> None:
         descriptor_book.write_bytes(stream.getvalue())
         run(descriptor_book)
 
+        # Common repackagers deflate or omit the marker, add ./ prefixes or
+        # reserve ZIP64 local sizes even though the directory fits in ZIP32.
+        for variant in ('compressed', 'absent', 'wrong', 'dot-prefix', 'small-zip64', 'stream-zip64', 'alias'):
+            destination = NonSeekable() if variant == 'stream-zip64' else io.BytesIO()
+            with zipfile.ZipFile(good) as source, zipfile.ZipFile(destination, 'w', zipfile.ZIP_DEFLATED) as out:
+                for name in source.namelist():
+                    if name == 'mimetype' and variant == 'absent': continue
+                    value = b'text/plain' if name == 'mimetype' and variant == 'wrong' else source.read(name)
+                    member = './' + name if variant == 'dot-prefix' else name
+                    with out.open(member, 'w', force_zip64=variant.endswith('zip64')) as stream_out:
+                        stream_out.write(value)
+                if variant == 'alias': out.writestr('./mimetype', 'application/epub+zip')
+            fixture = folder / (variant + '.epub')
+            fixture.write_bytes(destination.getvalue())
+            run(fixture, variant not in ('wrong', 'alias'))
+        resources = {f'OPS/images/{i}.png': b'x' for i in range(3000)}
+        extra = ''.join(f'<item id="p{i}" href="images/{i}.png" media-type="image/png"/>' for i in range(3000))
+        resources['OPS/book.opf'] = OPF.replace('</manifest>', extra + '</manifest>')
+        _, title, chapters = run(write_book('large-manifest.epub', resources))
+        assert title == '页间 & 测试' and len(chapters) == 3
+
         ncx_opf = OPF.replace('href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"', 'href="toc.ncx" media-type="application/x-dtbncx+xml"').replace('<spine>', '<spine toc="nav">')
         ncx = '''<ncx><navMap><navPoint><navLabel><text>主章节</text></navLabel><content src="Text/one.xhtml"/>
         <navPoint><navLabel><text>内章节</text></navLabel><content src="Text/one.xhtml#inside"/></navPoint></navPoint>

@@ -14,8 +14,16 @@ static int wr_paragraph(int x,int baseline,int right,int size,int leading,unsign
 static void wr_message(int y,unsigned lines,const char* value){wr_paragraph(72,y,612,26,42,lines,MUTED,value);}
 static void draw_weread(void) {
     folio_weread_get_status(&s_wr_status);
+    if (s_wr_searching && s_wr_status.state == FOLIO_WR_SHELF && !s_wr_status.busy) {
+        page_header("返回","查找云书架","输入书名、作者的拼音或首字母");
+        draw_search_input(s_wr_query);
+        draw_keyboard(s_wr_search_keys);
+        action(done_rect(), "显示结果", true);
+        return;
+    }
+    s_wr_searching = false;
     page_header("返回",s_wr_status.state==FOLIO_WR_SYNC?"同步进度":s_wr_status.title[0]?s_wr_status.title:"微信读书",
-        s_wr_status.state==FOLIO_WR_SYNC?s_wr_status.title:"设备直连 · 登录与离线书籍自动保存");
+        s_wr_status.state==FOLIO_WR_SYNC?s_wr_status.title:s_wr_status.state==FOLIO_WR_SHELF?s_wr_status.message:"设备直连 · 登录与离线书籍自动保存");
     if(s_wr_confirm){
         const char* title=s_wr_confirm==1?"开启时长记录？":s_wr_confirm==2?"提交新增时长？":s_wr_confirm==3?"退出登录？":s_wr_confirm==5?"重新登录？":"上传进度与时长？";
         const char* message=s_wr_confirm==1?"仅从开启后记录有效阅读。时长按书籍与账号保存，上传仍需你手动确认。":
@@ -69,7 +77,13 @@ static void draw_weread(void) {
             if(i+1<s_wr_status.item_count)epd_fill_rect((EpdRect){64,r.y+103,556,1},RULE,fb());
         }
         if(!s_wr_status.item_count){panel((EpdRect){48,280,588,480});wr_message(388,5,s_wr_status.message);}
-        else wr_message(914,2,s_wr_status.message);
+        else if(s_wr_status.state==FOLIO_WR_BOOK) wr_message(914,2,s_wr_status.message);
+        if(s_wr_status.state==FOLIO_WR_SHELF){
+            char count[48];
+            snprintf(count,sizeof(count),s_wr_status.query[0]?"找到 %u 本":"共 %u 本",(unsigned)s_wr_status.count);
+            label(64,931,320,28,MUTED,count);
+            action(wr_right(876),s_wr_status.query[0]?"修改搜索":"查找书籍",false);
+        }
         if(s_wr_status.state==FOLIO_WR_SHELF){if(wr_can_relogin())action(wr_account(0),"重新登录",false);action(wr_account(1),"退出登录",false);action_state(wr_account(2),"刷新书架",true,!s_wr_status.busy);}
         else {
             action_state((EpdRect){48,984,188,96},"离线阅读",true,s_wr_status.can_read && !s_wr_status.busy);
@@ -112,7 +126,7 @@ static void enter_weread(void) {
     folio_transfer_status_t transfer;folio_transfer_get_status(&transfer);
     if(transfer.running && !stop_transfer()) {s_wr_leaving=true;s_wr_target=VIEW_WEREAD;return;}
     if(!save_reader() || !activity_flush() || !catalog_save())return;
-    close_reader();folio_cover_clear_cache();s_wr_confirm=0;s_wr_otp[0]=0;s_wr_leaving=false;
+    close_reader();folio_cover_clear_cache();s_wr_confirm=0;s_wr_searching=false;s_wr_otp[0]=0;s_wr_leaving=false;
     // Reuse the connected native STA; start_station checks AP ownership and TLS time.
     s_view=VIEW_WEREAD;
     char error[192];
@@ -145,16 +159,15 @@ static void weread_finish_open(void) {
     // Sync only changes the position ledger, so the existing shelf is current.
     // Downloads still rescan to pick up new/replaced EPUBs and covers.
     if(!reader_return || !known)refresh_library();
-    for(size_t i=0;i<s_book_count;++i)if(!strcmp(path,s_books[i].path)){
-        open_book_absolute(i,true);
-        if(s_reader && s_view!=VIEW_ERROR && position!=UINT32_MAX){
-            if(!folio_reader_seek(s_reader,position) || !folio_reader_save(s_reader)){show_error(folio_reader_error(s_reader),VIEW_READING);return;}
-            s_reader_cover=restore_cover;activity_record_book();
-            show_view(VIEW_READING,true);activity_flush();
-        }
-        return;
+    folio_book_t downloaded;
+    const folio_book_t* book = resolve_book(path, &downloaded);
+    if (!book) { show_error("本机未找到已下载的书籍，请检查 TF 卡。", VIEW_DEVICE); return; }
+    open_book(book,true);
+    if(s_reader && s_view!=VIEW_ERROR && position!=UINT32_MAX){
+        if(!folio_reader_seek(s_reader,position) || !folio_reader_save(s_reader)){show_error(folio_reader_error(s_reader),VIEW_READING);return;}
+        s_reader_cover=restore_cover;activity_record_book();
+        show_view(VIEW_READING,true);activity_flush();
     }
-    show_error("本地书架未找到缓存。请检查 TF 卡和书库容量，再重新下载。",VIEW_DEVICE);
 }
 static void weread_open(const char* path,uint32_t position) {
     snprintf(s_wr_open_path,sizeof(s_wr_open_path),"%s",path);s_wr_open_position=position;s_wr_open_pending=true;
@@ -163,8 +176,12 @@ static void weread_open(const char* path,uint32_t position) {
 }
 static void weread_back(void) {
     if(s_wr_leaving)return;
+    if(s_wr_searching){s_wr_searching=false;show_view(VIEW_WEREAD,false);return;}
     if(s_wr_confirm){s_wr_confirm=0;show_view(VIEW_WEREAD,false);return;}
     folio_weread_get_status(&s_wr_status);
+    if(!s_wr_status.busy && s_wr_status.state==FOLIO_WR_SHELF && s_wr_status.query[0]){
+        folio_weread_command(FOLIO_WR_SEARCH,0,"");return;
+    }
     if(s_wr_reader_path[0]){weread_open(s_wr_reader_path,s_wr_reader_position);return;}
     if(!s_wr_status.busy && s_wr_status.running && s_wr_status.state==FOLIO_WR_OTP){
         memset(s_wr_otp,0,sizeof(s_wr_otp));folio_weread_command(FOLIO_WR_NEW_QR,0,NULL);show_view(VIEW_WEREAD,true);return;
@@ -177,7 +194,7 @@ static void weread_back(void) {
 }
 static void weread_page(int direction) {
     folio_weread_get_status(&s_wr_status);
-    if(s_wr_status.busy || s_wr_leaving || s_wr_confirm)return;
+    if(s_wr_status.busy || s_wr_leaving || s_wr_confirm || s_wr_searching)return;
     if(s_wr_status.state!=FOLIO_WR_BOOK && s_wr_status.state!=FOLIO_WR_SHELF)return;
     if(direction<0 && s_wr_status.page)folio_weread_command(FOLIO_WR_PAGE,s_wr_status.page-1,NULL);
     if(direction>0 && (s_wr_status.page+1)*FOLIO_WR_PAGE_SIZE<s_wr_status.count)folio_weread_command(FOLIO_WR_PAGE,s_wr_status.page+1,NULL);
@@ -185,6 +202,17 @@ static void weread_page(int direction) {
 static void weread_tap(int x,int y) {
     if(s_wr_leaving)return;
     folio_weread_get_status(&s_wr_status);
+    if(s_wr_searching){
+        if(hit(done_rect(),x,y)){
+            if(folio_weread_command(FOLIO_WR_SEARCH,0,s_wr_query)){
+                s_wr_searching=false;show_view(VIEW_WEREAD,false);
+            }
+        }else for(unsigned i=0;i<31;++i)if(hit(catalog_key(i),x,y)){
+            edit_search_key(i,s_wr_query,sizeof(s_wr_query),&s_wr_search_keys);
+            break;
+        }
+        return;
+    }
     if(s_wr_confirm){
         if(hit((EpdRect){48,984,588,96},x,y)){s_wr_confirm=0;show_view(VIEW_WEREAD,false);}
         else if(hit(done_rect(),x,y)){
@@ -235,7 +263,10 @@ static void weread_tap(int x,int y) {
             return;
         }
         if(s_wr_status.state==FOLIO_WR_SHELF){
-            if(wr_can_relogin() && hit(wr_account(0),x,y)){s_wr_confirm=5;show_view(VIEW_WEREAD,false);}
+            if(hit(wr_right(876),x,y)){
+                snprintf(s_wr_query,sizeof(s_wr_query),"%s",s_wr_status.query);
+                s_wr_search_keys=0;s_wr_searching=true;show_view(VIEW_WEREAD,false);
+            }else if(wr_can_relogin() && hit(wr_account(0),x,y)){s_wr_confirm=5;show_view(VIEW_WEREAD,false);}
             else if(hit(wr_account(1),x,y)){s_wr_confirm=3;show_view(VIEW_WEREAD,false);}
             else if(hit(wr_account(2),x,y))folio_weread_command(FOLIO_WR_REFRESH,0,NULL);
         }else {

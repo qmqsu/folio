@@ -31,6 +31,7 @@ static bool login_timeout, expire_progress, unknown_time;
 static uint32_t cloud_seconds=1234;
 static std::vector<unsigned char> stored_session,pending_session;
 static bool nvs_fail_commit;static int nvs_commits;
+static bool large_shelf, partial_shelf;
 static int shelf_failures,shelf_calls,reader_failures,toc_calls,toc_failures;
 static int shard_failures,shard_calls[3];
 static std::vector<std::string> raw;
@@ -43,7 +44,7 @@ static void login(const char* id){
  account=id;Error error;QrSession session;QrState state;
  assert(client.BeginQrLogin(&session,&error));assert(client.PollQrLogin(session,"",&state,&error)&&state==QrState::Complete);
 }
-static void select_book(){fetch_shelf();assert(books.size()==1);choose_book(0);assert(selected==0&&chapters.size()==4);}
+static void select_book(){fetch_shelf();assert(shelf.order.size()==1);choose_book(0);assert(selected==0&&chapters.size()==4);}
 static void forget_record(){assert(folio_weread_flush());record_loaded=false;record_dirty=false;record_error=false;record_path[0]=0;record={};}
 static folio_weread_time_t ledger(){folio_weread_time_t t{};assert(load_time(&t,false));return t;}
 }
@@ -55,7 +56,14 @@ void EspTransport(const HttpRequest& q,HttpResponse* r,CancelCheck cancel,void*)
  if(q.url.find("getLoginUid")!=std::string::npos){r->body="{\"uid\":\"fixture_qr\"}";return;}
  if(q.url.find("getLoginInfo")!=std::string::npos){assert(q.timeout_ms==30000);if(login_timeout){r->failure=ErrorCode::Timeout;return;}r->body="{\"succeed\":true}";r->set_cookies={"wr_vid="+account,"wr_skey=NO_REAL_ACCOUNT"};return;}
  assert(q.cookie.find("wr_vid="+account)!=std::string::npos);
- if(q.url.find("shelf/sync")!=std::string::npos){++shelf_calls;if(shelf_failures>0){--shelf_failures;r->failure=ErrorCode::Transport;return;}r->body="{\"books\":[{\"bookId\":\"book1\",\"title\":\"Service Fixture\",\"author\":\"Test\"}]}";return;}
+ if(q.url.find("shelf/sync")!=std::string::npos){++shelf_calls;if(shelf_failures>0){--shelf_failures;r->failure=ErrorCode::Transport;return;}assert(q.consume);
+   auto feed=[&](const std::string& text){r->failure=q.consume(q.consume_context,text.data(),text.size());assert(r->failure==ErrorCode::None);};
+   feed("{\"books\":[");
+   if(large_shelf)for(int i=0;i<6000;++i)feed("{\"bookId\":\"b"+std::to_string(i)+"\",\"title\":\"Test\",\"description\":\""+std::string(400,'x')+"\"},");
+   if(partial_shelf){
+       feed(R"({"bookId":"partial"},)");r->failure=ErrorCode::Transport;return;
+   }
+   feed(R"({"bookId":"book1","title":"Service Fixture","author":"鲁迅"}]})");return;}
  if(q.url.find("chapterInfos")!=std::string::npos){++toc_calls;if(toc_failures>0){--toc_failures;r->failure=ErrorCode::Transport;return;}r->body=toc();return;}
  if(q.url.find("/web/reader/")!=std::string::npos){if(reader_failures>0){--reader_failures;r->failure=ErrorCode::Connection;return;}assert(q.timeout_ms==60000);r->body="{\"psvts\":\"fixture_ps\",\"token\":\"fixture_token\"}";return;}
  if(q.url.find("/web/book/getProgress")!=std::string::npos){if(expire_progress){r->status=401;r->body="{}";return;}r->body="{\"book\":{\"bookId\":\"book1\",\"chapterUid\":\""+uid+"\",\"chapterOffset\":"+std::to_string(offset)+",\"progress\":"+std::to_string(percent)+",\"updateTime\":"+std::to_string(updated)+",\"readingTime\":"+std::to_string(cloud_seconds)+"}}";return;}
@@ -184,7 +192,7 @@ int main(int argc,char** argv){
  tick+=181000000;poll_login(nullptr);assert(status.state==FOLIO_WR_ERROR);
  begin_login();station=false;poll_login(nullptr);assert(status.state==FOLIO_WR_ERROR);station=true;
  begin_login();poll_login("1234");assert(status.state==FOLIO_WR_ERROR);
- begin_login();login_timeout=false;poll_login(nullptr);assert(client.LoggedIn()&&status.qr_url[0]==0&&books.size()==1);
+ begin_login();login_timeout=false;poll_login(nullptr);assert(client.LoggedIn()&&status.qr_url[0]==0&&shelf.order.size()==1);
  // Simulated reboot restores the completed QR session without another QR request.
  assert(LoadSession(&restored)==SessionLoad::Loaded);client.Logout();session_loaded=false;
  int requests_before=network_calls;assert(restore_login()&&client.LoggedIn());fetch_shelf();
@@ -192,21 +200,41 @@ int main(int argc,char** argv){
 
  login("accountA");select_book();
  // Navigation cache is account-bound, rejects damage, and is only a hint.
- std::vector<Book> cached_shelf;requests_before=network_calls;
- assert(shelf_load(&cached_shelf)&&cached_shelf.size()==1&&network_calls==requests_before);
+ ShelfIndex cached_shelf;requests_before=network_calls;
+ assert(shelf_load(&cached_shelf)&&cached_shelf.order.size()==1&&network_calls==requests_before);
  login("accountB");assert(!shelf_load(&cached_shelf));login("accountA");
  {FILE* f=fopen(SHELF_FILE,"r+b");assert(f);assert(fseek(f,sizeof(shelf_header_t)+3,SEEK_SET)==0);int c=fgetc(f);assert(c!=EOF);assert(fseek(f,-1,SEEK_CUR)==0);assert(fputc(c^1,f)!=EOF);assert(fclose(f)==0);}
- assert(!shelf_load(&cached_shelf));shelf_save(books);assert(shelf_load(&cached_shelf));
+ assert(!shelf_load(&cached_shelf));fetch_shelf();assert(shelf_load(&cached_shelf));
+ // A stale streaming reply must never publish even the prefix that parsed cleanly.
+ partial_shelf=true;fetch_shelf();partial_shelf=false;
+ assert(status.state==FOLIO_WR_SHELF && !strcmp(status.items[0].title,"Service Fixture"));
+ assert(shelf_load(&cached_shelf) && access(SHELF_FILE ".tmp",F_OK)!=0);
+ // Recover an interrupted FAT replacement and load an existing v2 cache.
+ assert(rename(SHELF_FILE,SHELF_FILE ".bak")==0 && shelf_load(&cached_shelf));
+ {
+   shelf_header_t h{SHELF_MAGIC,2,1,0,{}};assert(owner_digest(h.owner));
+   shelf_entry_t entry{};copy(entry.id,"book1");copy(entry.title,"Old cache");
+   uint32_t hash=shelf_checksum(2166136261u,&h,sizeof(h));h.checksum=shelf_checksum(hash,&entry,sizeof(entry));
+   auto f=open_file(SHELF_FILE,"wb");assert(f && fwrite(&h,sizeof(h),1,f.get())==1 && fwrite(&entry,sizeof(entry),1,f.get())==1);
+ }
+ assert(shelf_load(&shelf) && shelf.legacy);shelf_page(0);assert(!strcmp(status.items[0].title,"Old cache"));
+ fetch_shelf();assert(!shelf.legacy);
  // Reopening a recently fetched directory skips the network, but expiry does not.
  int toc_before=toc_calls;choose_book(0);assert(toc_calls==toc_before);
  // Back restores the selected shelf page without HTTP, even while offline;
  // selecting the same book again retains the current TOC cache.
- auto single_shelf=books;books.resize(FOLIO_WR_PAGE_SIZE+2,books.front());selected=FOLIO_WR_PAGE_SIZE+1;
- requests_before=network_calls;station=false;execute({FOLIO_WR_RETURN_SHELF,0,{}});
- assert(status.state==FOLIO_WR_SHELF&&status.page==1&&status.item_count==2&&!status.busy&&network_calls==requests_before);
- station=true;execute({FOLIO_WR_SELECT_BOOK,selected,{}});
- assert(status.state==FOLIO_WR_BOOK&&toc_calls==toc_before&&network_calls==requests_before);
- books=std::move(single_shelf);selected=0;
+ large_shelf=true;fetch_shelf();assert(shelf.order.size()==6001 && shelf_load(&cached_shelf));
+ shelf_page(1000);assert(status.page==1000 && status.item_count==1 && !strcmp(status.items[0].title,"Service Fixture"));
+ choose_book(6000);requests_before=network_calls;station=false;execute({FOLIO_WR_RETURN_SHELF,0,{}});
+ assert(status.state==FOLIO_WR_SHELF&&status.page==1000&&status.item_count==1&&!status.busy&&network_calls==requests_before);
+ execute({FOLIO_WR_SEARCH,0,"lx"});
+ assert(status.count==1 && !strcmp(status.items[0].subtitle,"鲁迅"));
+ station=true;execute({FOLIO_WR_SELECT_BOOK,0,{}});
+ assert(active_book.id=="book1" && status.state==FOLIO_WR_BOOK&&toc_calls==toc_before&&network_calls==requests_before);
+ execute({FOLIO_WR_RETURN_SHELF,0,{}});assert(status.count==1 && status.page==0);
+ execute({FOLIO_WR_SEARCH,0,"xyz"});assert(status.count==0);
+ execute({FOLIO_WR_SEARCH,0,{}});assert(status.count==6001);
+ large_shelf=false;fetch_shelf();choose_book(0);
  tick+=301000000;choose_book(0);assert(toc_calls==toc_before+1);
  // Retrying a failed directory resumes that read, never a shelf or a write.
  chapters_fetched=0;toc_failures=2;choose_book(0);assert(status.state==FOLIO_WR_ERROR&&!status.login_required);
@@ -217,7 +245,7 @@ int main(int argc,char** argv){
  int shelf_before=shelf_calls;shelf_failures=1;fetch_shelf();
  assert(shelf_calls==shelf_before+2&&status.state==FOLIO_WR_SHELF&&client.LoggedIn());
  shelf_before=shelf_calls;shelf_failures=3;int writes_before=read_posts;
- fetch_shelf();assert(shelf_calls==shelf_before+2&&status.state==FOLIO_WR_SHELF&&client.LoggedIn()&&books.size()==1&&read_posts==writes_before);
+ fetch_shelf();assert(shelf_calls==shelf_before+2&&status.state==FOLIO_WR_SHELF&&client.LoggedIn()&&shelf.order.size()==1&&read_posts==writes_before);
  shelf_failures=0;select_book();
  // A selected-chapter download publishes only that chapter.
  reader_failures=99;client.Disconnect();download(0,false);assert(status.state==FOLIO_WR_DOWNLOAD_ERROR);
@@ -240,7 +268,7 @@ int main(int argc,char** argv){
  auto t=ledger();assert(t.pending==20&&t.enabled);uint8_t owner_a[32];memcpy(owner_a,t.owner,32);
  // Cover is independently fetched, tolerates EAGAIN and reuses the saved image.
  cover_test=true;cover_data=load("tools/tests/fixtures/ui-cover-light.png");cover_header_waits=2;cover_body_waits=2;
- Book cover_book=books[selected];cover_book.cover="https://img.qpic.cn/cover.png";
+ Book cover_book=active_book;cover_book.cover="https://img.qpic.cn/cover.png";
  int cover_before=cover_requests;bool changed=false;assert(fetch_cover(cover_book,&changed)&&changed&&cover_requests==cover_before+1);
  assert(fetch_cover(cover_book,&changed)&&!changed&&cover_requests==cover_before+1);
  char hidden_cover[256];assert(folio_wr_aux(path.c_str(),"cover.png",hidden_cover,sizeof(hidden_cover)));std::string cover_path=hidden_cover;assert(load(cover_path)==cover_data);
@@ -291,7 +319,7 @@ int main(int argc,char** argv){
  expire_progress=true;check_sync();assert(status.state==FOLIO_WR_ERROR && status.login_required && !status.busy);
  requests_before=network_calls;execute({FOLIO_WR_UPLOAD_SYNC,0,{}});assert(network_calls==requests_before);
  copy(requested_sync_path,path.c_str());execute({FOLIO_WR_RELOGIN,0,{}});
- assert(status.state==FOLIO_WR_LOGIN && !status.login_required && books.empty());
+ assert(status.state==FOLIO_WR_LOGIN && !status.login_required && shelf.order.empty());
  expire_progress=false;int before_direct_shelf=shelf_calls;poll_login(nullptr);
  assert(status.state==FOLIO_WR_SYNC && shelf_calls==before_direct_shelf && !strcmp(requested_sync_path,path.c_str()));
  // A single manual upload drains acknowledged <=300-second chunks without a duplicate position write.

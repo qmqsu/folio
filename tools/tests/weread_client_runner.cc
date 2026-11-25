@@ -32,11 +32,28 @@ struct Mock {
         m.cookies.push_back(q.cookie);
         if (q.method == "POST") m.posts.push_back(q.body);
         r->status = s.status; r->failure = s.failure; r->sent = s.sent;
-        r->body = s.body; r->set_cookies = s.cookies;
+        r->set_cookies = s.cookies;
+        if (!q.consume) r->body = s.body;
+        else if (s.body.size() > q.max_response) r->failure = ErrorCode::Limit;
+        else if (s.status == 200) {
+            for (size_t i = 0; i < s.body.size() && r->failure == ErrorCode::None; i += 17)
+                r->failure = q.consume(q.consume_context, s.body.data()+i, std::min<size_t>(17, s.body.size()-i));
+        }
         if(s.delay_ms>q.timeout_ms){r->failure=ErrorCode::Timeout;r->body.clear();}
     }
     void reset(std::vector<Step> s) { steps = std::move(s); index = 0; posts.clear(); cookies.clear();timeouts.clear();mock_milliseconds=0; }
 };
+static bool fetch_shelf(Client& client, std::vector<Book>* out, Error* error) {
+    struct Collector : ShelfSink {
+        std::vector<Book> rows;
+        bool append(const Book& b) override { rows.push_back(b); return true; }
+    } sink;
+    std::vector<uint16_t> order;
+    out->clear();
+    if (!client.FetchShelf(sink, &order, error)) return false;
+    for (auto i : order) out->push_back(std::move(sink.rows[i]));
+    return true;
+}
 static void login(Client& c, Mock& m, const char* id = "123") {
     c.Logout();
     m.reset({{"getLoginUid", "{\"uid\":\"qr_123\"}"},
@@ -64,20 +81,33 @@ int main(int argc, char** argv) {
     login(c,m);
     std::vector<Book> shelf;
     m.reset({{"shelf/sync", "{\"books\":[{\"bookId\":\"book1\",\"title\":\"中文书\",\"author\":\"作者\",\"cover\":\"https://img.example/a.jpg\"}],\"bookProgress\":[{\"bookId\":\"book1\",\"chapterUid\":\"c1\",\"chapterOffset\":12,\"updateTime\":123}]}"}});
-    assert(c.FetchShelf(&shelf,&e) && shelf.size()==1 && shelf[0].progress.chapter_offset==12 && !shelf[0].cover.empty());
+    assert(fetch_shelf(c,&shelf,&e) && shelf.size()==1 && !shelf[0].cover.empty());
     for(const char* url:{"http://img.qpic.cn/a.jpg","//img.qpic.cn/a.jpg"}){
         m.reset({{"shelf/sync",std::string("{\"books\":[{\"bookId\":\"book1\",\"cover\":\"")+url+"\"}]}"}});
-        assert(c.FetchShelf(&shelf,&e)&&shelf[0].cover=="https://img.qpic.cn/a.jpg");
+        assert(fetch_shelf(c,&shelf,&e)&&shelf[0].cover=="https://img.qpic.cn/a.jpg");
     }
-    m.reset({{"shelf/sync",load(dir+"/shelf128.json")}}); assert(c.FetchShelf(&shelf,&e)&&shelf.size()==128);
-    m.reset({{"shelf/sync",load(dir+"/shelf129.json")}}); assert(c.FetchShelf(&shelf,&e)&&shelf.size()==129);
-    m.reset({{"shelf/sync",load(dir+"/shelf1024.json")}}); assert(c.FetchShelf(&shelf,&e)&&shelf.size()==1024&&shelf.back().id=="b1023");
+    m.reset({{"shelf/sync",load(dir+"/shelf128.json")}}); assert(fetch_shelf(c,&shelf,&e)&&shelf.size()==128);
+    m.reset({{"shelf/sync",load(dir+"/shelf129.json")}}); assert(fetch_shelf(c,&shelf,&e)&&shelf.size()==129);
+    m.reset({{"shelf/sync",load(dir+"/shelf1024.json")}}); assert(fetch_shelf(c,&shelf,&e)&&shelf.size()==1024&&shelf.back().id=="b1023");
+    m.reset({{"shelf/sync",load(dir+"/shelf6000.json")}});
+    assert(fetch_shelf(c,&shelf,&e) && shelf.size()==6000 && shelf.front().id=="b5999" && shelf.back().id=="b5998");
+    m.reset({{"shelf/sync",R"({"books":[],"errcode":-2012})"}});
+    assert(!fetch_shelf(c,&shelf,&e) && e.code==ErrorCode::SessionExpired);
+    m.reset({{"shelf/sync","{\"books\":[{\"bookId\":\"x\",\"author\":\""+std::string(511,'a')+"中\",\"cover\":\""+std::string(2100,'x')+"\"}]}"}});
+    assert(fetch_shelf(c,&shelf,&e) && shelf[0].author.size()==511 && shelf[0].cover.empty());
+    std::string capacity="{\"books\":[";
+    for(size_t i=0;i<kMaxShelfBooks;++i){
+        if(i)capacity+=',';
+        capacity+="{\"bookId\":\"b"+std::to_string(i)+"\"}";
+    }
+    m.reset({{"shelf/sync",capacity+"]}"}});assert(fetch_shelf(c,&shelf,&e) && shelf.size()==kMaxShelfBooks);
+    m.reset({{"shelf/sync",capacity+",{\"bookId\":\"extra\"}]}"}});assert(!fetch_shelf(c,&shelf,&e) && e.code==ErrorCode::Limit);
     for (auto invalid : {"{\"books\":[{\"bookId\":\"../x\"}]}","{\"books\":[{\"bookId\":\"x\"},{\"bookId\":\"x\"}]}","{}","[]","{\"books\":[]}junk"}) {
-        m.reset({{"shelf/sync",invalid}}); assert(!c.FetchShelf(&shelf,&e));
+        m.reset({{"shelf/sync",invalid}}); assert(!fetch_shelf(c,&shelf,&e));
     }
-    m.reset({{"shelf/sync",std::string(40,'[')+std::string(40,']')}}); assert(!c.FetchShelf(&shelf,&e));
-    m.reset({{"shelf/sync","{\"books\":[{\"bookId\":\"book1\\u0000evil\"}]}"}}); assert(!c.FetchShelf(&shelf,&e));
-    m.reset({{"shelf/sync",std::string(kMaxShelfBytes+1,'x')}}); assert(!c.FetchShelf(&shelf,&e)&&e.code==ErrorCode::Limit);
+    m.reset({{"shelf/sync",std::string(40,'[')+std::string(40,']')}}); assert(!fetch_shelf(c,&shelf,&e));
+    m.reset({{"shelf/sync","{\"books\":[{\"bookId\":\"book1\\u0000evil\"}]}"}}); assert(!fetch_shelf(c,&shelf,&e));
+    m.reset({{"shelf/sync",std::string(kMaxShelfBytes+1,'x')}}); assert(!fetch_shelf(c,&shelf,&e)&&e.code==ErrorCode::Limit);
     std::vector<Chapter> chapters;
     m.reset({{"chapterInfos",load(dir+"/chapters512.json")}}); assert(c.FetchChapters("book1",&chapters,&e)&&chapters.size()==512);
     m.reset({{"chapterInfos",load(dir+"/chapters513.json")}}); assert(!c.FetchChapters("book1",&chapters,&e)&&e.code==ErrorCode::Limit&&chapters.empty());
@@ -166,9 +196,9 @@ int main(int argc, char** argv) {
     broken={load(dir+"/x0"),load(dir+"/x1"),load(dir+"/x2"),"D41D8CD98F00B204E9800998ECF8427E"}; assert(crypto::DecodeShards(&broken,&decoded,kMaxChapterBytes)&&decoded==load(dir+"/xhtml"));
 
     login(c,m,"456"); assert(std::string(c.AccountId())=="456");
-    m.reset({{"shelf/sync","{\"books\":[]}",200,ErrorCode::None,true,{"wr_vid=789"}}}); assert(!c.FetchShelf(&shelf,&e)&&!c.LoggedIn());
+    m.reset({{"shelf/sync","{\"books\":[]}",200,ErrorCode::None,true,{"wr_vid=789"}}}); assert(!fetch_shelf(c,&shelf,&e)&&!c.LoggedIn());
     login(c,m); c.Disconnect(); assert(c.LoggedIn());
-    m.throw_oom=true; assert(!c.FetchShelf(&shelf,&e)&&e.code==ErrorCode::NoMemory); m.throw_oom=false;
+    m.throw_oom=true; assert(!fetch_shelf(c,&shelf,&e)&&e.code==ErrorCode::NoMemory); m.throw_oom=false;
     c.Logout(); assert(!c.LoggedIn()&&!*c.AccountId());
     assert(crypto::EncodeId("123456789")==load(dir+"/id_expected"));
     std::printf("WeRead client: login/OTP, bounded parsing, raw XHTML/TXT, signature, readback, uncertain-time, cancellation, account isolation and OOM tests passed\n");

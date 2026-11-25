@@ -6,6 +6,7 @@
 extern "C" {
 #include "folio_network.h"
 #include "folio_storage.h"
+#include "folio_catalog.h"
 #include "folio_weread_cache.h"
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
@@ -52,46 +53,162 @@ static uint32_t shelf_checksum(uint32_t value,const void* bytes,size_t n) {
     while(n--)value=(value^*p++)*16777619u;
     return value;
 }
-static bool shelf_load(std::vector<Book>* out) {
-    StorageLock lock;uint8_t owner[32];if(!lock.held || !owner_digest(owner))return false;
-    FILE* f=fopen(SHELF_FILE,"rb");if(!f)return false;
-    shelf_header_t h{};bool okay=fread(&h,sizeof(h),1,f)==1 && h.magic==SHELF_MAGIC &&
-        h.version==2 && h.count<=kMaxShelfBooks && !memcmp(h.owner,owner,sizeof(owner));
-    uint32_t expected=h.checksum;h.checksum=0;
-    uint32_t sum=shelf_checksum(2166136261u,&h,sizeof(h));
-    std::vector<Book> cached;
-    for(uint32_t i=0;okay && i<h.count;++i){
-        shelf_entry_t e{};if(fread(&e,sizeof(e),1,f)!=1){okay=false;break;}
-        sum=shelf_checksum(sum,&e,sizeof(e));
-        if(!e.id[0] || !memchr(e.id,0,sizeof(e.id)) || !memchr(e.title,0,sizeof(e.title)) ||
-           !memchr(e.author,0,sizeof(e.author)) || !memchr(e.cover,0,sizeof(e.cover))){okay=false;break;}
-        Book book;book.id=e.id;book.title=e.title;book.author=e.author;book.cover=e.cover;
-        cached.push_back(std::move(book));
-    }
-    okay=okay && sum==expected && fgetc(f)==EOF && !ferror(f);
-    fclose(f);if(!okay)return false;
-    *out=std::move(cached);return true;
+using File = std::unique_ptr<FILE, decltype(&fclose)>;
+static File open_file(const char* path, const char* mode) { return File(fopen(path, mode), fclose); }
+
+// picolibc defaults to tiny file buffers. The caller owns this optional
+// buffer until after fclose, including all exception/early-return paths.
+static void buffer_shelf(FILE* file, std::unique_ptr<char[]>& buffer) {
+    buffer.reset(new(std::nothrow) char[8192]);
+    if (buffer) (void)setvbuf(file, buffer.get(), _IOFBF, 8192);
 }
-static void shelf_save(const std::vector<Book>& list) {
-    StorageLock lock;shelf_header_t h{SHELF_MAGIC,2,0,0,{}};
-    if(!lock.held || !owner_digest(h.owner) || list.size()>kMaxShelfBooks)return;
-    mkdir(FOLIO_SD_ROOT "/.folio",0777);mkdir(FOLIO_SD_ROOT "/.folio/weread",0777);
-    FILE* f=fopen(SHELF_FILE ".tmp","wb");if(!f)return;
-    h.count=(uint32_t)list.size();uint32_t sum=shelf_checksum(2166136261u,&h,sizeof(h));
-    bool okay=fwrite(&h,sizeof(h),1,f)==1;
-    for(uint32_t i=0;okay && i<h.count;++i){
-        shelf_entry_t e{};copy(e.id,list[i].id.c_str());copy(e.title,list[i].title.c_str());
-        copy(e.author,list[i].author.c_str());copy(e.cover,list[i].cover.c_str());
-        sum=shelf_checksum(sum,&e,sizeof(e));okay=fwrite(&e,sizeof(e),1,f)==1;
+
+// Offsets are in file order. Only the two small integer indexes stay resident.
+struct ShelfIndex {
+    std::vector<uint32_t> offsets;
+    std::vector<uint16_t> order;
+    bool legacy = false;
+};
+static ShelfIndex shelf;
+static Book active_book;
+static bool direct_book;
+static std::vector<uint16_t> matches;
+static char shelf_query[FOLIO_CATALOG_QUERY_CAP];
+
+static bool read_record(FILE* file, bool legacy, Book* book, uint32_t* sum) {
+    auto read = [&](void* data, size_t n) {
+        if (fread(data, 1, n, file) != n) return false;
+        if (sum) *sum = shelf_checksum(*sum, data, n);
+        return true;
+    };
+    if (legacy) {
+        shelf_entry_t entry;
+        if (!read(&entry, sizeof(entry)) || !entry.id[0] || !memchr(entry.id, 0, sizeof(entry.id)) ||
+            !memchr(entry.title, 0, sizeof(entry.title)) || !memchr(entry.author, 0, sizeof(entry.author)) ||
+            !memchr(entry.cover, 0, sizeof(entry.cover))) return false;
+        book->id = entry.id; book->title = entry.title; book->author = entry.author; book->cover = entry.cover;
+        return true;
     }
-    h.checksum=sum;
-    okay=okay && fseek(f,0,SEEK_SET)==0 && fwrite(&h,sizeof(h),1,f)==1 && fflush(f)==0 && fsync(fileno(f))==0;
-    if(fclose(f)!=0)okay=false;
-    // FAT cannot replace an existing destination. A missing hint is harmless.
-    if(okay && (unlink(SHELF_FILE)==0 || errno==ENOENT))okay=rename(SHELF_FILE ".tmp",SHELF_FILE)==0;
-    if(!okay)unlink(SHELF_FILE ".tmp");
+    uint16_t sizes[4];
+    if (!read(sizes, sizeof(sizes)) || !sizes[0] || sizes[0] > 63 ||
+        sizes[1] > 512 || sizes[2] > 512 || sizes[3] > 2054) return false;
+    std::string* fields[] = {&book->id, &book->title, &book->author, &book->cover};
+    for (unsigned i = 0; i < 4; ++i) {
+        fields[i]->resize(sizes[i]);
+        if (!read(fields[i]->data(), sizes[i]) || fields[i]->find('\0') != std::string::npos) return false;
+    }
+    return true;
 }
-struct Command { folio_weread_action_t action; size_t index; char value[16]; };
+static bool shelf_load(ShelfIndex* out) {
+    StorageLock lock;
+    uint8_t owner[32];
+    if (!lock.held || !owner_digest(owner)) return false;
+    unlink(SHELF_FILE ".tmp");
+    if (access(SHELF_FILE, F_OK) != 0 && errno == ENOENT)
+        rename(SHELF_FILE ".bak", SHELF_FILE);
+    std::unique_ptr<char[]> buffer;
+    File f = open_file(SHELF_FILE, "rb");
+    if (f) buffer_shelf(f.get(), buffer);
+    shelf_header_t h{};
+    if (!f || fread(&h, sizeof(h), 1, f.get()) != 1 || h.magic != SHELF_MAGIC ||
+        (h.version != 2 && h.version != 3) || h.count > kMaxShelfBooks || memcmp(h.owner, owner, 32)) return false;
+    uint32_t expected = h.checksum;
+    h.checksum = 0;
+    ShelfIndex next;
+    next.legacy = h.version == 2;
+    uint32_t sum = next.legacy ? shelf_checksum(2166136261u, &h, sizeof(h)) : 2166136261u;
+    next.offsets.reserve(h.count);
+    next.order.resize(h.count);
+    Book row;
+    for (uint32_t i = 0; i < h.count; ++i) {
+        if (folio_weread_io_cancelled()) return false;
+        long offset = ftell(f.get());
+        if (offset < 0 || !read_record(f.get(), next.legacy, &row, &sum)) return false;
+        next.offsets.push_back(offset);
+        next.order[i] = i;
+    }
+    if (!next.legacy) {
+        size_t bytes = next.order.size() * sizeof(uint16_t);
+        if (bytes && fread(next.order.data(), 1, bytes, f.get()) != bytes) return false;
+        sum = shelf_checksum(sum, next.order.data(), bytes);
+        sum = shelf_checksum(sum, &h, sizeof(h));
+        std::vector<bool> seen(h.count);
+        for (uint16_t slot : next.order) {
+            if (slot >= h.count || seen[slot]) return false;
+            seen[slot] = true;
+        }
+    }
+    if (sum != expected || fgetc(f.get()) != EOF || ferror(f.get())) return false;
+    *out = std::move(next);
+    return true;
+}
+
+class ShelfWriter final : public ShelfSink {
+    std::unique_ptr<char[]> buffer;
+    File file{nullptr, fclose};
+    ShelfIndex next;
+    bool staged = false;
+    uint32_t offset = sizeof(shelf_header_t);
+    uint32_t sum = 2166136261u;
+    shelf_header_t header{SHELF_MAGIC, 3, 0, 0, {}};
+    bool put(const void* data, size_t n) {
+        if (!n) return true;
+        sum = shelf_checksum(sum, data, n);
+        return fwrite(data, 1, n, file.get()) == n;
+    }
+public:
+    bool begin() {
+        if (!owner_digest(header.owner)) return false;
+        mkdir(FOLIO_SD_ROOT "/.folio", 0777);
+        mkdir(FOLIO_SD_ROOT "/.folio/weread", 0777);
+        file = open_file(SHELF_FILE ".tmp", "wb");
+        staged = bool(file);
+        if (file) buffer_shelf(file.get(), buffer);
+        return file && fwrite(&header, sizeof(header), 1, file.get()) == 1;
+    }
+    ~ShelfWriter() { file.reset(); if (staged) unlink(SHELF_FILE ".tmp"); }
+    bool append(const Book& book) override {
+        next.offsets.push_back(offset);
+        const uint16_t sizes[] = {(uint16_t)book.id.size(), (uint16_t)book.title.size(),
+                                  (uint16_t)book.author.size(), (uint16_t)book.cover.size()};
+        offset += sizeof(sizes) + sizes[0] + sizes[1] + sizes[2] + sizes[3];
+        return put(sizes, sizeof(sizes)) && put(book.id.data(), sizes[0]) && put(book.title.data(), sizes[1]) &&
+               put(book.author.data(), sizes[2]) && put(book.cover.data(), sizes[3]);
+    }
+    bool commit(std::vector<uint16_t>& order) {
+        if (order.size() != next.offsets.size() || !put(order.data(), order.size() * sizeof(uint16_t))) return false;
+        header.count = order.size();
+        header.checksum = shelf_checksum(sum, &header, sizeof(header));
+        if (fseek(file.get(), 0, SEEK_SET) || fwrite(&header, sizeof(header), 1, file.get()) != 1 ||
+            fflush(file.get()) || fsync(fileno(file.get())) || fclose(file.release())) return false;
+        // FAT rename cannot replace a file. Recover the previous complete index
+        // at next open if power is lost between these two renames.
+        if (unlink(SHELF_FILE ".bak") != 0 && errno != ENOENT) return false;
+        bool had_previous = rename(SHELF_FILE, SHELF_FILE ".bak") == 0;
+        if (!had_previous && errno != ENOENT) return false;
+        if (rename(SHELF_FILE ".tmp", SHELF_FILE) != 0) {
+            if (had_previous) rename(SHELF_FILE ".bak", SHELF_FILE);
+            return false;
+        }
+        staged = false;
+        if (had_previous) unlink(SHELF_FILE ".bak");
+        next.order = std::move(order);
+        shelf = std::move(next);
+        return true;
+    }
+};
+static void reset_shelf() {
+    shelf = {}; matches = {}; shelf_query[0] = 0;
+    direct_book = false; active_book = {};
+}
+static const std::vector<uint16_t>& visible_books() {
+    return *shelf_query ? matches : shelf.order;
+}
+static bool read_slot(FILE* file, size_t slot, Book* book) {
+    return slot < shelf.offsets.size() && !fseek(file, shelf.offsets[slot], SEEK_SET) &&
+           read_record(file, shelf.legacy, book, nullptr);
+}
+struct Command { folio_weread_action_t action; size_t index; char value[FOLIO_CATALOG_QUERY_CAP]; };
 struct StageTimer {
     const char* name;
     int64_t started=esp_timer_get_time();
@@ -110,7 +227,7 @@ static QueueHandle_t commands;
 static Client client;
 static QrSession qr;
 static int64_t qr_started;
-static std::vector<Book> books;
+
 static std::vector<Chapter> chapters;
 static size_t selected=SIZE_MAX;
 static size_t download_first;
@@ -181,21 +298,57 @@ static void time_status() {
     status.uncertain_seconds=eligible?(uint32_t)std::min<uint64_t>(t.uncertain,UINT32_MAX):0;
     ++status.revision;portEXIT_CRITICAL(&status_mux);
 }
-static void shelf_page(size_t page) {
-    size_t pages=(books.size()+FOLIO_WR_PAGE_SIZE-1)/FOLIO_WR_PAGE_SIZE;
-    if(page>=pages)page=pages?pages-1:0;
-    folio_weread_item_t items[FOLIO_WR_PAGE_SIZE]{};size_t count=0;
-    for(size_t i=page*FOLIO_WR_PAGE_SIZE;i<books.size() && count<FOLIO_WR_PAGE_SIZE;++i,++count){
-        copy(items[count].title,books[i].title.c_str());copy(items[count].subtitle,books[i].author.c_str());
+static void shelf_page(size_t page, const char* notice = nullptr) {
+    const auto& visible = visible_books();
+    size_t pages = (visible.size() + FOLIO_WR_PAGE_SIZE - 1) / FOLIO_WR_PAGE_SIZE;
+    if (page >= pages) page = pages ? pages - 1 : 0;
+    folio_weread_item_t items[FOLIO_WR_PAGE_SIZE]{};
+    size_t count = 0;
+    StorageLock lock;
+    File f = lock.held ? open_file(SHELF_FILE, "rb") : File(nullptr, fclose);
+    Book row;
+    for (size_t i = page * FOLIO_WR_PAGE_SIZE; i < visible.size() && count < FOLIO_WR_PAGE_SIZE; ++i, ++count) {
+        if (!f || !read_slot(f.get(), visible[i], &row)) { fail("书架读取失败，请检查 TF 卡并刷新书架。"); return; }
+        copy(items[count].title, row.title.c_str()); copy(items[count].subtitle, row.author.c_str());
     }
-    portENTER_CRITICAL(&status_mux);status.page=page;status.count=books.size();status.item_count=count;
+    portENTER_CRITICAL(&status_mux);status.page=page;status.count=visible.size();status.item_count=count;copy(status.query,shelf_query);
     memcpy(status.items,items,sizeof(items));status.can_read=false;status.local_path[0]=0;
     copy(status.title,"微信读书");portEXIT_CRITICAL(&status_mux);
-    publish(FOLIO_WR_SHELF,shelf_cached?"已显示上次书架，点刷新获取最新内容。":books.empty()?"书架为空，可先在微信读书添加书籍。":"选择书籍，下载后可离线阅读。");
+    char filtered[192];
+    if (!notice && *shelf_query) {
+        snprintf(filtered, sizeof(filtered), visible.empty() ? "没有找到 %s，可修改搜索" : "搜索结果 · %s", shelf_query);
+        notice = filtered;
+    }
+    if (!notice) {
+        if (visible.empty()) notice = "书架为空，可先在微信读书添加书籍。";
+        else notice = shelf_cached ? "上次同步的书架 · 可点刷新获取最新内容" : "最近阅读优先 · 选书后可下载";
+    }
+    publish(FOLIO_WR_SHELF, notice);
+}
+static void search_shelf(const char* query) {
+    std::vector<uint16_t> found;
+    if (*query) {
+        work("正在查找书籍");
+        StorageLock lock;
+        std::unique_ptr<char[]> buffer;
+        File f = lock.held ? open_file(SHELF_FILE, "rb") : File(nullptr, fclose);
+        if (f) buffer_shelf(f.get(), buffer);
+        if (!f || fseek(f.get(), sizeof(shelf_header_t), SEEK_SET)) { fail("无法读取书架，请刷新。"); return; }
+        std::vector<bool> matched(shelf.offsets.size());
+        Book book;
+        for (size_t i = 0; i < matched.size(); ++i) {
+            if (cancelled(nullptr)) return;
+            if (!read_record(f.get(), shelf.legacy, &book, nullptr)) { fail("无法读取书架，请刷新。"); return; }
+            matched[i] = folio_catalog_matches_book(book.title.c_str(), book.author.c_str(), query);
+        }
+        for (uint16_t i : shelf.order) if (matched[i]) found.push_back(i);
+    }
+    matches.swap(found); copy(shelf_query, query);
+    shelf_page(0);
 }
 static void book_page(size_t page,const char* message=nullptr) {
     StageTimer timing("book-page");
-    if(selected>=books.size())return;
+    if(selected==SIZE_MAX)return;
     size_t pages=(chapters.size()+FOLIO_WR_PAGE_SIZE-1)/FOLIO_WR_PAGE_SIZE;
     if(page>=pages)page=pages?pages-1:0;
     folio_weread_item_t items[FOLIO_WR_PAGE_SIZE]{};size_t count=0;
@@ -209,7 +362,7 @@ static void book_page(size_t page,const char* message=nullptr) {
         copy(items[count].subtitle,items[count].cached?"已下载 · 点击重新下载":"点击下载本章");
     }
     portENTER_CRITICAL(&status_mux);status.page=page;status.count=chapters.size();status.item_count=count;
-    memcpy(status.items,items,sizeof(items));copy(status.title,books[selected].title.c_str());
+    memcpy(status.items,items,sizeof(items));copy(status.title,active_book.title.c_str());
     status.can_read=readable;copy(status.local_path,readable?book_path:"");portEXIT_CRITICAL(&status_mux);
     time_status();publish(FOLIO_WR_BOOK,message?message:"已下载章节可从本地书架打开。");
 }
@@ -247,12 +400,17 @@ static bool connected() {
     if(!net.clock_valid){fail("请先在日期与时间页面校准时间。");return false;}
     return true;
 }
+static void forget_shelf_files() {
+    StorageLock lock;
+    if (!lock.held) return;
+    unlink(SHELF_FILE); unlink(SHELF_FILE ".bak"); unlink(SHELF_FILE ".tmp");
+}
 static void begin_login() {
     retry_task=RetryTask::Login;
     if(!connected())return;
     if(!EraseSession()){fail("登录记录无法清除，请重试。");return;}
-    session_loaded=true;login_required=false;shelf_cached=false;client.Logout();books.clear();chapters.clear();chapters_book.clear();chapters_owner.clear();selected=SIZE_MAX;book_path[0]=0;
-    {StorageLock lock;if(lock.held)unlink(SHELF_FILE);}
+    session_loaded=true;login_required=false;shelf_cached=false;client.Logout();reset_shelf();chapters.clear();chapters_book.clear();chapters_owner.clear();selected=SIZE_MAX;book_path[0]=0;
+    forget_shelf_files();
     portENTER_CRITICAL(&status_mux);status.item_count=status.count=0;status.can_read=status.sync_local=status.sync_cloud=false;
     status.local_path[0]=open_path[0]=0;status.cloud_time_available=false;portEXIT_CRITICAL(&status_mux);
     work("正在获取登录二维码");Error error;
@@ -273,8 +431,19 @@ static void fetch_shelf() {
     // No hidden background request: busy accurately describes ownership.
     work("正在同步微信读书书架");
     Error error;
-    std::vector<Book> refreshed;
-    bool fetched=client.FetchShelf(&refreshed,&error);
+    auto refresh = [&]() {
+        StorageLock lock;
+        ShelfWriter writer;
+        std::vector<uint16_t> order;
+        if (lock.held && writer.begin()) {
+            if (!client.FetchShelf(writer, &order, &error)) return false;
+            if (!cancelled(nullptr) && writer.commit(order)) return true;
+        }
+        error.code = ErrorCode::Storage;
+        copy(error.message, "书架保存失败，请检查 TF 卡空间后重试。");
+        return false;
+    };
+    bool fetched=refresh();
     // One bounded retry for a transient read failure; do not repeat business
     // rejections or write/OTP submissions.
     static const uint16_t kShelfPauseMs[]={300};
@@ -283,25 +452,30 @@ static void fetch_shelf() {
         work("正在重试获取书架");vTaskDelay(pdMS_TO_TICKS(kShelfPauseMs[attempt]));
         folio_network_status_t network;folio_network_get_status(&network);
         if(!network.connected)break;
-        refreshed.clear();
-        fetched=client.FetchShelf(&refreshed,&error);
+        fetched=refresh();
     }
     // One renewal/retry is restricted to this read-only operation. Write/time
     // requests never enter this path and are never automatically repeated.
     if(!fetched && error.code==ErrorCode::SessionExpired){
         Error expired=error;
-        if(client.RenewSession(&error))fetched=client.FetchShelf(&refreshed,&error);
+        if(client.RenewSession(&error))fetched=refresh();
         else error=expired; // Keep the confirmed expiry even if renewal hit a network error.
     }
     if(!fetched){
         if(error.code==ErrorCode::SessionExpired || error.code==ErrorCode::NotLoggedIn)fail(error);
-        else if(!books.empty()&&transient_read_error(error.code)){shelf_cached=true;shelf_page(0);publish(FOLIO_WR_SHELF,"刷新失败，仍显示上次书架；可稍后重试。");}
+        else if (!shelf.order.empty() && (transient_read_error(error.code) || error.code == ErrorCode::Limit ||
+                 error.code == ErrorCode::Storage || error.code == ErrorCode::NoMemory || error.code == ErrorCode::Malformed)) {
+            shelf_cached = true;
+            char notice[192];
+            snprintf(notice, sizeof(notice), "保留上次书架 · %s", error.message);
+            shelf_page(0, notice);
+        }
         else fail(error);
         return;
     }
     login_required=false;
-    if(!persist_login())return;
-    books.swap(refreshed);shelf_cached=false;selected=SIZE_MAX;book_path[0]=0;shelf_save(books);shelf_page(0);
+    shelf_query[0]=0;matches.clear();direct_book=false;shelf_cached=false;selected=SIZE_MAX;book_path[0]=0;
+    if(persist_login())shelf_page(0);
 }
 static void open_requested_sync();
 static void poll_login(const char* otp) {
@@ -329,34 +503,41 @@ static bool fetch_cover(const Book& book,bool* changed=nullptr);
 static void choose_book(size_t index,bool sync_only=false) {
     StageTimer timing("choose-book");
     retry_task=RetryTask::Book;retry_book=index;retry_sync_only=sync_only;
-    if(index>=books.size() || !connected())return;
+    if (!connected()) return;
+    if (!direct_book) {
+        const auto& visible = visible_books();
+        if (index >= visible.size()) return;
+        StorageLock lock;
+        File f = lock.held ? open_file(SHELF_FILE, "rb") : File(nullptr, fclose);
+        if (!f || !read_slot(f.get(), visible[index], &active_book)) { fail("无法读取书架，请刷新。"); return; }
+    }
     selected=index;book_path[0]=0;cloud={};local_anchor={};cloud_anchor={};cloud_position_ready=false;
     work("正在获取章节目录");Error error;
     // The TOC is a read-only lookup, so a dropped link is retried with the same
     // growing pause as the shelf instead of failing the whole selection.
     static const uint16_t kTocPauseMs[]={300};
-    bool reused=chapters_book==books[index].id && chapters_owner==client.AccountId() && !chapters.empty() &&
+    bool reused=chapters_book==active_book.id && chapters_owner==client.AccountId() && !chapters.empty() &&
         esp_timer_get_time()>=chapters_fetched && esp_timer_get_time()-chapters_fetched<INT64_C(300000000);
-    bool toc_okay=reused || client.FetchChapters(books[index].id,&chapters,&error);
+    bool toc_okay=reused || client.FetchChapters(active_book.id,&chapters,&error);
     for(unsigned attempt=0;!toc_okay && !cancelled(nullptr) && attempt<sizeof(kTocPauseMs)/sizeof(kTocPauseMs[0]) &&
         transient_read_error(error.code);++attempt){
         work("正在重试获取章节目录");vTaskDelay(pdMS_TO_TICKS(kTocPauseMs[attempt]));
         folio_network_status_t network;folio_network_get_status(&network);
         if(!network.connected)break;
         chapters.clear();
-        toc_okay=client.FetchChapters(books[index].id,&chapters,&error);
+        toc_okay=client.FetchChapters(active_book.id,&chapters,&error);
     }
     if(!toc_okay){chapters_book.clear();fail(error);return;}
-    if(!reused){chapters_book=books[index].id;chapters_owner=client.AccountId();chapters_fetched=esp_timer_get_time();}
+    if(!reused){chapters_book=active_book.id;chapters_owner=client.AccountId();chapters_fetched=esp_timer_get_time();}
     login_required=false;
     // IDs are validated; display titles are sanitized only by the EPUB exporter.
     // All book data stays under books / .folio.
-    if(!folio_weread_cache_path(books[index].id.c_str(),book_path,sizeof(book_path))){fail("书籍标识不受支持。");return;}
+    if(!folio_weread_cache_path(active_book.id.c_str(),book_path,sizeof(book_path))){fail("书籍标识不受支持。");return;}
     // Showing the directory must not hash every body or wait for a cover CDN.
     // Cover refresh and export belong to an explicit download operation.
     char exported[256];if(folio_weread_cache_public_path(book_path,exported,sizeof(exported)))copy(book_path,exported);
     if(sync_only){
-        portENTER_CRITICAL(&status_mux);copy(status.title,books[index].title.c_str());copy(status.local_path,book_path);
+        portENTER_CRITICAL(&status_mux);copy(status.title,active_book.title.c_str());copy(status.local_path,book_path);
         status.can_read=true;status.page=status.item_count=status.count=0;portEXIT_CRITICAL(&status_mux);
         publish(FOLIO_WR_BOOK,"正在读取同步信息",true);
     }else book_page(0);
@@ -437,18 +618,18 @@ static bool fetch_cover(const Book& book,bool* changed) {
     return okay;
 }
 static bool fetch_chapter(size_t index,ChapterContent* content,Error* error) {
-    bool okay=client.FetchChapter(books[selected].id,chapters[index],content,error);
+    bool okay=client.FetchChapter(active_book.id,chapters[index],content,error);
     // The client already retries individual read-only shards. Repeating the
     // whole chapter multiplies deadlines and redownloads successful shards.
     if(!okay && error->code==ErrorCode::NoMemory && !cancelled(nullptr)){
         content->bytes.clear();client.Disconnect();vTaskDelay(pdMS_TO_TICKS(300));
-        okay=client.FetchChapter(books[selected].id,chapters[index],content,error);
+        okay=client.FetchChapter(active_book.id,chapters[index],content,error);
     }
     return okay;
 }
 static void download(size_t first,bool all) {
     StageTimer timing("download");
-    if(selected>=books.size() || !connected() || chapters.empty())return;
+    if(selected==SIZE_MAX || !connected() || chapters.empty())return;
     if(!all && first>=chapters.size())return;
     download_first=first;download_all=all;
     publish(FOLIO_WR_WORK,"正在准备下载，可返回取消",true);
@@ -456,7 +637,7 @@ static void download(size_t first,bool all) {
     for(size_t i=0;i<chapters.size();++i){copy(toc[i].uid,chapters[i].uid.c_str());copy(toc[i].title,chapters[i].title.c_str());}
     char error_text[192]{};
     std::unique_ptr<folio_weread_cache_writer_t,WriterCloser> writer(folio_weread_cache_begin(
-        books[selected].id.c_str(),books[selected].title.c_str(),books[selected].author.c_str(),toc.data(),toc.size(),error_text,sizeof(error_text)));
+        active_book.id.c_str(),active_book.title.c_str(),active_book.author.c_str(),toc.data(),toc.size(),error_text,sizeof(error_text)));
     if(!writer){publish(FOLIO_WR_DOWNLOAD_ERROR,error_text);return;}
     folio_weread_time_t old_time{};folio_weread_position_t previous{};
     bool restore=load_time(&old_time,false) && old_time.book_revision && old_time.book_revision==folio_weread_cache_revision(book_path) &&
@@ -505,7 +686,7 @@ static void download(size_t first,bool all) {
         if(restore && folio_weread_cache_cloud_to_local(book_path,&previous,&new_position,publish_error,sizeof(publish_error))){
             StorageLock lock;if(lock.held){old_time.position=new_position;old_time.book_revision=folio_weread_cache_revision(book_path);folio_weread_time_save(book_path,&old_time);}
         }
-        if(okay){publish(FOLIO_WR_WORK,"正文已保存，正在获取封面",true);cover_saved=fetch_cover(books[selected]);}
+        if(okay){publish(FOLIO_WR_WORK,"正文已保存，正在获取封面",true);cover_saved=fetch_cover(active_book);}
     }
     if(!okay){
         if(committed && folio_weread_cache_export(book_path,published,sizeof(published),publish_error,sizeof(publish_error)))copy(book_path,published);
@@ -533,7 +714,7 @@ static const Chapter* find_chapter(const char* uid) {
 static bool verify_source(const folio_weread_position_t& anchor,Error* error) {
     const Chapter* chapter=find_chapter(anchor.chapter_uid);
     if(!chapter)return false;
-    ChapterContent raw;if(!client.FetchChapter(books[selected].id,*chapter,&raw,error))return false;
+    ChapterContent raw;if(!client.FetchChapter(active_book.id,*chapter,&raw,error))return false;
     return folio_weread_cache_matches_raw(&anchor,(const uint8_t*)raw.bytes.data(),raw.bytes.size(),
         raw.xhtml?FOLIO_WEREAD_XHTML:FOLIO_WEREAD_TEXT);
 }
@@ -548,18 +729,18 @@ static bool complete_cache() {
 }
 static void check_sync() {
     retry_task=RetryTask::Sync;
-    if(selected>=books.size() || !connected())return;
+    if(selected==SIZE_MAX || !connected())return;
     work("正在核对云端位置与正文版本");
     portENTER_CRITICAL(&status_mux);status.sync_local=status.sync_cloud=false;portEXIT_CRITICAL(&status_mux);
     Error error;char message[192]{};folio_weread_time_t t{};
     // Reading the cloud position is a GET; retry a dropped link before failing.
-    bool cloud_okay=client.FetchProgress(books[selected].id,&cloud,&error);
+    bool cloud_okay=client.FetchProgress(active_book.id,&cloud,&error);
     for(unsigned attempt=0;!cloud_okay && !cancelled(nullptr) && attempt<2 && transient_read_error(error.code);++attempt){
         vTaskDelay(pdMS_TO_TICKS(300*(attempt+1)));
         folio_network_status_t network;folio_network_get_status(&network);
         if(!network.connected)break;
         cloud={};
-        cloud_okay=client.FetchProgress(books[selected].id,&cloud,&error);
+        cloud_okay=client.FetchProgress(active_book.id,&cloud,&error);
     }
     if(!cloud_okay){fail(error);return;}
     login_required=false;
@@ -568,7 +749,7 @@ static void check_sync() {
     bool complete=local && complete_cache();
     local=local && complete;
 
-    cloud_anchor={};copy(cloud_anchor.book_id,books[selected].id.c_str());copy(cloud_anchor.chapter_uid,cloud.chapter_uid.c_str());
+    cloud_anchor={};copy(cloud_anchor.book_id,active_book.id.c_str());copy(cloud_anchor.chapter_uid,cloud.chapter_uid.c_str());
     cloud_anchor.offset_utf16=cloud.chapter_offset;
     bool remote=cloud.has_offset && folio_weread_cache_cloud_to_local(book_path,&cloud_anchor,&cloud_byte,message,sizeof(message));
     if(remote){remote=folio_weread_cache_local_to_cloud(book_path,cloud_byte,&cloud_anchor,message,sizeof(message));}
@@ -594,19 +775,19 @@ static void open_requested_sync() {
         fail("这本书没有可同步的微信读书记录，请重新下载。");return;
     }
     Book book;book.id=id;book.title=title;book.author=author;
-    books.clear();books.push_back(std::move(book));
+    reset_shelf();direct_book=true;active_book=std::move(book);
     choose_book(0,true);
     if(status.state==FOLIO_WR_BOOK && !stopping)check_sync();
 }
 static bool fresh_preview() {
     Progress latest;Error error;
-    if(!client.FetchProgress(books[selected].id,&latest,&error)){fail(error);return false;}
+    if(!client.FetchProgress(active_book.id,&latest,&error)){fail(error);return false;}
     if(!same_progress(latest,cloud)){fail("云端进度已发生变化，请重新核对后同步。");return false;}
     cloud=std::move(latest);return true;
 }
 static void use_cloud() {
     bool valid;portENTER_CRITICAL(&status_mux);valid=status.sync_cloud;portEXIT_CRITICAL(&status_mux);
-    if(!valid || selected>=books.size() || !connected())return;
+    if(!valid || selected==SIZE_MAX || !connected())return;
     work("正在确认云端阅读位置");Error error;char message[192];uint32_t position;
     if(!fresh_preview())return;
     if(cloud_position_ready){
@@ -628,7 +809,7 @@ static void use_cloud() {
 }
 static void upload(bool time) {
     bool valid;portENTER_CRITICAL(&status_mux);valid=status.sync_local;portEXIT_CRITICAL(&status_mux);
-    if(!valid || selected>=books.size() || !connected())return;
+    if(!valid || selected==SIZE_MAX || !connected())return;
     work(time?"正在提交本次新增阅读时长":"正在上传本机位置并读回核对");
     if(!fresh_preview())return;
     folio_weread_time_t t;Error error;
@@ -641,8 +822,8 @@ static void upload(bool time) {
         StorageLock lock;
         if(!lock.held || !folio_weread_time_begin(book_path,&t)){fail("没有可提交的新增时长，或记录未能安全保存。");return;}
     }
-    if(time)result=client.SubmitReadingTime(books[selected].id,*chapter,local_anchor.offset_utf16,(int)t.percent,t.inflight,&error);
-    else {Progress readback;result=client.WritePosition(books[selected].id,*chapter,local_anchor.offset_utf16,(int)t.percent,&readback,&error);}
+    if(time)result=client.SubmitReadingTime(active_book.id,*chapter,local_anchor.offset_utf16,(int)t.percent,t.inflight,&error);
+    else {Progress readback;result=client.WritePosition(active_book.id,*chapter,local_anchor.offset_utf16,(int)t.percent,&readback,&error);}
     if(time){
         StorageLock lock;
         folio_wr_time_result_t outcome=result==Submission::Confirmed?FOLIO_WR_TIME_ACCEPTED:
@@ -664,7 +845,7 @@ static void upload_sync() {
     if(!load_time(&t,true)){fail("记录损坏或属于其他账号，已停止上传。");return;}
     if(!t.enabled || !t.pending){upload(false);return;}
     bool valid;portENTER_CRITICAL(&status_mux);valid=status.sync_local;portEXIT_CRITICAL(&status_mux);
-    if(!valid || selected>=books.size() || !connected())return;
+    if(!valid || selected==SIZE_MAX || !connected())return;
     work("正在上传阅读进度和新增时长");
     if(!fresh_preview())return;
     Error error;
@@ -681,7 +862,7 @@ static void upload_sync() {
             if(!lock.held || !folio_weread_time_begin(book_path,&t)){fail("新增时长未能安全保存，已停止上传。");return;}
         }
         uint32_t seconds=t.inflight;
-        Submission result=client.SubmitReadingTime(books[selected].id,*chapter,local_anchor.offset_utf16,(int)t.percent,seconds,&error);
+        Submission result=client.SubmitReadingTime(active_book.id,*chapter,local_anchor.offset_utf16,(int)t.percent,seconds,&error);
         {
             StorageLock lock;
             folio_wr_time_result_t outcome=result==Submission::Confirmed?FOLIO_WR_TIME_ACCEPTED:
@@ -699,7 +880,7 @@ static void upload_sync() {
         }
         submitted+=seconds;
         Progress readback;
-        if(!client.FetchProgress(books[selected].id,&readback,&error)){
+        if(!client.FetchProgress(active_book.id,&readback,&error)){
             time_status();fail(error);return;
         }
         if(!readback.has_offset || readback.chapter_uid!=local_anchor.chapter_uid || readback.chapter_offset!=local_anchor.offset_utf16){
@@ -742,11 +923,12 @@ static void execute(const Command& command) {
         case FOLIO_WR_RETURN_SHELF:
             // Back navigation uses the loaded list; only Refresh requests it again.
             retry_task=RetryTask::Shelf;
-            shelf_page(selected<books.size()?selected/FOLIO_WR_PAGE_SIZE:0);
+            shelf_page(selected == SIZE_MAX ? 0 : selected/FOLIO_WR_PAGE_SIZE);
             break;
         case FOLIO_WR_NEW_QR:case FOLIO_WR_RELOGIN:begin_login();break;
         case FOLIO_WR_SUBMIT_OTP:poll_login(command.value);break;
         case FOLIO_WR_SELECT_BOOK:choose_book(command.index);break;
+        case FOLIO_WR_SEARCH:search_shelf(command.value);break;
         case FOLIO_WR_PAGE:{folio_weread_state_t state;portENTER_CRITICAL(&status_mux);state=status.state;portEXIT_CRITICAL(&status_mux);
             if(state==FOLIO_WR_SHELF)shelf_page(command.index);else if(state==FOLIO_WR_BOOK)book_page(command.index);break;}
         case FOLIO_WR_DOWNLOAD_CHAPTER:download(command.index,false);break;
@@ -766,9 +948,9 @@ static void execute(const Command& command) {
         case FOLIO_WR_UPLOAD_SYNC:upload_sync();break;
         case FOLIO_WR_LOGOUT:
             if(!EraseSession()){fail("退出未完成，登录记录未能清除，请重试。");break;}
-            session_loaded=true;login_required=false;shelf_cached=false;requested_sync_path[0]=0;client.Logout();books.clear();chapters.clear();chapters_book.clear();chapters_owner.clear();selected=SIZE_MAX;book_path[0]=0;
+            session_loaded=true;login_required=false;shelf_cached=false;requested_sync_path[0]=0;client.Logout();reset_shelf();chapters.clear();chapters_book.clear();chapters_owner.clear();selected=SIZE_MAX;book_path[0]=0;
             /* The cached shelf belongs to the account that just left. */
-            {StorageLock lock;unlink(SHELF_FILE);}
+            forget_shelf_files();
             portENTER_CRITICAL(&status_mux);status.qr_url[0]=status.local_path[0]=open_path[0]=0;status.can_read=false;status.item_count=status.count=0;portEXIT_CRITICAL(&status_mux);
             publish(FOLIO_WR_OFF,"已退出并清除设备登录记录，离线书籍仍保留。");break;
         case FOLIO_WR_CANCEL:stopping=true;break;
@@ -779,7 +961,7 @@ static void worker(void*) {
     try {
         // A restored shelf is immediately usable. Refresh is explicit, never
         // an in-flight background request that blocks the next selected book.
-        bool cached=client.LoggedIn() && !login_required && !requested_sync_path[0] && shelf_load(&books);
+        bool cached=client.LoggedIn() && !login_required && !requested_sync_path[0] && shelf_load(&shelf);
         if(cached){shelf_cached=true;shelf_page(0);}
         else {
             int64_t deadline=esp_timer_get_time()+INT64_C(30000000);bool ready=false;
@@ -813,7 +995,7 @@ static void worker(void*) {
     }catch(const std::bad_alloc&){fail("内存不足，请更换较小字体或分章下载后重试。");}
      catch(...){fail("操作已停止，请重新打开微信读书。");}
     persist_login();client.Disconnect();
-    std::vector<Book>().swap(books);std::vector<Chapter>().swap(chapters);chapters_book.clear();chapters_owner.clear();selected=SIZE_MAX;
+    reset_shelf();std::vector<Chapter>().swap(chapters);chapters_book.clear();chapters_owner.clear();selected=SIZE_MAX;
     portENTER_CRITICAL(&status_mux);status.running=status.busy=false;++status.revision;portEXIT_CRITICAL(&status_mux);
     worker_task=nullptr;worker_alive=false;vTaskDelete(nullptr);
 }

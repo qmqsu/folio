@@ -79,6 +79,7 @@ end:
 typedef struct { char package[256];bool root,manifest,spine,item; } epub_check_t;
 static bool container_token(void* context,const folio_xml_token_t* token) {
     epub_check_t* check=context;
+    if(token->kind==FOLIO_XML_START && !token->depth && !folio_xml_name(token->name,"container"))return false;
     if(token->kind==FOLIO_XML_START && folio_xml_name(token->name,"rootfile") && !check->package[0])
         return folio_xml_attr(token,"full-path",check->package,sizeof(check->package));
     return !cancelled();
@@ -86,7 +87,7 @@ static bool container_token(void* context,const folio_xml_token_t* token) {
 static bool package_token(void* context,const folio_xml_token_t* token) {
     epub_check_t* check=context;
     if(token->kind==FOLIO_XML_START) {
-        if(folio_xml_name(token->name,"package"))check->root=true;
+        if(!token->depth){check->root=folio_xml_name(token->name,"package");if(!check->root)return false;}
         if(folio_xml_name(token->name,"manifest"))check->manifest=true;
         if(folio_xml_name(token->name,"spine"))check->spine=true;
         if(folio_xml_name(token->name,"itemref"))check->item=true;
@@ -102,8 +103,7 @@ static bool validate_epub(const char* path,char* error,size_t cap) {
         ok=expanded<=128u*1024u*1024u && zip_member(&zip,&zip.entries[i]);
     }
     size_t size=0;unsigned char* data=NULL;epub_check_t check={0};
-    if(ok) {data=folio_zip_read(&zip,folio_zip_find(&zip,"mimetype"),64,&size,error,cap);
-        ok=folio_epub_valid_mime(data,size);free(data);}
+    if(ok) ok=folio_zip_check_epub_type(&zip,error,cap);
     if(ok) {data=folio_zip_read(&zip,folio_zip_find(&zip,"META-INF/container.xml"),FOLIO_EPUB_XML_LIMIT,&size,error,cap);
         ok=data && folio_xml_parse((char*)data,size,container_token,&check) && check.package[0];free(data);}
     if(ok) {data=folio_zip_read(&zip,folio_zip_find(&zip,check.package),FOLIO_EPUB_XML_LIMIT,&size,error,cap);
@@ -337,7 +337,7 @@ bool folio_transfer_validate(const char* path,folio_upload_kind_t kind,char* err
         if(file){if(ferror(file))ok=false;if(fclose(file)!=0)ok=false;}ok=ok && visible;
     }
     if(cancelled())ok=false;
-    if(!ok && kind==FOLIO_UPLOAD_EPUB && error && cap)
+    if(!ok && kind==FOLIO_UPLOAD_EPUB && error && cap && !error[0])
         snprintf(error,cap,"EPUB 容器损坏、超过安全资源上限或校验中断。");
     if(!ok && error && cap && !error[0])snprintf(error,cap,"文件结构损坏、类型不符或校验中断。");
     return ok;
