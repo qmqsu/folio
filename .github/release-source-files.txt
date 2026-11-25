@@ -193,7 +193,6 @@ components/sy7636a/idf_component.yml
 components/sy7636a/include/sy7636a.h
 components/sy7636a/sy7636a.c
 dependencies.lock
-docs/0.8.40反馈修复.md
 docs/UI设计规范.md
 docs/公开分发核查.md
 docs/刷机说明.md
