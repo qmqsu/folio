@@ -1,0 +1,1 @@
+{"app_sha256":"44584af700ed785c9d465efb519c8003f8af28745fcee58b40e19395227683f9","authorized_at":"2026-11-25T09:52:18Z","hardware":"RDP-G01-W","hardware_tested":false,"kind":"maintainer-waiver","layout":"folio-16m-factory-storage-ota-v2","maintainer":"qmqsu","reason":"维护者决定本版本不经实机验收直接发布。","schema":2,"source_commit":"706b24e0055800d38911c59a1ec1f731839419c7","version":"0.9.3"}
